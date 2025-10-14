@@ -6,6 +6,7 @@ import {
   CreditCard, X
 } from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
+import PaymentModal from '../components/PaymentModal';
 
 
 const cyberData = {
@@ -454,6 +455,10 @@ const TerminalModal = ({ isOpen, onClose, asset }: { isOpen: boolean; onClose: (
                   <>
                     <option value="printing">Printing Service</option>
                     <option value="scanning">Scanning Service</option>
+                    <option value="photocopying">Photocopying Service</option>
+                    <option value="binding">Binding Service</option>
+                    <option value="digital">Government Service</option>
+                    <option value="movies">Movie / Songs</option>
                     <option value="other">Other Service</option>
                   </>
                 )}
@@ -614,6 +619,17 @@ const Dashboard = () => {
         }}
         asset={selectedAsset}
       />
+
+      {showPaymentModal && selectedInvoice && (
+        <PaymentModal
+          invoice={selectedInvoice}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setSelectedInvoice(null);
+          }}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   );
 };
