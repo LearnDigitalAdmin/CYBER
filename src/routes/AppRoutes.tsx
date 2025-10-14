@@ -97,9 +97,7 @@ import ExplorePage from "../pages/ExplorePage";
 import AuthPage from "../pages/AuthPage";
 import SignupPage from "../pages/SignupPage";
 import Dashboard from "../pages/DashboardLayout";
-import { useEffect, useState } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth } from "../services/firebaseService";
+import { useAuth } from "../context/authContext";
 
 /**
  * AppRoutes:
@@ -109,21 +107,11 @@ import { auth } from "../services/firebaseService";
  */
 
 const AppRoutes: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
+  const { currentUser, loading } = useAuth();
   const location = useLocation();
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      console.log('Auth state changed:', firebaseUser);
-      setUser(firebaseUser);
-      setAuthChecked(true);
-    });
-    return () => unsubscribe();
-  }, []);
-
   // Wait for initial auth check before rendering routes
-  if (!authChecked) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -135,7 +123,7 @@ const AppRoutes: React.FC = () => {
   }
 
   const ProtectedRoute = ({ children }: { children: React.ReactNode }) =>
-    user ? <>{children}</> : <Navigate to="/signin" replace />;
+    currentUser ? <>{children}</> : <Navigate to="/signin" replace />;
 
   return (
     <motion.div

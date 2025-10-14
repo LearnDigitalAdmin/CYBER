@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Phone, Mail, Lock, LogIn } from "lucide-react";
 import { signInWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { auth } from "../services/firebaseService";
+import { useNavigate } from "react-router-dom";
 
 declare global {
   interface Window {
@@ -11,6 +12,7 @@ declare global {
 }
 
 const AuthPage: React.FC = () => {
+  const navigate = useNavigate();
   const [isEmailMode, setIsEmailMode] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,7 +29,8 @@ const AuthPage: React.FC = () => {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      window.location.href = "/dashboard";
+      // The useAuth hook will automatically detect the auth state change
+      navigate("/dashboard");
     } catch (err: any) {
       setMessage(err.message);
     } finally {
@@ -65,7 +68,8 @@ const AuthPage: React.FC = () => {
     setLoading(true);
     try {
       await confirmation.confirm(otp);
-      window.location.href = "/dashboard";
+      // The useAuth hook will automatically detect the auth state change
+      navigate("/dashboard");
     } catch (err: any) {
       setMessage("Invalid OTP");
     } finally {

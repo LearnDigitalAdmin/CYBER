@@ -1,0 +1,610 @@
+import { useState, useEffect } from 'react';
+import { 
+  Users, Building2, DollarSign, Calendar, 
+  Search, Plus, Smartphone, X, AlertCircle, Loader2
+} from 'lucide-react';
+import { assetsService, type Asset, type AssetFormData } from '../../services/Assets';
+import { useAuth } from '../../context/authContext';
+//import { useAuth } from '../contexts/AuthContext';
+
+// StatCard Component
+const StatCard = ({ icon, value, trend, color, label }: { 
+  icon: any; 
+  value: any; 
+  trend: any; 
+  color: any; 
+  label: string 
+}) => {
+  const colorClasses: Record<string, string> = {
+    cyan: 'from-cyan-500 to-cyan-600',
+    emerald: 'from-emerald-500 to-emerald-600',
+    violet: 'from-violet-500 to-violet-600',
+    amber: 'from-amber-500 to-amber-600'
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-5 hover:border-cyan-500/50 transition-all duration-300">
+      <div className="flex items-start justify-between mb-3">
+        <div className={`p-2.5 bg-gradient-to-br ${colorClasses[color]} rounded-lg text-white shadow-lg`}>
+          {icon}
+        </div>
+        <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/30">
+          {trend}
+        </span>
+      </div>
+      <div className="text-sm text-gray-400 mb-1">{label}</div>
+      <div className="text-2xl font-bold text-white">{value}</div>
+    </div>
+  );
+};
+
+// Add Asset Modal Component
+const AddAssetModal = ({ 
+  isOpen, 
+  onClose, 
+  type, 
+  onSuccess 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  type: 'landlord' | 'agent';
+  onSuccess: () => void;
+}) => {
+  const { firestoreUser } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [formData, setFormData] = useState<AssetFormData>({
+    id: '',
+    name: '',
+    email: '',
+    phone: '',
+    password: '',
+    type,
+    companyName: '',
+    companyAddress: '',
+    companyPhone: '',
+    companyEmail: ''
+  });
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        id: '',
+        name: '',
+        email: '',
+        phone: '',
+        password: '',
+        type,
+        companyName: '',
+        companyAddress: '',
+        companyPhone: '',
+        companyEmail: ''
+      });
+      setConfirmPassword('');
+      setError('');
+    }
+  }, [isOpen, type]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    // Validation
+    if (formData.password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
+
+    if (formData.id.length < 5) {
+      setError('Please enter a valid National ID');
+      return;
+    }
+
+    if (type === 'agent' && !formData.companyName) {
+      setError('Company name is required for agents');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await assetsService.createAsset(formData, firestoreUser?.pId || '');
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create asset');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      [e.target.name]: e.target.value
+    }));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-gray-700 my-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-bold text-white">
+            Add New {type === 'landlord' ? 'Landlord' : 'Agent'}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition-colors"
+            disabled={loading}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Personal Information */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+              Personal Information
+            </h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  National ID Number *
+                </label>
+                <input
+                  type="text"
+                  name="id"
+                  value={formData.id}
+                  onChange={handleChange}
+                  placeholder="12345678"
+                  required
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  placeholder="John Doe"
+                  required
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="john@example.com"
+                  required
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Phone Number *
+                </label>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleChange}
+                  placeholder="0712345678"
+                  required
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Password *
+                </label>
+                <input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Min. 8 characters"
+                  required
+                  minLength={8}
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Confirm Password *
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  required
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Company Information (for Agents only) */}
+          {type === 'agent' && (
+            <div className="space-y-4 pt-4 border-t border-gray-700">
+              <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+                Company Information
+              </h4>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Company Name *
+                  </label>
+                  <input
+                    type="text"
+                    name="companyName"
+                    value={formData.companyName}
+                    onChange={handleChange}
+                    placeholder="ABC Properties Ltd"
+                    required
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Company Phone
+                  </label>
+                  <input
+                    type="tel"
+                    name="companyPhone"
+                    value={formData.companyPhone}
+                    onChange={handleChange}
+                    placeholder="0700000000"
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Company Email
+                  </label>
+                  <input
+                    type="email"
+                    name="companyEmail"
+                    value={formData.companyEmail}
+                    onChange={handleChange}
+                    placeholder="info@company.com"
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Company Address
+                  </label>
+                  <input
+                    type="text"
+                    name="companyAddress"
+                    value={formData.companyAddress}
+                    onChange={handleChange}
+                    placeholder="123 Main St, Nairobi"
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Submit Buttons */}
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1 py-3 bg-transparent border-2 border-gray-600 text-gray-400 rounded-lg hover:bg-gray-800 hover:text-white hover:border-gray-500 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 py-3 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>Create {type === 'landlord' ? 'Landlord' : 'Agent'}</>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Main PlotTab Component
+const PlotTab = ({ onOpenTerminal }: { onOpenTerminal: (asset: any) => void }) => {
+  const { firestoreUser } = useAuth();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all');
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [stats, setStats] = useState({
+    totalAssets: 0,
+    totalTenants: 0,
+    monthlyRevenue: 0,
+    pendingRenewals: 0
+  });
+  const [monthlyTrends, setMonthlyTrends] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalType, setAddModalType] = useState<'landlord' | 'agent'>('landlord');
+
+  // Load data on mount
+  useEffect(() => {
+    loadData();
+  }, [firestoreUser]);
+
+  const loadData = async () => {
+    console.log('Loading data...');
+    if (!firestoreUser?.pId) return;
+    
+    setLoading(true);
+    console.log('Fetching data for pId:', firestoreUser.pId);
+    try {
+      const [assetsData, statsData, trendsData] = await Promise.all([
+        assetsService.getAssetsByCyberId(firestoreUser.pId),
+        assetsService.getDashboardStats(firestoreUser.pId),
+        assetsService.getMonthlyTrends(firestoreUser.pId, 6)
+      ]);
+
+      setAssets(assetsData);
+      setStats(statsData);
+      setMonthlyTrends(trendsData);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredAssets = assets.filter(asset => {
+    const matchesSearch = asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         asset.phone.includes(searchTerm);
+    const matchesFilter = filterType === 'all' || asset.type === filterType;
+    return matchesSearch && matchesFilter;
+  });
+
+  const handleAddAsset = (type: 'landlord' | 'agent') => {
+    setAddModalType(type);
+    setShowAddModal(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-cyan-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Overview */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          icon={<Users className="w-5 h-5" />}
+          label="Total Assets"
+          value={stats.totalAssets}
+          trend="+12%"
+          color="cyan"
+        />
+        <StatCard
+          icon={<Building2 className="w-5 h-5" />}
+          label="Total Tenants"
+          value={stats.totalTenants}
+          trend="+8%"
+          color="emerald"
+        />
+        <StatCard
+          icon={<DollarSign className="w-5 h-5" />}
+          label="Monthly Revenue"
+          value={`KES ${stats.monthlyRevenue.toLocaleString()}`}
+          trend="+23%"
+          color="violet"
+        />
+        <StatCard
+          icon={<Calendar className="w-5 h-5" />}
+          label="Pending Renewals"
+          value={stats.pendingRenewals}
+          trend={`${stats.pendingRenewals} due`}
+          color="amber"
+        />
+      </div>
+
+      {/* Monthly Trends Chart */}
+      {monthlyTrends.length > 0 && (
+        <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
+          <h3 className="text-lg font-semibold mb-4 text-white">Monthly Trends</h3>
+          <div className="h-64 flex items-end justify-between gap-2">
+            {monthlyTrends.map((data, idx) => (
+              <div key={idx} className="flex-1 flex flex-col items-center gap-2">
+                <div className="w-full bg-gradient-to-t from-cyan-500 to-cyan-400 rounded-t-lg transition-all hover:from-cyan-600 hover:to-cyan-500 shadow-lg shadow-cyan-500/20"
+                     style={{ height: `${(data.income / 200000) * 100}%` }}>
+                </div>
+                <span className="text-xs text-gray-400 font-medium">{data.month}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-cyan-500 rounded shadow-sm shadow-cyan-500/50"></div>
+              <span className="text-gray-400">Income (KES)</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assets Management */}
+      <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <h3 className="text-lg font-semibold text-white">Managed Assets</h3>
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search assets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full sm:w-64 pl-10 pr-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-gray-500"
+              />
+            </div>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-sm text-white"
+            >
+              <option value="all">All Types</option>
+              <option value="landlord">Landlords</option>
+              <option value="agent">Agents</option>
+            </select>
+          </div>
+        </div>
+
+        {filteredAssets.length === 0 ? (
+          <div className="text-center py-12">
+            <Users className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-400">No assets found</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {searchTerm || filterType !== 'all' 
+                ? 'Try adjusting your search or filters' 
+                : 'Start by adding a landlord or agent'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Name</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Type</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Contact</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Properties</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Tenants</th>
+                  <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">Revenue</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAssets.map((asset) => (
+                  <tr key={asset.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
+                    <td className="py-4 px-4">
+                      <div className="font-medium text-white">{asset.name}</div>
+                      {asset.company && (
+                        <div className="text-xs text-gray-500 mt-1">{asset.company.name}</div>
+                      )}
+                    </td>
+                    <td className="py-4 px-4">
+                      <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${
+                        asset.type === 'agent' 
+                          ? 'bg-violet-500/10 text-violet-400 border border-violet-500/30' 
+                          : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+                      }`}>
+                        {asset.type === 'agent' ? 'Agent' : 'Landlord'}
+                      </span>
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="text-sm text-gray-400">{asset.phone}</div>
+                      <div className="text-xs text-gray-500">{asset.email}</div>
+                    </td>
+                    <td className="py-4 px-4 text-center text-sm text-white">{asset.properties}</td>
+                    <td className="py-4 px-4 text-center text-sm text-white">{asset.tenants}</td>
+                    <td className="py-4 px-4 text-right font-medium text-white">
+                      KES {asset.revenue.toLocaleString()}
+                    </td>
+                    <td className="py-4 px-4">
+                      <button
+                        onClick={() => onOpenTerminal(asset)}
+                        className="mx-auto flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 transition-colors text-sm font-medium shadow-lg shadow-cyan-500/20"
+                      >
+                        <Smartphone className="w-4 h-4" />
+                        Terminal
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+        <button 
+          onClick={() => handleAddAsset('landlord')}
+          className="flex items-center justify-center gap-2 px-6 py-4 bg-cyan-500 text-black rounded-xl hover:bg-cyan-400 transition-all shadow-lg shadow-cyan-500/30 font-semibold"
+        >
+          <Plus className="w-5 h-5" />
+          <span>Add Landlord</span>
+        </button>
+        <button 
+          onClick={() => handleAddAsset('agent')}
+          className="flex items-center justify-center gap-2 px-6 py-4 bg-transparent border-2 border-cyan-500 text-cyan-400 hover:bg-cyan-500 hover:text-black transition-all rounded-xl font-semibold"
+        >
+          <Plus className="w-5 h-5" />
+          <span>Add Agent</span>
+        </button>
+      </div>
+
+      {/* Add Asset Modal */}
+      <AddAssetModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        type={addModalType}
+        onSuccess={loadData}
+      />
+    </div>
+  );
+};
+
+export default PlotTab;

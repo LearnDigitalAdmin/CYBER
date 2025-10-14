@@ -5,6 +5,7 @@
 import { BrowserRouter } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import AppRoutes from "./routes/AppRoutes";
+import { AuthProvider } from "./context/authContext";
 //import { DataProvider } from "./context/dataContext";
 //import { Loader } from "./components/global/Loader";
 import "./index.css";
@@ -27,11 +28,11 @@ const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      {/* <DataProvider> */}
+      <AuthProvider>
         <AnimatePresence mode="wait">
           <AppRoutes />
         </AnimatePresence>
-      {/* </DataProvider> */}
+      </AuthProvider>
     </BrowserRouter>
   );
 };
