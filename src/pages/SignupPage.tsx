@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Upload, MapPin, User, Mail, Phone, FileText, Building } from "lucide-react";
 import { auth, db, storage } from "../services/firebaseService";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const SignupPage: React.FC = () => {
@@ -43,36 +43,69 @@ const SignupPage: React.FC = () => {
     return await getDownloadURL(storageRef);
   };
 
+  const generateNextPID = async (): Promise<string> => {
+    try {
+      // Query to get the agent with the highest pId
+      const agentsRef = collection(db, "agents");
+      const q = query(agentsRef, orderBy("pId", "desc"), limit(1));
+      const querySnapshot = await getDocs(q);
+
+      let nextNumber = 1234; // Starting number
+
+      if (!querySnapshot.empty) {
+        const lastDoc = querySnapshot.docs[0];
+        const lastPID = lastDoc.data().pId;
+        
+        // Extract the numeric part from the last PID (e.g., "COG-1234" -> 1234)
+        const lastNumber = parseInt(lastPID.replace("COG-", ""), 10);
+        
+        if (!isNaN(lastNumber)) {
+          nextNumber = lastNumber + 1;
+        }
+      }
+
+      // Format as COG-#### (no padding limit, can grow beyond 9999)
+      return `COG-${nextNumber}`;
+    } catch (error) {
+      console.error("Error generating PID:", error);
+      // Fallback: use timestamp-based PID if query fails
+      return `COG-${Date.now().toString().slice(-6)}`;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  try {
-    const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
-    const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
-    const kraUrl = kraFile ? await uploadFile(kraFile, `uploads/${user.uid}/kra`) : "";
-    const shopUrl = form.type === "Cyber" && shopFile ? await uploadFile(shopFile, `uploads/${user.uid}/shop`) : "";
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
+      const kraUrl = kraFile ? await uploadFile(kraFile, `uploads/${user.uid}/kra`) : "";
+      const shopUrl = form.type === "Cyber" && shopFile ? await uploadFile(shopFile, `uploads/${user.uid}/shop`) : "";
 
-    // Remove password from the data object before storing
-    const { password, ...formWithoutPassword } = form;
+      // Generate sequential PID
+      const nextPID = await generateNextPID();
 
-    const data = {
-      ...formWithoutPassword,
-      uid: user.uid,
-      pId: `COG-${String(Math.floor(Math.random() * 9999)).padStart(4, "0")}-${form.id}`,
-      coords,
-      uploads: { idUrl, kraUrl, shopUrl },
-      isVerified: false,
-      createdAt: new Date().toISOString(),
-    };
+      // Remove password from the data object before storing
+      const { password, ...formWithoutPassword } = form;
 
-    await setDoc(doc(db, "agents", user.uid), data);
-    window.location.href = "/verify";
-  } catch (err: any) {
-    setMsg(err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+      const data = {
+        ...formWithoutPassword,
+        uid: user.uid,
+        pId: nextPID,
+        coords,
+        uploads: { idUrl, kraUrl, shopUrl },
+        isVerified: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      await setDoc(doc(db, "agents", user.uid), data);
+      window.location.href = "/verify";
+    } catch (err: any) {
+      setMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4">

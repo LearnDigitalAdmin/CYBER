@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { 
   Building2, DollarSign, 
-  FileText, Download, Trash2, Search, ArrowUpRight,
-  Clock, Printer, File, BarChart3,
-  CreditCard, X,
+  Download, 
+  Printer, BarChart3,
+  X,
   Loader2,
   AlertCircle
 } from 'lucide-react';
@@ -15,23 +15,24 @@ import { useAuth } from '../context/authContext';
 import PricingModal from '../components/PricingPage';
 import { PaymentSuccessHandler, type Transaction } from '../services/PaymentsSuccess';
 import { toast } from 'react-toastify';
+import CyberTab from '../components/cyber/CyberTab';
 
-const cyberData = {
-  uploads: [
-    { id: 1, name: 'James Omondi', files: 3, phone: '0756789012', service: 'Printing', time: '09:15 AM', status: 'completed' },
-    { id: 2, name: 'Grace Akinyi', files: 1, phone: '0767890123', service: 'File Returns', time: '09:45 AM', status: 'pending' },
-    { id: 3, name: 'Peter Mwangi', files: 5, phone: '0778901234', service: 'Printing', time: '10:20 AM', status: 'completed' },
-    { id: 4, name: 'Sarah Njeri', files: 2, phone: '0789012345', service: 'Scanning', time: '11:05 AM', status: 'completed' },
-    { id: 5, name: 'David Otieno', files: 4, phone: '0790123456', service: 'Printing', time: '11:30 AM', status: 'pending' },
-    { id: 6, name: 'Alice Wambui', files: 1, phone: '0701234567', service: 'File Returns', time: '12:15 PM', status: 'completed' }
-  ],
-  services: [
-    { name: 'Printing', count: 45, revenue: 2250 },
-    { name: 'Scanning', count: 23, revenue: 1150 },
-    { name: 'File Returns', count: 18, revenue: 900 },
-    { name: 'Photocopying', count: 67, revenue: 3350 }
-  ]
-};
+// const cyberData = {
+//   uploads: [
+//     { id: 1, name: 'James Omondi', files: 3, phone: '0756789012', service: 'Printing', time: '09:15 AM', status: 'completed' },
+//     { id: 2, name: 'Grace Akinyi', files: 1, phone: '0767890123', service: 'File Returns', time: '09:45 AM', status: 'pending' },
+//     { id: 3, name: 'Peter Mwangi', files: 5, phone: '0778901234', service: 'Printing', time: '10:20 AM', status: 'completed' },
+//     { id: 4, name: 'Sarah Njeri', files: 2, phone: '0789012345', service: 'Scanning', time: '11:05 AM', status: 'completed' },
+//     { id: 5, name: 'David Otieno', files: 4, phone: '0790123456', service: 'Printing', time: '11:30 AM', status: 'pending' },
+//     { id: 6, name: 'Alice Wambui', files: 1, phone: '0701234567', service: 'File Returns', time: '12:15 PM', status: 'completed' }
+//   ],
+//   services: [
+//     { name: 'Printing', count: 45, revenue: 2250 },
+//     { name: 'Scanning', count: 23, revenue: 1150 },
+//     { name: 'File Returns', count: 18, revenue: 900 },
+//     { name: 'Photocopying', count: 67, revenue: 3350 }
+//   ]
+// };
 
 const incomeData = {
   today: {
@@ -86,174 +87,174 @@ const StatCard = ({ icon, value, trend, color, label = '' }: { icon: any; value:
 };
 
 // CyberTab Component
-const CyberTab = ({ onOpenTerminal }: { onOpenTerminal: (asset?: any) => void }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [serviceFilter, setServiceFilter] = useState('all');
+// const CyberTab = ({ onOpenTerminal }: { onOpenTerminal: (asset?: any) => void }) => {
+//   const [searchTerm, setSearchTerm] = useState('');
+//   const [serviceFilter, setServiceFilter] = useState('all');
 
-  const filteredUploads = cyberData.uploads.filter(upload => {
-    const matchesSearch = upload.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         upload.phone.includes(searchTerm);
-    const matchesFilter = serviceFilter === 'all' || upload.service === serviceFilter;
-    return matchesSearch && matchesFilter;
-  });
+//   const filteredUploads = cyberData.uploads.filter(upload => {
+//     const matchesSearch = upload.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+//                          upload.phone.includes(searchTerm);
+//     const matchesFilter = serviceFilter === 'all' || upload.service === serviceFilter;
+//     return matchesSearch && matchesFilter;
+//   });
 
-  const todayStats = {
-    totalUploads: cyberData.uploads.length,
-    totalFiles: cyberData.uploads.reduce((sum, u) => sum + u.files, 0),
-    completed: cyberData.uploads.filter(u => u.status === 'completed').length,
-    pending: cyberData.uploads.filter(u => u.status === 'pending').length
-  };
+//   const todayStats = {
+//     totalUploads: cyberData.uploads.length,
+//     totalFiles: cyberData.uploads.reduce((sum, u) => sum + u.files, 0),
+//     completed: cyberData.uploads.filter(u => u.status === 'completed').length,
+//     pending: cyberData.uploads.filter(u => u.status === 'pending').length
+//   };
 
-  return (
-    <div className="space-y-6">
-      {/* Today's Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={<FileText className="w-5 h-5" />}
-          label="Today's Uploads"
-          value={todayStats.totalUploads}
-          trend="Active"
-          color="cyan"
-        />
-        <StatCard
-          icon={<File className="w-5 h-5" />}
-          label="Total Files"
-          value={todayStats.totalFiles}
-          trend={`${todayStats.totalFiles} files`}
-          color="emerald"
-        />
-        <StatCard
-          icon={<Clock className="w-5 h-5" />}
-          label="Completed"
-          value={todayStats.completed}
-          trend="Done"
-          color="violet"
-        />
-        <StatCard
-          icon={<ArrowUpRight className="w-5 h-5" />}
-          label="Pending"
-          value={todayStats.pending}
-          trend="In Progress"
-          color="amber"
-        />
-      </div>
+//   return (
+//     <div className="space-y-6">
+//       {/* Today's Stats */}
+//       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+//         <StatCard
+//           icon={<FileText className="w-5 h-5" />}
+//           label="Today's Uploads"
+//           value={todayStats.totalUploads}
+//           trend="Active"
+//           color="cyan"
+//         />
+//         <StatCard
+//           icon={<File className="w-5 h-5" />}
+//           label="Total Files"
+//           value={todayStats.totalFiles}
+//           trend={`${todayStats.totalFiles} files`}
+//           color="emerald"
+//         />
+//         <StatCard
+//           icon={<Clock className="w-5 h-5" />}
+//           label="Completed"
+//           value={todayStats.completed}
+//           trend="Done"
+//           color="violet"
+//         />
+//         <StatCard
+//           icon={<ArrowUpRight className="w-5 h-5" />}
+//           label="Pending"
+//           value={todayStats.pending}
+//           trend="In Progress"
+//           color="amber"
+//         />
+//       </div>
 
-      {/* Services Overview */}
-      <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
-        <h3 className="text-lg font-semibold mb-4 text-white">Services Summary (Today)</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {cyberData.services.map((service, idx) => (
-            <div
-              key={idx}
-              className="p-4 bg-gradient-to-br from-gray-700/30 to-gray-800/30 rounded-lg border border-gray-700/50 hover:border-cyan-500/50 transition-all"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <Printer className="w-5 h-5 text-cyan-400" />
-                <span className="text-xs font-medium text-gray-400">{service.count} orders</span>
-              </div>
-              <div className="font-semibold text-white">{service.name}</div>
-              <div className="text-sm text-gray-400 mt-1">KES {service.revenue.toLocaleString()}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+//       {/* Services Overview */}
+//       <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
+//         <h3 className="text-lg font-semibold mb-4 text-white">Services Summary (Today)</h3>
+//         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+//           {cyberData.services.map((service, idx) => (
+//             <div
+//               key={idx}
+//               className="p-4 bg-gradient-to-br from-gray-700/30 to-gray-800/30 rounded-lg border border-gray-700/50 hover:border-cyan-500/50 transition-all"
+//             >
+//               <div className="flex items-center justify-between mb-2">
+//                 <Printer className="w-5 h-5 text-cyan-400" />
+//                 <span className="text-xs font-medium text-gray-400">{service.count} orders</span>
+//               </div>
+//               <div className="font-semibold text-white">{service.name}</div>
+//               <div className="text-sm text-gray-400 mt-1">KES {service.revenue.toLocaleString()}</div>
+//             </div>
+//           ))}
+//         </div>
+//       </div>
 
-      {/* Uploads Table */}
-      <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-          <h3 className="text-lg font-semibold text-white">Today's File Uploads</h3>
-          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            <div className="relative flex-1 sm:flex-initial">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search uploads..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full sm:w-64 pl-10 pr-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-gray-500"
-              />
-            </div>
-            <select
-              value={serviceFilter}
-              onChange={(e) => setServiceFilter(e.target.value)}
-              className="px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-sm text-white"
-            >
-              <option value="all">All Services</option>
-              <option value="Printing">Printing</option>
-              <option value="Scanning">Scanning</option>
-              <option value="File Returns">File Returns</option>
-              <option value="Photocopying">Photocopying</option>
-            </select>
-          </div>
-        </div>
+//       {/* Uploads Table */}
+//       <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 backdrop-blur-sm rounded-xl border border-gray-700/50 p-6">
+//         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+//           <h3 className="text-lg font-semibold text-white">Today's File Uploads</h3>
+//           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+//             <div className="relative flex-1 sm:flex-initial">
+//               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+//               <input
+//                 type="text"
+//                 placeholder="Search uploads..."
+//                 value={searchTerm}
+//                 onChange={(e) => setSearchTerm(e.target.value)}
+//                 className="w-full sm:w-64 pl-10 pr-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-gray-500"
+//               />
+//             </div>
+//             <select
+//               value={serviceFilter}
+//               onChange={(e) => setServiceFilter(e.target.value)}
+//               className="px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-sm text-white"
+//             >
+//               <option value="all">All Services</option>
+//               <option value="Printing">Printing</option>
+//               <option value="Scanning">Scanning</option>
+//               <option value="File Returns">File Returns</option>
+//               <option value="Photocopying">Photocopying</option>
+//             </select>
+//           </div>
+//         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-700">
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Customer</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Files</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Contact</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Service</th>
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Time</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Status</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredUploads.map((upload) => (
-                <tr key={upload.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
-                  <td className="py-4 px-4">
-                    <div className="font-medium text-white">{upload.name}</div>
-                  </td>
-                  <td className="py-4 px-4 text-center">
-                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-cyan-500/10 text-cyan-400 rounded-md text-xs font-medium border border-cyan-500/30">
-                      <File className="w-3 h-3" />
-                      {upload.files}
-                    </span>
-                  </td>
-                  <td className="py-4 px-4 text-sm text-gray-400">{upload.phone}</td>
-                  <td className="py-4 px-4 text-sm text-white">{upload.service}</td>
-                  <td className="py-4 px-4 text-sm text-gray-400">{upload.time}</td>
-                  <td className="py-4 px-4 text-center">
-                    <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${
-                      upload.status === 'completed' 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
-                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                    }`}>
-                      {upload.status}
-                    </span>
-                  </td>
-                  <td className="py-4 px-4">
-                    <div className="flex items-center justify-center gap-2">
-                      <button className="p-2 text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-colors border border-transparent hover:border-cyan-500/30">
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/30">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+//         <div className="overflow-x-auto">
+//           <table className="w-full">
+//             <thead>
+//               <tr className="border-b border-gray-700">
+//                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Customer</th>
+//                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Files</th>
+//                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Contact</th>
+//                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Service</th>
+//                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Time</th>
+//                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Status</th>
+//                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-400">Actions</th>
+//               </tr>
+//             </thead>
+//             <tbody>
+//               {filteredUploads.map((upload) => (
+//                 <tr key={upload.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
+//                   <td className="py-4 px-4">
+//                     <div className="font-medium text-white">{upload.name}</div>
+//                   </td>
+//                   <td className="py-4 px-4 text-center">
+//                     <span className="inline-flex items-center gap-1 px-2 py-1 bg-cyan-500/10 text-cyan-400 rounded-md text-xs font-medium border border-cyan-500/30">
+//                       <File className="w-3 h-3" />
+//                       {upload.files}
+//                     </span>
+//                   </td>
+//                   <td className="py-4 px-4 text-sm text-gray-400">{upload.phone}</td>
+//                   <td className="py-4 px-4 text-sm text-white">{upload.service}</td>
+//                   <td className="py-4 px-4 text-sm text-gray-400">{upload.time}</td>
+//                   <td className="py-4 px-4 text-center">
+//                     <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${
+//                       upload.status === 'completed' 
+//                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+//                         : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+//                     }`}>
+//                       {upload.status}
+//                     </span>
+//                   </td>
+//                   <td className="py-4 px-4">
+//                     <div className="flex items-center justify-center gap-2">
+//                       <button className="p-2 text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-colors border border-transparent hover:border-cyan-500/30">
+//                         <Download className="w-4 h-4" />
+//                       </button>
+//                       <button className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/30">
+//                         <Trash2 className="w-4 h-4" />
+//                       </button>
+//                     </div>
+//                   </td>
+//                 </tr>
+//               ))}
+//             </tbody>
+//           </table>
+//         </div>
+//       </div>
 
-      {/* Terminal Button */}
-      <div className="max-w-md mx-auto">
-        <button 
-          onClick={() => onOpenTerminal(null)}
-          className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-cyan-500 text-black rounded-xl hover:bg-cyan-400 transition-all shadow-lg shadow-cyan-500/30 font-semibold"
-        >
-          <CreditCard className="w-5 h-5" />
-          <span>Open Payment Terminal</span>
-        </button>
-      </div>
-    </div>
-  );
-};
+//       {/* Terminal Button */}
+//       <div className="max-w-md mx-auto">
+//         <button 
+//           onClick={() => onOpenTerminal(null)}
+//           className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-cyan-500 text-black rounded-xl hover:bg-cyan-400 transition-all shadow-lg shadow-cyan-500/30 font-semibold"
+//         >
+//           <CreditCard className="w-5 h-5" />
+//           <span>Open Payment Terminal</span>
+//         </button>
+//       </div>
+//     </div>
+//   );
+// };
 
 // IncomeTab Component
 const IncomeTab = () => {
