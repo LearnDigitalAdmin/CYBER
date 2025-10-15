@@ -15,7 +15,7 @@ const firebaseConfig = {
 };
 
 export interface Invoice {
-  id: string;
+  id: string | number;
   localId: number;
   tenantId: number;
   propertyId: number;
@@ -39,6 +39,9 @@ export interface Invoice {
   paidDate?: string;
   tenantName?: string;
   propertyName?: string;
+  invoiceNumber?: any;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 // Initialize Firebase

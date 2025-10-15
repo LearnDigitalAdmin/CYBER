@@ -10,7 +10,7 @@ const SignupPage: React.FC = () => {
   const [form, setForm] = useState({
     type: "Freelancer",
     name: "",
-    idNumber: "",
+    id: "",
     phone: "",
     altPhone: "",
     email: "",
@@ -44,31 +44,35 @@ const SignupPage: React.FC = () => {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
-      const kraUrl = kraFile ? await uploadFile(kraFile, `uploads/${user.uid}/kra`) : "";
-      const shopUrl = form.type === "Cyber" && shopFile ? await uploadFile(shopFile, `uploads/${user.uid}/shop`) : "";
+  e.preventDefault();
+  setLoading(true);
+  try {
+    const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
+    const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
+    const kraUrl = kraFile ? await uploadFile(kraFile, `uploads/${user.uid}/kra`) : "";
+    const shopUrl = form.type === "Cyber" && shopFile ? await uploadFile(shopFile, `uploads/${user.uid}/shop`) : "";
 
-      const data = {
-        ...form,
-        cogvanaId: `COG-${String(Math.floor(Math.random() * 9999)).padStart(4, "0")}-${form.idNumber}`,
-        coords,
-        uploads: { idUrl, kraUrl, shopUrl },
-        isVerified: false,
-        createdAt: new Date().toISOString(),
-      };
+    // Remove password from the data object before storing
+    const { password, ...formWithoutPassword } = form;
 
-      await setDoc(doc(db, "agents", user.uid), data);
-      window.location.href = "/verify";
-    } catch (err: any) {
-      setMsg(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const data = {
+      ...formWithoutPassword,
+      uid: user.uid,
+      pId: `COG-${String(Math.floor(Math.random() * 9999)).padStart(4, "0")}-${form.id}`,
+      coords,
+      uploads: { idUrl, kraUrl, shopUrl },
+      isVerified: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    await setDoc(doc(db, "agents", user.uid), data);
+    window.location.href = "/verify";
+  } catch (err: any) {
+    setMsg(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4">
@@ -105,7 +109,7 @@ const SignupPage: React.FC = () => {
             <input
               name="idNumber"
               placeholder="National ID Number"
-              value={form.idNumber}
+              value={form.id}
               onChange={handleChange}
               required
               className="bg-gray-800 rounded-lg px-3 py-2 w-full md:w-[48%] outline-none"

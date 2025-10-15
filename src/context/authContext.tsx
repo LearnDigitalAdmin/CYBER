@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, db } from '../services/firebaseService';
-import { query, collection, where, limit, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -30,53 +30,80 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading
   });
 
-  const fetchFirestoreUser = async (email: string, phoneNumber?: string | null) => {
-    console.log('📥 [fetchFirestoreUser] Starting fetch');
-    console.log('📥 [fetchFirestoreUser] Email:', email);
-    console.log('📥 [fetchFirestoreUser] Phone:', phoneNumber || 'null');
+  // const fetchFirestoreUser = async (email: string, phoneNumber?: string | null) => {
+  //   console.log('📥 [fetchFirestoreUser] Starting fetch');
+  //   console.log('📥 [fetchFirestoreUser] Email:', email);
+  //   console.log('📥 [fetchFirestoreUser] Phone:', phoneNumber || 'null');
     
+  //   try {
+  //     let usersQuery;
+      
+  //     // Query by email if available
+  //     if (email) {
+  //       console.log('📥 [fetchFirestoreUser] Querying by email:', email.toLowerCase().trim());
+  //       usersQuery = query(
+  //         collection(db, 'users'),
+  //         where('email', '==', email.toLowerCase().trim()),
+  //         limit(1)
+  //       );
+  //     } 
+  //     // Query by phone if email not available
+  //     else if (phoneNumber) {
+  //       console.log('📥 [fetchFirestoreUser] Querying by phone:', phoneNumber);
+  //       usersQuery = query(
+  //         collection(db, 'users'),
+  //         where('phoneNumber', '==', phoneNumber),
+  //         limit(1)
+  //       );
+  //     } else {
+  //       console.error('❌ [fetchFirestoreUser] No email or phone number provided');
+  //       return;
+  //     }
+      
+  //     console.log('📥 [fetchFirestoreUser] Executing query...');
+  //     const querySnapshot = await getDocs(usersQuery);
+  //     console.log('📥 [fetchFirestoreUser] Query complete. Empty:', querySnapshot.empty);
+  //     console.log('📥 [fetchFirestoreUser] Documents found:', querySnapshot.size);
+      
+  //     if (querySnapshot.empty) {
+  //       console.warn('⚠️ [fetchFirestoreUser] User not found in Firestore');
+  //       console.warn('⚠️ [fetchFirestoreUser] Searched for:', { email, phoneNumber });
+  //       setFirestoreUser(null);
+  //     } else {
+  //       const userDoc = querySnapshot.docs[0];
+  //       const userData = userDoc.data();
+  //       console.log('✅ [fetchFirestoreUser] Fetched user data:', userData);
+  //       console.log('✅ [fetchFirestoreUser] Document ID:', userDoc.id);
+        
+  //       // Include the document ID in the user data
+  //       setFirestoreUser({ ...userData, id: userDoc.id });
+  //     }
+  //   } catch (error) {
+  //     console.error('❌ [fetchFirestoreUser] Error:', error);
+  //     console.error('❌ [fetchFirestoreUser] Error details:', {
+  //       message: error instanceof Error ? error.message : 'Unknown error',
+  //       code: (error as any)?.code,
+  //       stack: error instanceof Error ? error.stack : undefined
+  //     });
+  //   }
+  // };
+
+    const fetchFirestoreUser = async (uid: string) => {
+    console.log('📥 [fetchFirestoreUser] Starting fetch for UID:', uid);
     try {
-      let usersQuery;
+      const userDocRef = doc(db, 'agents', uid);
+      console.log('📥 [fetchFirestoreUser] Document reference:', userDocRef.path);
       
-      // Query by email if available
-      if (email) {
-        console.log('📥 [fetchFirestoreUser] Querying by email:', email.toLowerCase().trim());
-        usersQuery = query(
-          collection(db, 'users'),
-          where('email', '==', email.toLowerCase().trim()),
-          limit(1)
-        );
-      } 
-      // Query by phone if email not available
-      else if (phoneNumber) {
-        console.log('📥 [fetchFirestoreUser] Querying by phone:', phoneNumber);
-        usersQuery = query(
-          collection(db, 'users'),
-          where('phoneNumber', '==', phoneNumber),
-          limit(1)
-        );
-      } else {
-        console.error('❌ [fetchFirestoreUser] No email or phone number provided');
-        return;
-      }
+      const userDoc = await getDoc(userDocRef);
+      console.log('📥 [fetchFirestoreUser] Document exists:', userDoc.exists());
       
-      console.log('📥 [fetchFirestoreUser] Executing query...');
-      const querySnapshot = await getDocs(usersQuery);
-      console.log('📥 [fetchFirestoreUser] Query complete. Empty:', querySnapshot.empty);
-      console.log('📥 [fetchFirestoreUser] Documents found:', querySnapshot.size);
-      
-      if (querySnapshot.empty) {
-        console.warn('⚠️ [fetchFirestoreUser] User not found in Firestore');
-        console.warn('⚠️ [fetchFirestoreUser] Searched for:', { email, phoneNumber });
-        setFirestoreUser(null);
-      } else {
-        const userDoc = querySnapshot.docs[0];
+      if (userDoc.exists()) {
         const userData = userDoc.data();
         console.log('✅ [fetchFirestoreUser] Fetched user data:', userData);
-        console.log('✅ [fetchFirestoreUser] Document ID:', userDoc.id);
-        
-        // Include the document ID in the user data
-        setFirestoreUser({ ...userData, id: userDoc.id });
+        setFirestoreUser(userData);
+      } else {
+        console.warn('⚠️ [fetchFirestoreUser] User document does not exist in Firestore');
+        setFirestoreUser(null);
       }
     } catch (error) {
       console.error('❌ [fetchFirestoreUser] Error:', error);
@@ -94,7 +121,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔄 [refreshUser] Refreshing user data');
       console.log('🔄 [refreshUser] User email:', currentUser.email);
       console.log('🔄 [refreshUser] User phone:', currentUser.phoneNumber);
-      await fetchFirestoreUser(currentUser.email || '', currentUser.phoneNumber);
+      await fetchFirestoreUser(currentUser.uid);
       console.log('🔄 [refreshUser] User data refresh complete');
     } else {
       console.warn('⚠️ [refreshUser] No current user to refresh');
@@ -125,15 +152,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('🔐 [onAuthStateChanged] User is authenticated, fetching Firestore data...');
         
         // Use email or phone number to query Firestore
-        if (firebaseUser.email) {
-          console.log('🔐 [onAuthStateChanged] Fetching by email:', firebaseUser.email);
-          await fetchFirestoreUser(firebaseUser.email, firebaseUser.phoneNumber);
-        } else if (firebaseUser.phoneNumber) {
-          console.log('🔐 [onAuthStateChanged] Fetching by phone:', firebaseUser.phoneNumber);
-          await fetchFirestoreUser('', firebaseUser.phoneNumber);
-        } else {
-          console.error('❌ [onAuthStateChanged] No email or phone number available!');
-        }
+        // if (firebaseUser.email) {
+        //   console.log('🔐 [onAuthStateChanged] Fetching by email:', firebaseUser.email);
+        //   await fetchFirestoreUser(firebaseUser.uid);
+        // } else if (firebaseUser.phoneNumber) {
+        //   console.log('🔐 [onAuthStateChanged] Fetching by phone:', firebaseUser.phoneNumber);
+        //   await fetchFirestoreUser('', firebaseUser.uid);
+        // } else {
+        //   console.error('❌ [onAuthStateChanged] No email or phone number available!');
+        // }
+        await fetchFirestoreUser(firebaseUser.uid);
+        console.log('🔐 [onAuthStateChanged] Firestore data fetch complete');
       } else {
         console.log('🔐 [onAuthStateChanged] User is not authenticated, clearing Firestore data');
         setFirestoreUser(null);

@@ -13,7 +13,8 @@ import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from '
 import { db, type Invoice } from '../services/firebaseService';
 import { useAuth } from '../context/authContext';
 import PricingModal from '../components/PricingPage';
-
+import { PaymentSuccessHandler, type Transaction } from '../services/PaymentsSuccess';
+import { toast } from 'react-toastify';
 
 const cyberData = {
   uploads: [
@@ -890,16 +891,20 @@ const Dashboard = () => {
     setShowPricingModal(true);
   };
 
-  const handlePaymentSuccess = () => {
-    // Refresh data after successful payment
-    console.log('Payment successful, refreshing data...');
-    // TODO: Implement data refresh logic
-  };
+const handlePaymentSuccess = async (transaction: Transaction) => {
+  try {
+    await PaymentSuccessHandler.handlePaymentSuccess(
+      transaction,
+      firestoreUser.uid
+    );
+    
+    toast.success('Payment processed successfully!');
+    //onSuccess?.(); // Refresh UI
+  } catch (error: any) {
+    toast.error(error.message);
+  }
+};
 
-  // const handleOpenTerminal = (asset: any) => {
-  //   setSelectedAsset(asset);
-  //   setShowTerminal(true);
-  // };
 
   const tabs = [
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-5 h-5" /> },

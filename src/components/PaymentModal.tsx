@@ -7,7 +7,7 @@ import { PaymentService, type Invoice } from '../services/firebaseService';
 interface PaymentModalProps {
   invoice: Invoice;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (transaction: any) => void;
 }
 
 const PaymentModal: React.FC<PaymentModalProps> = ({ 
@@ -100,7 +100,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
           if (transaction.status === 'success') {
             setStatus('success');
             setTimeout(() => {
-              onSuccess();
+              onSuccess(transaction);
               onClose();
             }, 2000);
             unsubscribe();
