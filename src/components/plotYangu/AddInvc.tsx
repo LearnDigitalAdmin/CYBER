@@ -6,18 +6,15 @@ import {
 import { assetsService, type Asset, type Property, type Tenant } from '../../services/Assets';
 import { Timestamp, setDoc, doc } from 'firebase/firestore';
 import { PaymentSuccessHandler } from '../../services/PaymentsSuccess';
-
-
 import { db } from '../../services/firebaseService';
 
 interface InvoiceInput {
   propertyId: number;
-  tenantId?: string;
+  tenantId?: number;
   tenantName?: string;
   tenantEmail?: string;
   tenantPhone?: string;
   propertyName?: string;
-  //tenant: Tenant;
   userId: string;
   billingMonth: string;
   rentAmount: number;
@@ -85,14 +82,12 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [, setTenant] = useState<Tenant | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
-
-
 
   const [formData, setFormData] = useState<InvoiceInput>({
     propertyId: 0,
-    tenantId: '',
+    tenantId: 0,
     tenantName: '',
     tenantEmail: '',
     tenantPhone: '',
@@ -127,7 +122,6 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadProperties();
-      // Set default due date (30 days from now)
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 30);
       setFormData(prev => ({
@@ -176,8 +170,8 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
     if (tenant) {
       setFormData(prev => ({
         ...prev,
-        rentAmount: tenant.rentAmount,
-        standingFees: tenant.standingFees
+        rentAmount: tenant.rentAmount || 0,
+        standingFees: tenant.standingFees || 0
       }));
     }
   };
@@ -261,12 +255,12 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
     try {
       const totals = calculateTotals();
       
-      // Generate invoice number
+      // Generate invoice number and get next ID
       const invoiceNumber = `INV-${Date.now()}`;
       const id = await assetsService.getNextInvoiceId(asset.id);
-      const pdfUrl = await PaymentSuccessHandler.generateAndUploadInvoicePDF(invoiceData, property, asset, invoiceNumber);
 
-      const invoiceData = {
+      // Create invoice data object FIRST (without PDF URL)
+      const invoiceDataWithoutPDF = {
         id,
         invoiceNumber,
         tenantId: formData.tenantId,
@@ -275,8 +269,8 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
         tenantPhone: formData.tenantPhone || "",
         propertyId: formData.propertyId,
         propertyName: formData.propertyName || "",
-        //userId: formData.userId,
         userId: asset.id,
+        assetId: asset.id,
         localId: Date.now(),
         billingMonth: formData.billingMonth,
         rentAmount: formData.rentAmount,
@@ -295,7 +289,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
         amountPaid: 0,
         arrears: 0,
         isPaid: false,
-        pdfStatus: "pending",
+        pdfStatus: "generating",
         pdfUrl: "",
         dueDate: formData.dueDate,
         lastModified: new Date().toISOString(),
@@ -304,39 +298,42 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
         updatedAt: Timestamp.now()
       };
 
-      
-      // const invoiceData = {
-      //   id,
-      //   invoiceNumber,
-      //   tenantId: formData.tenantId,
-      //   propertyId: formData.propertyId,
-      //   userId: formData.userId,
-      //   localId: id,
-      //   billingMonth: formData.billingMonth,
-      //   rentAmount: formData.rentAmount,
-      //   waterCurrentReading: formData.waterCurrentReading,
-      //   waterPreviousReading: formData.waterPreviousReading,
-      //   waterStandingFee: formData.includeWaterStanding ? formData.waterStandingFee : 0,
-      //   waterUnitPrice: formData.waterUnitPrice,
-      //   waterAmount: totals.waterAmount,
-      //   powerCurrentReading: formData.includePower ? formData.powerCurrentReading : 0,
-      //   powerPreviousReading: formData.includePower ? formData.powerPreviousReading : 0,
-      //   powerUnitPrice: formData.includePower ? formData.powerUnitPrice : 0,
-      //   powerAmount: totals.powerAmount,
-      //   otherCharges: formData.otherCharges,
-      //   otherChargesDescription: formData.otherChargesDescription,
-      //   totalAmount: totals.totalAmount,
-      //   amountPaid: 0,
-      //   arrears: 0,
-      //   isPaid: false,
-      //   dueDate: formData.dueDate,
-      //   createdAt: Timestamp.now(),
-      //   updatedAt: Timestamp.now()
-      // };
+      // Get company info for PDF generation
+      const companyInfo = {
+        name: asset.name || 'Plot Yangu',
+        address: 'Nairobi, Kenya',
+        phone: '0791286165',
+        email: 'info@cogvana.co.ke',
+        website: 'https://cogvana.co.ke'
+      };
+
+      // Generate and upload PDF
+      let pdfUrl = "";
+      try {
+        if (property) {
+          pdfUrl = await PaymentSuccessHandler.generateAndUploadInvoicePDF(
+            invoiceDataWithoutPDF as any,
+            property,
+            companyInfo,
+            invoiceNumber
+          );
+        }
+      } catch (pdfError) {
+        console.error('Error generating PDF:', pdfError);
+        // Continue without PDF - we'll mark it as failed
+        pdfUrl = "";
+      }
+
+      // Create final invoice data with PDF URL
+      const finalInvoiceData = {
+        ...invoiceDataWithoutPDF,
+        pdfUrl: pdfUrl,
+        pdfStatus: pdfUrl ? "completed" : "failed"
+      };
 
       // Save to Firestore
-      const invoiceRef = doc(db, "users", formData.userId, "invoices", id.toString());
-      await setDoc(invoiceRef, invoiceData);
+      const invoiceRef = doc(db, "users", asset.id, "invoices", id.toString());
+      await setDoc(invoiceRef, finalInvoiceData);
 
       onSuccess();
       onClose();
@@ -345,7 +342,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
       setCurrentStep(0);
       setFormData({
         propertyId: 0,
-        tenantId: '',
+        tenantId: 0,
         userId: asset.id,
         billingMonth: new Date().toISOString().slice(0, 7),
         rentAmount: 0,
@@ -363,6 +360,8 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
         otherChargesDescription: '',
         dueDate: ''
       });
+      setTenant(null);
+      setProperty(null);
     } catch (error) {
       console.error('Error saving invoice:', error);
       setErrors({ general: 'Failed to create invoice. Please try again.' });
@@ -390,16 +389,13 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                   const selectedId = parseInt(e.target.value);
                   updateFormData('propertyId', selectedId);
 
-                  // Find the full property object
                   const selectedProperty = properties.find(p => p.id === selectedId) || null;
                   setProperty(selectedProperty);
 
-                  // Optionally auto-fill related info into formData
                   if (selectedProperty) {
                     updateFormData('propertyName', selectedProperty.name);
                   }
 
-                  // 🧹 Reset tenant-related selections if property changes
                   updateFormData('tenantId', '');
                   setTenant(null);
                 }}
@@ -414,25 +410,10 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                   </option>
                 ))}
               </select>
-
               {errors.propertyId && (
                 <p className="text-red-400 text-sm mt-1">{errors.propertyId}</p>
               )}
             </div>
-            {/* <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">Property *</label>
-              <select
-                value={formData.propertyId || ''}
-                onChange={(e) => updateFormData('propertyId', parseInt(e.target.value))}
-                className={`w-full px-4 py-3 bg-gray-900/50 border ${errors.propertyId ? 'border-red-500' : 'border-gray-700'} rounded-lg focus:ring-2 focus:ring-cyan-500 text-white`}
-              >
-                <option value="">Select a property</option>
-                {properties.map(property => (
-                  <option key={property.id} value={property.id}>{property.name}</option>
-                ))}
-              </select>
-              {errors.propertyId && <p className="text-red-400 text-sm mt-1">{errors.propertyId}</p>}
-            </div> */}
 
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2">Tenant *</label>
@@ -442,15 +423,16 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                   const selectedId = e.target.value;
                   updateFormData('tenantId', selectedId);
 
-                  // find full tenant object
                   const selectedTenant = tenants.find(t => t.id.toString() === selectedId);
                   setTenant(selectedTenant || null);
 
-                  // optionally also auto-fill tenant info in formData
                   if (selectedTenant) {
                     updateFormData('tenantName', selectedTenant.name);
                     updateFormData('tenantEmail', selectedTenant.email || '');
                     updateFormData('tenantPhone', selectedTenant.phone || '');
+                    // Auto-fill rent amount and standing fees
+                    updateFormData('rentAmount', selectedTenant.rentAmount || 0);
+                    updateFormData('standingFees', selectedTenant.standingFees || 0);
                   }
                 }}
                 disabled={!formData.propertyId}
@@ -465,29 +447,10 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                   </option>
                 ))}
               </select>
-
               {errors.tenantId && (
                 <p className="text-red-400 text-sm mt-1">{errors.tenantId}</p>
               )}
             </div>
-
-            {/* <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">Tenant *</label>
-              <select
-                value={formData.tenantId || ''}
-                onChange={(e) => updateFormData('tenantId', e.target.value)}
-                disabled={!formData.propertyId}
-                className={`w-full px-4 py-3 bg-gray-900/50 border ${errors.tenantId ? 'border-red-500' : 'border-gray-700'} rounded-lg focus:ring-2 focus:ring-cyan-500 text-white`}
-              >
-                <option value="">Select a tenant</option>
-                {tenants.map(tenant => (
-                  <option key={tenant.id} value={tenant.id}>
-                    {tenant.name} {tenant.unitNumber && `(Unit ${tenant.unitNumber})`}
-                  </option>
-                ))}
-              </select>
-              {errors.tenantId && <p className="text-red-400 text-sm mt-1">{errors.tenantId}</p>}
-            </div> */}
 
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2">Billing Month *</label>
@@ -520,7 +483,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 <span className="absolute left-3 top-3 text-gray-500">KES</span>
                 <input
                   type="number"
-                  value={tenant ? tenant.rentAmount : formData.rentAmount}
+                  value={formData.rentAmount}
                   onChange={(e) => updateFormData('rentAmount', parseFloat(e.target.value) || 0)}
                   className={`w-full pl-14 pr-4 py-3 bg-gray-900/50 border ${errors.rentAmount ? 'border-red-500' : 'border-gray-700'} rounded-lg focus:ring-2 focus:ring-cyan-500 text-white`}
                   placeholder="0.00"
@@ -548,6 +511,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 <h4 className="font-medium text-emerald-400 mb-2">Tenant Information</h4>
                 <p className="text-emerald-300 text-sm">Default Rent: KES {selectedTenant.rentAmount.toLocaleString()}</p>
                 <p className="text-emerald-300 text-sm">Standing Fees: KES {selectedTenant.standingFees.toLocaleString()}</p>
+                <p className="text-emerald-200 text-xs mt-2 italic">Values auto-filled above but can be edited</p>
               </div>
             )}
           </div>

@@ -53,12 +53,12 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
   const confirmDelete = async () => {
     if (!tenantToDelete) return;
 
-    setDeletingTenant(tenantToDelete.id);
+    setDeletingTenant(tenantToDelete.id.toString());
     setError('');
 
     try {
       // Delete from Firestore
-      const tenantRef = doc(db, 'users', asset.id, 'tenants', tenantToDelete.id);
+      const tenantRef = doc(db, 'users', asset.id, 'tenants', tenantToDelete.id.toString());
       await deleteDoc(tenantRef);
 
       // Reload tenants
@@ -195,11 +195,11 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
                         <div className="flex items-center justify-center">
                           <button
                             onClick={() => handleDeleteTenant(tenant)}
-                            disabled={deletingTenant === tenant.id}
+                            disabled={Number(deletingTenant) === tenant.id}
                             className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Delete tenant"
                           >
-                            {deletingTenant === tenant.id ? (
+                            {Number(deletingTenant) === tenant.id ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <Trash2 className="w-4 h-4" />

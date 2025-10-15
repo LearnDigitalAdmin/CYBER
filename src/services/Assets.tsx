@@ -65,6 +65,7 @@ export interface Property {
   updatedAt: Timestamp;
 }
 
+
 export interface PropertyInput {
   userId: string; // Asset ID
   companyId?: number;
@@ -77,8 +78,8 @@ export interface PropertyInput {
 }
 
 export interface Tenant {
-  id: string; // National ID
-  localId: string;
+  id: number; // National ID
+  localId: number;
   propertyId: number;
   userId: string; // Asset ID
   name: string;
@@ -96,7 +97,7 @@ export interface Tenant {
 }
 
 export interface TenantInput {
-  id: string; // National ID
+  id: number; // National ID
   propertyId: number;
   userId: string; // Asset ID
   name: string;
@@ -299,7 +300,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
    */
   async createTenant(tenantData: TenantInput): Promise<Tenant> {
     try {
-      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id);
+      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
       
       const tenant = {
         id: tenantData.id,

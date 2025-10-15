@@ -11,9 +11,23 @@ import { formatCurrency, formatDate } from '../utils/FormatUtils';
 
 
 
+// export interface Property {
+//   id: number;
+//   userId: number;
+//   companyId?: number;
+//   name: string;
+//   address?: string;
+//   description?: string;
+//   image?: string;
+//   agentCommissionRate: number;
+//   maxUnits: number;
+//   isRestricted?: boolean; // Added for access control
+//   createdAt: string;
+//   updatedAt: string;
+// }
 export interface Property {
   id: number;
-  userId: number;
+  userId: number | string; // Asset ID
   companyId?: number;
   name: string;
   address?: string;
@@ -22,8 +36,8 @@ export interface Property {
   agentCommissionRate: number;
   maxUnits: number;
   isRestricted?: boolean; // Added for access control
-  createdAt: string;
-  updatedAt: string;
+  createdAt: any;
+  updatedAt: any;
 }
 
 export interface Invoice {

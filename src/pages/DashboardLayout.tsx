@@ -266,7 +266,7 @@ const TerminalModal = ({
     try {
       // Get tenant from asset's tenants subcollection
       const tenantsRef = collection(db, 'users', asset.id, 'tenants');
-      const tenantQuery = query(tenantsRef, where('localId', '==', parseInt(tenantId)));
+      const tenantQuery = query(tenantsRef, where('localId', 'in', [tenantId, parseInt(tenantId)]));
       const tenantSnapshot = await getDocs(tenantQuery);
 
       if (tenantSnapshot.empty) {

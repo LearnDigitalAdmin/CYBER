@@ -35,7 +35,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
   const [error, setError] = useState('');
   const [properties, setProperties] = useState<Property[]>([]);
   const [formData, setFormData] = useState<TenantInput>({
-    id: '',
+    id: 0,
     propertyId: 0,
     userId: asset.id,
     name: '',
@@ -111,7 +111,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
       
       // Reset form
       setFormData({
-        id: '',
+        id: 0,
         propertyId: 0,
         userId: asset.id,
         name: '',
@@ -173,9 +173,9 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
             <div>
               <label className="block text-sm font-medium text-gray-400 mb-2">National ID *</label>
               <input
-                type="text"
+                type="number"
                 value={formData.id}
-                onChange={(e) => setFormData(prev => ({ ...prev, id: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, id: Number(e.target.value) }))}
                 required
                 className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
                 placeholder="12345678"
