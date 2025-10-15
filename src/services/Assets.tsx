@@ -6,7 +6,8 @@ import {
   setDoc, 
   query, 
   where,
-  Timestamp} from 'firebase/firestore';
+  Timestamp,
+  updateDoc} from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebaseService';
 import { argon2id } from 'hash-wasm';
@@ -45,6 +46,66 @@ export interface Asset {
   tenants: number;
   revenue: number;
   status: 'active' | 'pending' | 'inactive';
+}
+
+export interface Property {
+  id: number;
+  localId: number;
+  userId: string; // Asset ID
+  companyId?: number;
+  name: string;
+  address?: string;
+  description?: string;
+  image?: string;
+  agentCommissionRate: number;
+  maxUnits: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface PropertyInput {
+  userId: string; // Asset ID
+  companyId?: number;
+  name: string;
+  address?: string;
+  description?: string;
+  image?: string;
+  agentCommissionRate?: number;
+  maxUnits?: number;
+}
+
+export interface Tenant {
+  id: string; // National ID
+  localId: string;
+  propertyId: number;
+  userId: string; // Asset ID
+  name: string;
+  phone?: string;
+  email?: string;
+  unitNumber?: string;
+  rentAmount: number;
+  standingFees: number;
+  depositAmount: number;
+  leaseStart?: string;
+  leaseEnd?: string;
+  isActive: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface TenantInput {
+  id: string; // National ID
+  propertyId: number;
+  userId: string; // Asset ID
+  name: string;
+  phone?: string;
+  email?: string;
+  unitNumber?: string;
+  rentAmount: number;
+  standingFees?: number;
+  depositAmount?: number;
+  leaseStart?: string;
+  leaseEnd?: string;
 }
 
 class AssetsService {
@@ -137,6 +198,159 @@ class AssetsService {
       throw new Error('Failed to create asset. Please try again.');
     }
   }
+
+    /**
+   * Get next property ID using Firestore counter
+   */
+  private async getNextPropertyId(_userId: string): Promise<number> {
+    const counterRef = doc(db, 'counters', 'properties');
+    const counterDoc = await getDoc(counterRef);
+    
+    let nextId = 111; // Starting ID
+    
+    if (counterDoc.exists()) {
+      nextId = counterDoc.data().lastId + 1;
+    }
+    
+    // Update counter
+    await setDoc(counterRef, { lastId: nextId }, { merge: true });
+    
+    return nextId;
+  }
+
+  /**
+   * Create a new property for an asset
+   */
+  async createProperty(propertyData: PropertyInput): Promise<Property> {
+    try {
+      const propertyId = await this.getNextPropertyId(propertyData.userId);
+      
+      const propertyRef = doc(db, 'users', propertyData.userId, 'properties', propertyId.toString());
+      
+      const property = {
+        id: propertyId,
+        localId: propertyId,
+        userId: propertyData.userId,
+        companyId: propertyData.companyId || null,
+        name: propertyData.name,
+        address: propertyData.address || '',
+        description: propertyData.description || '',
+        image: propertyData.image || '',
+        agentCommissionRate: propertyData.agentCommissionRate || 0,
+        maxUnits: propertyData.maxUnits || 1,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+      
+      await setDoc(propertyRef, property);
+      
+      return property as Property;
+    } catch (error) {
+      console.error('Error creating property:', error);
+      throw new Error('Failed to create property. Please try again.');
+    }
+  }
+
+  /**
+   * Update an existing property
+   */
+  async updateProperty(userId: string, propertyId: number, updates: Partial<PropertyInput>): Promise<void> {
+    try {
+      const propertyRef = doc(db, 'users', userId, 'properties', propertyId.toString());
+      
+      await updateDoc(propertyRef, {
+        ...updates,
+        updatedAt: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error updating property:', error);
+      throw new Error('Failed to update property. Please try again.');
+    }
+  }
+
+  /**
+   * Create a new tenant
+   */
+  async createTenant(tenantData: TenantInput): Promise<Tenant> {
+    try {
+      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id);
+      
+      const tenant = {
+        id: tenantData.id,
+        localId: tenantData.id,
+        propertyId: tenantData.propertyId,
+        userId: tenantData.userId,
+        name: tenantData.name,
+        phone: tenantData.phone || '',
+        email: tenantData.email || '',
+        unitNumber: tenantData.unitNumber || '',
+        rentAmount: tenantData.rentAmount,
+        standingFees: tenantData.standingFees || 0,
+        depositAmount: tenantData.depositAmount || 0,
+        leaseStart: tenantData.leaseStart || null,
+        leaseEnd: tenantData.leaseEnd || null,
+        isActive: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+      
+      await setDoc(tenantRef, tenant);
+      
+      return tenant as Tenant;
+    } catch (error) {
+      console.error('Error creating tenant:', error);
+      throw new Error('Failed to create tenant. Please try again.');
+    }
+  }
+
+  /**
+   * Update an existing tenant
+   */
+  async updateTenant(userId: string, tenantId: string, updates: Partial<TenantInput>): Promise<void> {
+    try {
+      const tenantRef = doc(db, 'users', userId, 'tenants', tenantId);
+      
+      await updateDoc(tenantRef, {
+        ...updates,
+        updatedAt: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error updating tenant:', error);
+      throw new Error('Failed to update tenant. Please try again.');
+    }
+  }
+
+  /**
+   * Get all properties for an asset
+   */
+  async getPropertiesByAsset(userId: string): Promise<Property[]> {
+    try {
+      const propertiesRef = collection(db, 'users', userId, 'properties');
+      const snapshot = await getDocs(propertiesRef);
+      
+      return snapshot.docs.map(doc => doc.data() as Property);
+    } catch (error) {
+      console.error('Error fetching properties:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get all tenants for a property
+   */
+  async getTenantsByProperty(userId: string, propertyId: number): Promise<Tenant[]> {
+    try {
+      const tenantsRef = collection(db, 'users', userId, 'tenants');
+      const q = query(tenantsRef, where('propertyId', '==', propertyId));
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => doc.data() as Tenant);
+    } catch (error) {
+      console.error('Error fetching tenants:', error);
+      return [];
+    }
+  }
+
 
   /**
    * Get all assets managed by current cyber operator

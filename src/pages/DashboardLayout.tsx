@@ -646,7 +646,7 @@ const TerminalModal = ({
         id: invoiceDoc.id,
         tenantName: tenantData.name || `Tenant ${tenantLocalId}`,
         propertyName: propertyName,
-        agentUserId: asset.id
+        assetId: asset.id
       };
 
       setFoundInvoice(completeInvoice);

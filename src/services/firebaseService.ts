@@ -19,7 +19,7 @@ export interface Invoice {
   localId: number;
   tenantId: number;
   propertyId: number;
-  agentUserId: string;
+  assetId: string;
   billingMonth: string;
   rentAmount: number;
   waterCurrentReading: number;
@@ -124,7 +124,7 @@ export class PaymentService {
           invoiceId: data.invoice.id,
           billingMonth: data.invoice.billingMonth,
           arrears: fees.arrears,
-          agentId: data.invoice.agentUserId
+          agentId: data.invoice.assetId
         }
       });
 
