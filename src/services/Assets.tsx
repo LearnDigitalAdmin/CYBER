@@ -7,7 +7,9 @@ import {
   query, 
   where,
   Timestamp,
-  updateDoc} from 'firebase/firestore';
+  updateDoc,
+  orderBy,
+  limit} from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebaseService';
 import { argon2id } from 'hash-wasm';
@@ -202,21 +204,43 @@ class AssetsService {
     /**
    * Get next property ID using Firestore counter
    */
-  private async getNextPropertyId(_userId: string): Promise<number> {
-    const counterRef = doc(db, 'counters', 'properties');
-    const counterDoc = await getDoc(counterRef);
-    
-    let nextId = 111; // Starting ID
-    
-    if (counterDoc.exists()) {
-      nextId = counterDoc.data().lastId + 1;
-    }
-    
-    // Update counter
-    await setDoc(counterRef, { lastId: nextId }, { merge: true });
-    
-    return nextId;
+
+private async getNextPropertyId(userId: string): Promise<number> {
+  const propertiesRef = collection(db, "users", userId, "properties");
+  
+  // Query the last document by ID (assuming ID is numeric)
+  const q = query(propertiesRef, orderBy("id", "desc"), limit(1));
+  const querySnapshot = await getDocs(q);
+
+  let nextId = 111; // Starting ID if none exist
+
+  if (!querySnapshot.empty) {
+    const lastDoc = querySnapshot.docs[0];
+    const lastId = lastDoc.data().id;
+    nextId = (typeof lastId === "number" ? lastId : parseInt(lastId, 10)) + 1;
   }
+
+  return nextId;
+}
+
+public async getNextInvoiceId(userId: string): Promise<number> {
+  const propertiesRef = collection(db, "users", userId, "invoices");
+  
+  // Query the last document by ID (assuming ID is numeric)
+  const q = query(propertiesRef, orderBy("id", "desc"), limit(1));
+  const querySnapshot = await getDocs(q);
+
+  let nextId = 1111111; // Starting ID if none exist
+
+  if (!querySnapshot.empty) {
+    const lastDoc = querySnapshot.docs[0];
+    const lastId = lastDoc.data().id;
+    nextId = (typeof lastId === "number" ? lastId : parseInt(lastId, 10)) + 1;
+  }
+
+  return nextId;
+}
+
 
   /**
    * Create a new property for an asset
@@ -243,6 +267,8 @@ class AssetsService {
       };
       
       await setDoc(propertyRef, property);
+      
+      console.log('Property created successfully:', property);
       
       return property as Property;
     } catch (error) {

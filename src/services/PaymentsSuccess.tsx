@@ -7,8 +7,9 @@ import {
   collection 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, type Invoice} from './firebaseService';
+import { db, storage} from './firebaseService';
 import { generateInvoicePDF, type InvoiceWithDetails, type Property } from './PDF';
+import type { Invoice } from '../components/plotYangu/AddInvc';
 
 export interface Transaction {
   id: string;
@@ -143,7 +144,7 @@ export class PaymentSuccessHandler {
   /**
    * Generate PDF and upload to Firebase Storage
    */
-  private static async generateAndUploadInvoicePDF(
+  public static async generateAndUploadInvoicePDF(
     invoice: Invoice,
     property: Property,
     companyInfo: CompanyInfo,

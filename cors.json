@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://cyber.cogvana.co.ke",
+      "https://cogvana.co.ke",
+      "https://www.cogvana.co.ke"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "responseHeader": ["Content-Type", "x-goog-meta-*"],
+    "maxAgeSeconds": 3600
+  }
+]

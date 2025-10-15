@@ -62,9 +62,31 @@ const CyberTab = ({ }: { onOpenTerminal: (asset?: any) => void }) => {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const [, setBusinessName] = useState('');
+  const [, setSettlementBank] = useState<'mpesa' | 'airtel-ke'>('mpesa');
+  const [, setAccountNumber] = useState('');
+  const [, setEmail] = useState('');
+  const [, setName] = useState('');
+  const [, setPhone] = useState('');
+
+  
+
   // Subscribe to real-time updates
   useEffect(() => {
     if (!firestoreUser?.uid) return;
+    if (firestoreUser.paymentInfo) {
+          setBusinessName(firestoreUser.paymentInfo.businessName || '');
+          setSettlementBank(firestoreUser.paymentInfo.settlementBank as 'mpesa' | 'airtel-ke' || 'mpesa');
+          setAccountNumber(firestoreUser.paymentInfo.accountNumber || '');
+          setEmail(firestoreUser.paymentInfo.email || firestoreUser.email);
+          setName(firestoreUser.paymentInfo.name || firestoreUser.name);
+          setPhone(firestoreUser.paymentInfo.phone || firestoreUser.phone);
+        } else {
+          // Set defaults from agent data
+          setEmail(firestoreUser.email);
+          setName(firestoreUser.name);
+          setPhone(firestoreUser.phone);
+        }
 
     setLoading(true);
     setError('');
@@ -430,3 +452,5 @@ const CyberTab = ({ }: { onOpenTerminal: (asset?: any) => void }) => {
 };
 
 export default CyberTab;
+
+

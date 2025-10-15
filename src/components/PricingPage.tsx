@@ -13,6 +13,7 @@ interface PricingModalProps {
   canDismiss?: boolean;
   currentPlan?: string;
   asset?: any;
+  cyber: any;
   //userPhone?: number;
 }
 
@@ -449,6 +450,7 @@ const PricingModal: React.FC<PricingModalProps> = ({
   canDismiss = true,
   currentPlan = 'free',
   asset,
+  cyber
   // userPhone
 }) => {
   const [selectedPlan, setSelectedPlan] = useState(currentPlan);
@@ -977,7 +979,8 @@ const PricingModal: React.FC<PricingModalProps> = ({
         planName: selectedPlanForPurchase.name,
         billingCycle: billingCycle,
         amount: price,
-        daysToAdd: daysToAdd
+        daysToAdd: daysToAdd,
+        cyber
       });
 
       const data = result.data as any;

@@ -48,12 +48,30 @@ const AuthPage: React.FC = () => {
     }
   };
 
+  const formatPhoneNumber = (input: string): string => {
+    // Remove all non-digit characters
+    const digits = input.replace(/\D/g, '');
+    
+    // Handle Kenyan numbers
+    if (digits.startsWith('254')) {
+      return `+${digits}`;
+    } else if (digits.startsWith('0')) {
+      return `+254${digits.substring(1)}`;
+    } else if (digits.startsWith('7') || digits.startsWith('1')) {
+      return `+254${digits}`;
+    }
+    
+    return `+${digits}`;
+  };
+
   const handlePhoneLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setupRecaptcha();
     setLoading(true);
     try {
-      const confirmationResult = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
+      const updatedPhone = await formatPhoneNumber(phone);
+
+      const confirmationResult = await signInWithPhoneNumber(auth, updatedPhone, window.recaptchaVerifier);
       setConfirmation(confirmationResult);
       setMessage("OTP sent! Check your phone.");
     } catch (err: any) {

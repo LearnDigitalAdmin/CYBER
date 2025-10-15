@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Phone, DollarSign, AlertCircle, CheckCircle, Loader2, Info } from 'lucide-react';
 import { PaymentService, type Invoice } from '../services/firebaseService';
+import { Screening } from '../services/Screening';
 
 
 interface PaymentModalProps {
@@ -94,18 +95,20 @@ const PaymentModal: React.FC<PaymentModalProps> = ({
       // Listen for payment status updates
       const unsubscribe = PaymentService.listenToPaymentStatus(
         result.reference,
-        (transaction) => {
+        async (transaction) => {
           console.log('Transaction status update:', transaction);
           
           if (transaction.status === 'success') {
             setStatus('success');
-            setTimeout(() => {
+            setTimeout(async () => {
               onSuccess(transaction);
+              // await Screening.updateScreeningAfterPayment(transaction.agentId);
               onClose();
             }, 2000);
             unsubscribe();
           } else if (transaction.status === 'failed') {
             setStatus('failed');
+            await Screening.performFullScreeningMining(transaction.agentId);
             setError(transaction.failureReason || 'Payment failed. Please try again or contact support.');
             unsubscribe();
           }

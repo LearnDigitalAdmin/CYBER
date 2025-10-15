@@ -16,6 +16,7 @@ const firebaseConfig = {
 
 export interface Invoice {
   id: string | number;
+  userId?: string;
   localId: number;
   tenantId: number;
   propertyId: number;
