@@ -1382,6 +1382,7 @@ const PlotTab = ({ onOpenTerminal }: { onOpenTerminal: (asset: any) => void }) =
             }}
             asset={selectedAsset}
             onSuccess={loadData}
+            pId={firestoreUser.pId}
           />
 
           <AddTenantModal

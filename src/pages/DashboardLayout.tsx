@@ -550,7 +550,7 @@ const Dashboard = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPricingModal, setShowPricingModal] = useState(false);
-  const { firestoreUser } = useAuth(); 
+ // const { firestoreUser } = useAuth(); 
     const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('mobile_money');
     const [savingPaymentInfo, setSavingPaymentInfo] = useState(false);
 
@@ -575,6 +575,20 @@ const Dashboard = () => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [showPaymentSettings, setShowPaymentSettings] = useState(false);
+
+  const { firestoreUser, loading } = useAuth(); 
+  
+  // Don't render anything until user data is loaded
+  if (loading || !firestoreUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-black to-gray-800">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-500 mx-auto"></div>
+          <p className="mt-4 text-gray-400">Loading user profile...</p>
+        </div>
+      </div>
+    );
+  }
 
 
   const paymentModes = [

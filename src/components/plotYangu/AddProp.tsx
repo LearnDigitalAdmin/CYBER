@@ -23,13 +23,15 @@ interface AddPropertyModalProps {
   onClose: () => void;
   asset: Asset;
   onSuccess: () => void;
+  pId: string; // Pass pId as a prop
 }
 
 const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   isOpen,
   onClose,
   asset,
-  onSuccess
+  onSuccess,
+  pId
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -66,7 +68,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         throw new Error(`Maximum ${limits.properties} properties allowed for ${asset.tier} tier`);
       }
 
-      await assetsService.createProperty(formData);
+      await assetsService.createProperty(formData, pId);
       onSuccess();
       onClose();
       

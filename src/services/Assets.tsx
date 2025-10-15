@@ -246,7 +246,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
   /**
    * Create a new property for an asset
    */
-  async createProperty(propertyData: PropertyInput): Promise<Property> {
+  async createProperty(propertyData: PropertyInput, pId: string): Promise<Property> {
     try {
       const propertyId = await this.getNextPropertyId(propertyData.userId);
       
@@ -256,6 +256,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         id: propertyId,
         localId: propertyId,
         userId: propertyData.userId,
+        agentId: pId,
         companyId: propertyData.companyId || null,
         name: propertyData.name,
         address: propertyData.address || '',
