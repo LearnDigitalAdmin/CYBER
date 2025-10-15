@@ -9,7 +9,6 @@ import {
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, type Invoice} from './firebaseService';
 import { generateInvoicePDF, type InvoiceWithDetails, type Property } from './PDF';
-// import type { Property } from './Assets';
 
 export interface Transaction {
   id: string;
@@ -17,14 +16,20 @@ export interface Transaction {
   amount: number;
   arrears: number;
   status: 'success' | 'failed' | 'pending';
-  metadata: {
+  invoiceId: string;
+  userId: string;
+  userName: string;
+  billingMonth: string;
+  agentId: string;
+  createdAt: any;
+  // Keep metadata optional for backward compatibility
+  metadata?: {
     invoiceId: string;
     tenantId: number;
     userName: string;
     billingMonth: string;
     agentId: string;
   };
-  createdAt: any;
 }
 
 interface CompanyInfo {
@@ -49,8 +54,17 @@ export class PaymentSuccessHandler {
         throw new Error('Transaction is not successful');
       }
 
-      const { metadata, amount, arrears, reference } = transaction;
-      const { invoiceId, agentId, userName } = metadata;
+      // Extract data from transaction (supporting both direct properties and metadata object)
+      const amount = transaction.amount;
+      const arrears = transaction.arrears;
+      const reference = transaction.reference;
+      const invoiceId = transaction.metadata?.invoiceId || transaction.invoiceId;
+      const agentId = transaction.metadata?.agentId || transaction.agentId || transaction.userId;
+      const userName = transaction.metadata?.userName || transaction.userName;
+
+      if (!invoiceId || !agentId || !userName) {
+        throw new Error('Missing required transaction data');
+      }
 
       // 1. Fetch invoice and related data in parallel
       const [invoiceDoc, propertyData, agentData] = await Promise.all([
@@ -106,24 +120,7 @@ export class PaymentSuccessHandler {
       };
       batch.set(uploadRef, uploadData);
 
-      // 6. Optionally create a payment record for history
-    //   const paymentRef = doc(collection(db, 'users', agentId, 'payments'));
-    //   const paymentData = {
-    //     invoiceId: invoiceId,
-    //     tenantId: invoice.tenantId,
-    //     propertyId: invoice.propertyId,
-    //     amount: amount,
-    //     arrears: arrears,
-    //     paymentMethod: 'mpesa',
-    //     reference: reference,
-    //     status: 'completed',
-    //     pdfUrl: pdfUrl,
-    //     createdAt: serverTimestamp(),
-    //     processedBy: firestoreUserId
-    //   };
-    //   batch.set(paymentRef, paymentData);
-
-      // 7. Update tenant's last payment date
+      // 6. Update tenant's last payment date
       const tenantRef = doc(db, 'users', agentId, 'tenants', invoice.tenantId.toString());
       batch.update(tenantRef, {
         lastPaymentDate: serverTimestamp(),
@@ -131,7 +128,7 @@ export class PaymentSuccessHandler {
         updatedAt: serverTimestamp()
       });
 
-      // 8. Commit all changes atomically
+      // 7. Commit all changes atomically
       await batch.commit();
 
       console.log('Payment success handler completed successfully');
@@ -153,15 +150,6 @@ export class PaymentSuccessHandler {
     reference: string
   ): Promise<string> {
     try {
-      // Prepare invoice with full details
-    //   const invoiceWithDetails = {
-    //     ...invoice,
-    //     tenantName: invoice.tenantName || `Tenant ${invoice.tenantId}`,
-    //     propertyName: property.name,
-    //     tenantPhone: '', // Add if available
-    //     tenantEmail: '' // Add if available
-    //   };
-
       const invoiceWithDetails: InvoiceWithDetails = {
         ...invoice,
         tenantName: invoice.tenantName || `Tenant ${invoice.tenantId}`,
@@ -171,8 +159,8 @@ export class PaymentSuccessHandler {
         invoiceNumber: invoice.invoiceNumber,
         createdAt: invoice.createdAt,
         updatedAt: invoice.updatedAt,
-        id: invoice.id as number, // Cast the id value to number
-        };
+        id: invoice.id as number,
+      };
 
       // Generate PDF
       const pdfBytes = await generateInvoicePDF(
@@ -193,11 +181,11 @@ export class PaymentSuccessHandler {
       const metadata = {
         contentType: 'application/pdf',
         customMetadata: {
-            invoiceId: invoice.id as string,
-            tenantId: invoice.tenantId.toString(),
-            billingMonth: invoice.billingMonth,
-            reference: reference,
-            uploadedAt: new Date().toISOString()
+          invoiceId: invoice.id as string,
+          tenantId: invoice.tenantId.toString(),
+          billingMonth: invoice.billingMonth,
+          reference: reference,
+          uploadedAt: new Date().toISOString()
         }
       };
 
@@ -315,7 +303,7 @@ export class PaymentSuccessHandler {
   ): Promise<void> {
     try {
       const errorRef = doc(collection(db, 'payment_errors'));
-      await writeBatch(db).set(errorRef, {
+      const errorData = {
         error: {
           message: error.message,
           stack: error.stack,
@@ -325,70 +313,23 @@ export class PaymentSuccessHandler {
           id: transaction.id,
           reference: transaction.reference,
           amount: transaction.amount,
-          metadata: transaction.metadata
+          invoiceId: transaction.invoiceId,
+          agentId: transaction.agentId || transaction.userId,
+          userName: transaction.userName
         },
         processedBy: firestoreUserId,
         timestamp: serverTimestamp(),
         resolved: false
-      }).commit();
+      };
+      
+      const batch = writeBatch(db);
+      batch.set(errorRef, errorData);
+      await batch.commit();
     } catch (logError) {
       console.error('Failed to log error:', logError);
       // Fail silently - don't throw
     }
   }
-
-  /**
-   * Validate transaction data before processing
-   */
-//   private static validateTransaction(transaction: Transaction): void {
-//     if (!transaction.reference) {
-//       throw new Error('Transaction reference is required');
-//     }
-
-//     if (!transaction.amount || transaction.amount <= 0) {
-//       throw new Error('Invalid transaction amount');
-//     }
-
-//     if (!transaction.metadata?.invoiceId) {
-//       throw new Error('Invoice ID is required');
-//     }
-
-//     if (!transaction.metadata?.agentId) {
-//       throw new Error('Agent ID is required');
-//     }
-
-//     if (!transaction.metadata?.userName) {
-//       throw new Error('Tenant name is required');
-//     }
-//   }
-
-  /**
-   * Retry logic wrapper for critical operations
-   */
-//   private static async retryOperation<T>(
-//     operation: () => Promise<T>,
-//     maxRetries: number = 3,
-//     delayMs: number = 1000
-//   ): Promise<T> {
-//     let lastError: Error | null = null;
-
-//     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-//       try {
-//         return await operation();
-//       } catch (error: any) {
-//         lastError = error;
-//         console.warn(`Attempt ${attempt} failed:`, error.message);
-
-//         if (attempt < maxRetries) {
-//           await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
-//         }
-//       }
-//     }
-
-//     throw new Error(
-//       `Operation failed after ${maxRetries} attempts: ${lastError?.message}`
-//     );
-//   }
 }
 
 // Export convenience function
