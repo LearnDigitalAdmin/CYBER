@@ -11,6 +11,7 @@ import { db, storage } from '../services/firebaseService';
 
 import { toast } from 'react-toastify';
 import { uploadService, type UploadRequest } from '../services/Uploads';
+import ProductCarousel from './Services';
 
 interface CyberDetails {
   id: string;
@@ -21,6 +22,7 @@ interface CyberDetails {
   email?: string;
   shopEmail?: string;
   address?: string;
+  uid?: string;
 }
 
 interface UploadedFile {
@@ -46,8 +48,8 @@ const ALLOWED_FILE_TYPES = {
   'application/x-mspublisher': '.pub'
 };
 
-const MAX_SINGLE_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_BATCH_SIZE = 20 * 1024 * 1024; // 20MB
+const MAX_SINGLE_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_BATCH_SIZE = 20 * 1024 * 1024;
 
 const SERVICE_TYPES = [
   'Printing',
@@ -61,6 +63,7 @@ const SERVICE_TYPES = [
 ];
 
 const CACHE_KEY = 'cogvana_cyber_details';
+const CACHE_PID_KEY = 'cogvana_cyber_pid';
 
 const UploadsPage = () => {
   const [step, setStep] = useState<'cyber-id' | 'details' | 'upload' | 'success'>('cyber-id');
@@ -76,6 +79,7 @@ const UploadsPage = () => {
   const [uploading, setUploading] = useState(false);
   const [, setUploadComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const servicesRef = useRef<HTMLDivElement>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
@@ -156,9 +160,11 @@ const UploadsPage = () => {
         phone: data.phone || 'N/A',
         email: data.email,
         shopEmail: data.shopEmail,
-        address: data.address
+        address: data.address,
+        uid: data.uid
       };
       localStorage.setItem(CACHE_KEY, JSON.stringify(cyber));
+      localStorage.setItem(CACHE_PID_KEY, fullPId);
       setCyberDetails(cyber);
       setStep('details');
       toast.success(`Connected to ${getShortCyberName(cyber)}`);
@@ -320,6 +326,10 @@ const UploadsPage = () => {
       setUploadComplete(true);
       setStep('success');
       toast.success('Files uploaded successfully!');
+      
+      setTimeout(() => {
+        servicesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 500);
     } catch (error: any) {
       console.error('Error submitting upload:', error);
       toast.error(`Failed to submit: ${error.message}`);
@@ -520,7 +530,7 @@ const UploadsPage = () => {
                   <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: "spring", stiffness: 200 }} className="w-24 h-24 mx-auto bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/50">
                     <CheckCircle className="w-12 h-12 text-white" />
                   </motion.div>
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     <h2 className="text-4xl font-bold text-white">Upload Successful!</h2>
                     <p className="text-lg text-gray-400 max-w-md mx-auto">Your files have been uploaded to {cyberDetails?.shopName || cyberDetails?.name}. You will be contacted shortly.</p>
                   </div>
@@ -547,6 +557,13 @@ const UploadsPage = () => {
             </AnimatePresence>
           </div>
         </div>
+
+        {/* Services Catalog Section - Shows when cyber is found */}
+        {cyberDetails && (
+          <div ref={servicesRef} className="relative z-10 w-full">
+            <ProductCarousel cyber={cyberDetails} />
+          </div>
+        )}
 
         {/* Footer */}
         <footer className="relative z-10 text-center text-sm text-gray-500 px-4 py-6">
