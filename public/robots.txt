@@ -1,0 +1,40 @@
+# Robots.txt for Cogvana Cyber
+# https://cyber.cogvana.co.ke/robots.txt
+
+# Allow all crawlers
+User-agent: *
+Allow: /
+Allow: /explore
+Allow: /signin
+Allow: /signup
+
+# Disallow authenticated/private areas
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /settings
+Disallow: /admin
+Disallow: /api/
+
+# Disallow user-specific paths
+Disallow: /*?token=
+Disallow: /*?session=
+Disallow: /*?auth=
+
+# Special rules for good bots
+User-agent: Googlebot
+Allow: /
+Allow: /explore
+Allow: /signin
+Allow: /signup
+
+User-agent: Bingbot
+Allow: /
+Allow: /explore
+Allow: /signin
+Allow: /signup
+
+# Sitemap location
+Sitemap: https://cyber.cogvana.co.ke/sitemap.xml
+
+# Crawl delay (optional, adjust if needed)
+Crawl-delay: 1
