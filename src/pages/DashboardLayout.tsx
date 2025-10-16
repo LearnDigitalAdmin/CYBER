@@ -11,7 +11,9 @@ import {
   Banknote,
   CheckCircle,
   MessageCircle,
-  CreditCard} from 'lucide-react';
+  CreditCard,
+  Zap,
+  ArrowRight} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore';
@@ -23,6 +25,8 @@ import { toast } from 'react-toastify';
 import CyberTab from '../components/cyber/CyberTab';
 import { Paystack } from '../services/paystackService';
 import { Screening } from '../services/Screening';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebaseService';
 
 const incomeData = {
   today: {
@@ -215,6 +219,209 @@ const IncomeTab = () => {
   );
 };
 
+interface CyberPaymentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  service: string;
+  currentUser: any;
+}
+
+const CyberPaymentModal = ({ isOpen, onClose, service, currentUser }: CyberPaymentModalProps) => {
+  const [amount, setAmount] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleCharge = async () => {
+    if (!amount || !phone) {
+      setError('Please fill in all fields');
+      return;
+    }
+
+    if (parseFloat(amount) < 10) {
+      setError('Minimum amount is KES 10');
+      return;
+    }
+
+    if (!/^254\d{9}$/.test(phone)) {
+      setError('Phone number must be in format 254XXXXXXXXX');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const chargeCustomer = httpsCallable(functions, 'chargeCustomer');
+      const result = await chargeCustomer({
+        amount: parseFloat(amount),
+        phone: phone,
+        pId: currentUser.pId,
+        uid: currentUser.uid,
+        id: currentUser.id,
+        service: service
+      });
+
+      console.log('Charge result:', result.data);
+
+      setSuccess(true);
+      toast.success('Payment request sent! Check your phone.');
+      
+      // Close modal after 2 seconds
+      setTimeout(() => {
+        onClose();
+        setSuccess(false);
+        setAmount('');
+        setPhone('');
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('Charge error:', err);
+      setError(err.message || 'Failed to initiate payment. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl max-w-md w-full border border-gray-700 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Beautiful Header */}
+        <div className="relative bg-gradient-to-br from-violet-600 via-purple-600 to-indigo-700 p-6 pb-20">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDEwIEwgNDAgMTAgTSAxMCAwIEwgMTAgNDAgTSAwIDIwIEwgNDAgMjAgTSAyMCAwIEwgMjAgNDAgTSAwIDMwIEwgNDAgMzAgTSAzMCAwIEwgMzAgNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjA1IiBzdHJva2Utd2lkdGg9IjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-30"></div>
+          
+          <div className="relative flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                <Zap className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Quick Charge</h3>
+                <p className="text-violet-100 text-sm">{service}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              disabled={loading}
+              className="text-white/80 hover:text-white transition-colors disabled:opacity-50"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="relative mt-6 flex items-center gap-2 text-white/90 text-sm">
+            <Smartphone className="w-4 h-4" />
+            <span>M-Pesa Payment</span>
+          </div>
+        </div>
+
+        {/* Form Content */}
+        <div className="p-6 space-y-5 -mt-14 relative z-10">
+          {/* Amount Card */}
+          <div className="bg-gradient-to-br from-gray-700/50 to-gray-800/50 backdrop-blur-sm rounded-xl border border-gray-600/50 p-5 shadow-xl">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Amount (KES)
+            </label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg font-semibold">
+                KES
+              </span>
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => {
+                  setAmount(e.target.value);
+                  setError('');
+                }}
+                disabled={loading || success}
+                placeholder="0.00"
+                className="w-full pl-16 pr-4 py-4 bg-gray-900/50 border border-gray-600 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent text-white text-lg font-semibold placeholder-gray-500 disabled:opacity-50"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Minimum: KES 10</p>
+          </div>
+
+          {/* Phone Card */}
+          <div className="bg-gradient-to-br from-gray-700/50 to-gray-800/50 backdrop-blur-sm rounded-xl border border-gray-600/50 p-5 shadow-xl">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              M-Pesa Phone Number
+            </label>
+            <div className="relative">
+              <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setError('');
+                }}
+                disabled={loading || success}
+                placeholder="254712345678"
+                className="w-full pl-12 pr-4 py-4 bg-gray-900/50 border border-gray-600 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent text-white font-medium placeholder-gray-500 disabled:opacity-50"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Format: 254XXXXXXXXX</p>
+          </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30 flex items-start gap-3 animate-shake">
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-400">{error}</div>
+            </div>
+          )}
+
+          {/* Success Alert */}
+          {success && (
+            <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/30 flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-green-400">Payment request sent successfully!</div>
+            </div>
+          )}
+
+          {/* Charge Button */}
+          <button
+            onClick={handleCharge}
+            disabled={loading || success || !amount || !phone}
+            className="w-full py-4 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl hover:from-violet-500 hover:to-purple-500 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed transition-all font-bold text-lg shadow-lg shadow-violet-500/20 hover:shadow-violet-500/40 flex items-center justify-center gap-3 group"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-6 h-6 animate-spin" />
+                <span>Processing...</span>
+              </>
+            ) : success ? (
+              <>
+                <CheckCircle className="w-6 h-6" />
+                <span>Payment Sent!</span>
+              </>
+            ) : (
+              <>
+                <span>Charge Customer</span>
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </>
+            )}
+          </button>
+
+          {/* Info */}
+          <div className="text-center text-xs text-gray-400 pt-2">
+            Customer will receive M-Pesa prompt on their phone
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface TerminalModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -222,6 +429,7 @@ interface TerminalModalProps {
   currentUserId: string;
   onOpenPaymentModal: (invoice: Invoice) => void;
   onOpenPricingModal: (asset: any) => void;
+  currentUser: any;
 }
 
 const TerminalModal = ({ 
@@ -229,7 +437,8 @@ const TerminalModal = ({
   onClose, 
   asset, 
   onOpenPaymentModal,
-  onOpenPricingModal 
+  onOpenPricingModal,
+  currentUser
 }: TerminalModalProps) => {
   const [selectedOption, setSelectedOption] = useState('');
   const [tenantId, setTenantId] = useState('');
@@ -237,6 +446,7 @@ const TerminalModal = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [foundInvoice, setFoundInvoice] = useState<Invoice | null>(null);
+  const [showCyberPayment, setShowCyberPayment] = useState(false);
 
   if (!isOpen) return null;
 
@@ -266,7 +476,12 @@ const TerminalModal = ({
     try {
       // Get tenant from asset's tenants subcollection
       const tenantsRef = collection(db, 'users', asset.id, 'tenants');
-      const tenantQuery = query(tenantsRef, where('localId', 'in', [tenantId, parseInt(tenantId)]));
+      
+      // Try to query with both string and number formats
+      const tenantIdNum = parseInt(tenantId);
+      const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
+      
+      const tenantQuery = query(tenantsRef, where('localId', 'in', searchIds));
       const tenantSnapshot = await getDocs(tenantQuery);
 
       if (tenantSnapshot.empty) {
@@ -279,11 +494,17 @@ const TerminalModal = ({
       const tenantData = tenantDoc.data();
       const tenantLocalId = tenantData.localId || tenantData.id;
 
-      // Get latest unpaid invoice for this tenant
+      // Get latest unpaid invoice for this tenant - query with both formats
       const invoicesRef = collection(db, 'users', asset.id, 'invoices');
+      
+      // Convert tenantLocalId to both string and number for querying
+      const tenantIdString = String(tenantLocalId);
+      const tenantIdNumber = parseInt(tenantLocalId);
+      const queryIds = isNaN(tenantIdNumber) ? [tenantIdString] : [tenantIdString, tenantIdNumber];
+      
       const invoiceQuery = query(
         invoicesRef,
-        where('tenantId', '==', tenantLocalId),
+        where('tenantId', 'in', queryIds),
         where('isPaid', '==', false),
         orderBy('dueDate', 'desc'),
         limit(1)
@@ -337,6 +558,10 @@ const TerminalModal = ({
       onOpenPricingModal(asset);
     } else if (selectedOption === 'rent') {
       await findTenantAndInvoice();
+    } else if (!asset) {
+      // Cyber services - open payment modal
+      handleClose();
+      setShowCyberPayment(true);
     }
   };
 
@@ -348,198 +573,204 @@ const TerminalModal = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={handleClose}
-    >
+    <>
       <div
-        className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-gray-700 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        onClick={handleClose}
       >
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-bold text-white">Payment Terminal</h3>
-          <button
-            onClick={handleClose}
-            disabled={loading}
-            className="text-gray-400 hover:text-white transition-colors disabled:opacity-50"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {asset && (
-          <div className="mb-6 p-4 bg-cyan-500/10 rounded-lg border border-cyan-500/30">
-            <div className="text-sm text-gray-400">Selected Asset</div>
-            <div className="font-semibold text-white">{asset.name}</div>
-            <div className="text-sm text-gray-400">{asset.type === 'landlord' ? 'Landlord' : 'Agent'}</div>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-4 p-4 bg-red-500/10 rounded-lg border border-red-500/30 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-red-400">{error}</div>
-          </div>
-        )}
-
-        {step === 1 && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                Select Service
-              </label>
-              <select
-                value={selectedOption}
-                onChange={(e) => {
-                  setSelectedOption(e.target.value);
-                  setError('');
-                }}
-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
-              >
-                <option value="">Choose an option...</option>
-                {asset ? (
-                  <>
-                    <option value="rent">Rent Payment</option>
-                    <option value="renewal">Subscription Renewal</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="printing">Printing Service</option>
-                    <option value="scanning">Scanning Service</option>
-                    <option value="photocopying">Photocopying Service</option>
-                    <option value="binding">Binding Service</option>
-                    <option value="digital">Government Service</option>
-                    <option value="movies">Movie / Songs</option>
-                    <option value="other">Other Service</option>
-                  </>
-                )}
-              </select>
-            </div>
-
-            {selectedOption === 'rent' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">
-                  Tenant ID
-                </label>
-                <input
-                  type="text"
-                  value={tenantId}
-                  onChange={(e) => {
-                    setTenantId(e.target.value);
-                    setError('');
-                  }}
-                  placeholder="Enter tenant ID number"
-                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter the tenant's local ID number
-                </p>
-              </div>
-            )}
-
+        <div
+          className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-gray-700 max-h-[90vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-bold text-white">Payment Terminal</h3>
             <button
-              onClick={handleContinue}
-              disabled={!selectedOption || (selectedOption === 'rent' && !tenantId.trim()) || loading}
-              className="w-full py-3 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2"
+              onClick={handleClose}
+              disabled={loading}
+              className="text-gray-400 hover:text-white transition-colors disabled:opacity-50"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Searching...</span>
-                </>
-              ) : (
-                'Continue'
-              )}
+              <X className="w-5 h-5" />
             </button>
           </div>
-        )}
 
-        {step === 2 && foundInvoice && (
-          <div className="space-y-4">
-            <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/30 space-y-3">
-              <h4 className="font-semibold text-white">Invoice Found</h4>
-              
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Tenant:</span>
-                  <span className="text-white font-medium">{foundInvoice.tenantName}</span>
+          {asset && (
+            <div className="mb-6 p-4 bg-cyan-500/10 rounded-lg border border-cyan-500/30">
+              <div className="text-sm text-gray-400">Selected Asset</div>
+              <div className="font-semibold text-white">{asset.name}</div>
+              <div className="text-sm text-gray-400">{asset.type === 'landlord' ? 'Landlord' : 'Agent'}</div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 p-4 bg-red-500/10 rounded-lg border border-red-500/30 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-red-400">{error}</div>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">
+                  Select Service
+                </label>
+                <select
+                  value={selectedOption}
+                  onChange={(e) => {
+                    setSelectedOption(e.target.value);
+                    setError('');
+                  }}
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
+                >
+                  <option value="">Choose an option...</option>
+                  {asset ? (
+                    <>
+                      <option value="rent">Rent Payment</option>
+                      <option value="renewal">Subscription Renewal</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="printing">Printing Service</option>
+                      <option value="scanning">Scanning Service</option>
+                      <option value="photocopying">Photocopying Service</option>
+                      <option value="binding">Binding Service</option>
+                      <option value="digital">Government Service</option>
+                      <option value="movies">Movie / Songs</option>
+                      <option value="other">Other Service</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {selectedOption === 'rent' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Tenant ID
+                  </label>
+                  <input
+                    type="text"
+                    value={tenantId}
+                    onChange={(e) => {
+                      setTenantId(e.target.value);
+                      setError('');
+                    }}
+                    placeholder="Enter tenant ID number"
+                    className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Enter the tenant's local ID number
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Property:</span>
-                  <span className="text-white font-medium">{foundInvoice.propertyName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Billing Month:</span>
-                  <span className="text-white font-medium">{foundInvoice.billingMonth}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Due Date:</span>
-                  <span className="text-white font-medium">{foundInvoice.dueDate}</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-blue-500/30">
-                  <span className="text-gray-400">Total Amount:</span>
-                  <span className="text-white font-bold">
-                    KES {foundInvoice.totalAmount.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Amount Paid:</span>
-                  <span className="text-green-400 font-semibold">
-                    KES {foundInvoice.amountPaid.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between pb-2 border-b border-blue-500/30">
-                  <span className="text-gray-400">Outstanding:</span>
-                  <span className="text-red-400 font-bold">
-                    KES {(foundInvoice.totalAmount - foundInvoice.amountPaid).toLocaleString()}
-                  </span>
-                </div>
-                {foundInvoice.arrears > 0 && (
-                  <div className="flex justify-between text-orange-400">
-                    <span>Previous Arrears:</span>
-                    <span className="font-semibold">KES {foundInvoice.arrears.toLocaleString()}</span>
-                  </div>
+              )}
+
+              <button
+                onClick={handleContinue}
+                disabled={!selectedOption || (selectedOption === 'rent' && !tenantId.trim()) || loading}
+                className="w-full py-3 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors font-semibold shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Searching...</span>
+                  </>
+                ) : (
+                  'Continue'
                 )}
+              </button>
+            </div>
+          )}
+
+          {step === 2 && foundInvoice && (
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/30 space-y-3">
+                <h4 className="font-semibold text-white">Invoice Found</h4>
+                
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Tenant:</span>
+                    <span className="text-white font-medium">{foundInvoice.tenantName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Property:</span>
+                    <span className="text-white font-medium">{foundInvoice.propertyName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Billing Month:</span>
+                    <span className="text-white font-medium">{foundInvoice.billingMonth}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Due Date:</span>
+                    <span className="text-white font-medium">{foundInvoice.dueDate}</span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-blue-500/30">
+                    <span className="text-gray-400">Total Amount:</span>
+                    <span className="text-white font-bold">
+                      KES {foundInvoice.totalAmount.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Amount Paid:</span>
+                    <span className="text-green-400 font-semibold">
+                      KES {foundInvoice.amountPaid.toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pb-2 border-b border-blue-500/30">
+                    <span className="text-gray-400">Outstanding:</span>
+                    <span className="text-red-400 font-bold">
+                      KES {(foundInvoice.totalAmount - foundInvoice.amountPaid).toLocaleString()}
+                    </span>
+                  </div>
+                  {foundInvoice.arrears > 0 && (
+                    <div className="flex justify-between text-orange-400">
+                      <span>Previous Arrears:</span>
+                      <span className="font-semibold">KES {foundInvoice.arrears.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setStep(1)}
+                  className="py-3 bg-transparent border-2 border-gray-600 text-gray-400 rounded-lg hover:bg-gray-800 hover:text-white hover:border-gray-500 transition-all font-semibold"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handlePayNow}
+                  className="py-3 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 transition-colors font-semibold shadow-lg shadow-cyan-500/20"
+                >
+                  Pay Now
+                </button>
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setStep(1)}
-                className="py-3 bg-transparent border-2 border-gray-600 text-gray-400 rounded-lg hover:bg-gray-800 hover:text-white hover:border-gray-500 transition-all font-semibold"
-              >
-                Back
-              </button>
-              <button
-                onClick={handlePayNow}
-                className="py-3 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 transition-colors font-semibold shadow-lg shadow-cyan-500/20"
-              >
-                Pay Now
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Cyber Payment Modal */}
+      <CyberPaymentModal
+        isOpen={showCyberPayment}
+        onClose={() => setShowCyberPayment(false)}
+        service={selectedOption}
+        currentUser={currentUser}
+      />
+    </>
   );
 };
 
-// Helper function to get initials
 const getInitials = (name: string): string => {
   if (!name) return 'CO';
   
   const words = name.trim().split(/\s+/);
   
   if (words.length === 1) {
-    // Single word: take first two letters
     return words[0].substring(0, 2).toUpperCase();
   } else {
-    // Multiple words: take first letter of first two words
     return (words[0][0] + words[1][0]).toUpperCase();
   }
 };
 
-// Main Dashboard Component
 type PaymentMode = 'mobile_money' | 'bank' | 'paybill' | 'till';
 
 const Dashboard = () => {
@@ -550,21 +781,17 @@ const Dashboard = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPricingModal, setShowPricingModal] = useState(false);
- // const { firestoreUser } = useAuth(); 
-    const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('mobile_money');
-    const [savingPaymentInfo, setSavingPaymentInfo] = useState(false);
+  const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('mobile_money');
+  const [savingPaymentInfo, setSavingPaymentInfo] = useState(false);
 
-  // Bank Account State
   const [bankName, setBankName] = useState('');
   const [bankAccountNumber, setBankAccountNumber] = useState('');
   const [bankAccountName, setBankAccountName] = useState('');
   const [bankBranch, setBankBranch] = useState('');
 
-  // Paybill State
   const [paybillNumber, setPaybillNumber] = useState('');
   const [paybillAccountName, setPaybillAccountName] = useState('');
 
-  // Till State
   const [tillNumber, setTillNumber] = useState('');
   const [tillBusinessName, setTillBusinessName] = useState('');
 
@@ -578,7 +805,6 @@ const Dashboard = () => {
 
   const { firestoreUser, loading } = useAuth(); 
   
-  // Don't render anything until user data is loaded
   if (loading || !firestoreUser) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-black to-gray-800">
@@ -589,7 +815,6 @@ const Dashboard = () => {
       </div>
     );
   }
-
 
   const paymentModes = [
     {
@@ -629,7 +854,6 @@ const Dashboard = () => {
   const handleRequestSetup = () => {
     if (!firestoreUser) return;
 
-    // Validate based on selected mode
     let isValid = false;
 
     switch (selectedPaymentMode) {
@@ -650,7 +874,7 @@ const Dashboard = () => {
     }
 
     const message = generateWhatsAppMessage();
-    const whatsappNumber = '254791286165'; // Your WhatsApp number
+    const whatsappNumber = '254791286165';
     const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${message}`;
     
     window.open(whatsappUrl, '_blank');
@@ -717,12 +941,6 @@ const Dashboard = () => {
         userId: firestoreUser.uid,
         pId: firestoreUser.pId
       });
-
-      // Refresh agent data
-      // const updated = await Paystack.getAgent(firestoreUser.id);
-      // if (updated) {
-      //   //set(updated);
-      // }
       
       setShowPaymentSettings(false);
       alert('Payment account setup successfully!');
@@ -778,7 +996,6 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800">
-      {/* Header - Fixed and Transparent */}
       <header className="fixed top-0 left-0 right-0 bg-gray-900/30 backdrop-blur-md border-b border-gray-700/30 z-40">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-3">
           <div className="flex items-center justify-between">
@@ -788,7 +1005,7 @@ const Dashboard = () => {
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">Dashboard Overview</p>
             </div>
-            <div onClick={() => setShowPaymentSettings(!showPaymentSettings)} className="flex items-center gap-2 sm:gap-3">
+            <div onClick={() => setShowPaymentSettings(!showPaymentSettings)} className="flex items-center gap-2 sm:gap-3 cursor-pointer">
               <div className="text-right">
                 <div className="text-xs sm:text-sm font-medium text-white">
                   {firestoreUser?.pId || 'COG-0000-12345'}
@@ -805,7 +1022,6 @@ const Dashboard = () => {
         </div>
       </header>
 
-            {/* Tab Navigation - Fixed and Transparent */}
       <div className="bg-gray-900/30 backdrop-blur-md border-b border-gray-800/50 fixed top-[73px] sm:top-[81px] left-0 right-0 z-40">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <nav className="flex gap-1 overflow-x-auto scrollbar-hide">
@@ -828,15 +1044,12 @@ const Dashboard = () => {
         </div>
       </div>
 
-
-      {/* Main Content - With top padding to account for fixed headers */}
       <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-[120px] sm:pt-[128px] pb-24 sm:pb-8">
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'income' && <IncomeTab />}
       </main>
 
-      {/* FAB - Terminal Button */}
       <button
         onClick={() => handleOpenTerminal(null)}
         className="fixed bottom-6 right-6 w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-full shadow-2xl shadow-cyan-500/50 hover:shadow-cyan-500/70 hover:scale-110 transition-all duration-300 flex items-center justify-center z-40 group"
@@ -846,12 +1059,13 @@ const Dashboard = () => {
       </button>
 
       {showPaymentSettings && (
-          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 mb-6 sm:mb-8">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowPaymentSettings(false)}>
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg sm:text-xl font-bold text-gray-900">Payment Account Settings</h2>
               <button
                 onClick={() => setShowPaymentSettings(false)}
-                className="sm:hidden text-gray-500 hover:text-gray-700"
+                className="text-gray-500 hover:text-gray-700"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -883,7 +1097,6 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* Payment Mode Selection */}
             <div className="mb-6">
               <h3 className="text-base font-semibold text-gray-900 mb-4">Select Payment Method</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -915,7 +1128,6 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Mobile Money Form */}
             {selectedPaymentMode === 'mobile_money' && (
               <form onSubmit={handleSavePaymentInfo} className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -1035,7 +1247,6 @@ const Dashboard = () => {
               </form>
             )}
 
-            {/* Bank Account Form */}
             {selectedPaymentMode === 'bank' && (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -1116,7 +1327,6 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* Paybill Form */}
             {selectedPaymentMode === 'paybill' && (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -1173,7 +1383,6 @@ const Dashboard = () => {
               </div>
             )}
 
-            {/* Till Number Form */}
             {selectedPaymentMode === 'till' && (
               <div className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
@@ -1230,9 +1439,9 @@ const Dashboard = () => {
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-      {/* Terminal Modal */}
       <TerminalModal
         isOpen={showTerminal}
         onClose={() => {
@@ -1243,6 +1452,7 @@ const Dashboard = () => {
         currentUserId={firestoreUser.id}
         onOpenPaymentModal={handleOpenPaymentModal}
         onOpenPricingModal={handleOpenPricingModal}
+        currentUser={firestoreUser}
       />
 
       {showPaymentModal && selectedInvoice && (
@@ -1257,15 +1467,14 @@ const Dashboard = () => {
       )}
 
       {showPricingModal && selectedAsset && (
-      <PricingModal
-        isOpen={showPricingModal}
-        onClose={handlePricingModalClose}
-        canDismiss={true} // Can dismiss from profile page
-        currentPlan={selectedAsset?.tier || 'free'}
-        asset={selectedAsset}
-        cyber={firestoreUser}
-        //userPhone={selectedAsset?.phone}
-      />
+        <PricingModal
+          isOpen={showPricingModal}
+          onClose={handlePricingModalClose}
+          canDismiss={true}
+          currentPlan={selectedAsset?.tier || 'free'}
+          asset={selectedAsset}
+          cyber={firestoreUser}
+        />
       )}
     </div>
   );
