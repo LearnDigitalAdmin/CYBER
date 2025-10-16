@@ -24,6 +24,8 @@ const TerminalModal = ({
   currentUser
 }: TerminalModalProps) => {
   const [selectedOption, setSelectedOption] = useState('');
+  const [selectedCyberOption, setSelectedCyberOption] = useState('');
+
   const [tenantId, setTenantId] = useState('');
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -335,7 +337,7 @@ const TerminalModal = ({
       <CyberPaymentModal
         isOpen={showCyberPayment}
         onClose={() => setShowCyberPayment(false)}
-        service={selectedOption}
+        service={selectedCyberOption}
         currentUser={currentUser}
       />
     </>
