@@ -289,22 +289,41 @@ const Dashboard = () => {
         </div>
       </header>
 
+      {/* Fixed Tabs Navigation */}
       <div className="bg-gray-900/30 backdrop-blur-md border-b border-gray-800/50 fixed top-[73px] sm:top-[81px] left-0 right-0 z-40">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <nav className="flex gap-1 overflow-x-auto scrollbar-hide">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
+          {/* Mobile: Full width distribution */}
+          <nav className="flex sm:hidden">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 sm:px-6 py-3 sm:py-4 font-medium text-xs sm:text-sm whitespace-nowrap transition-all border-b-2 ${
+                className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 font-medium text-xs transition-all border-b-2 ${
+                  activeTab === tab.id
+                    ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10'
+                    : 'border-transparent text-gray-400'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label.split(' ')[0]}</span>
+              </button>
+            ))}
+          </nav>
+
+          {/* Desktop: Centered with proper spacing */}
+          <nav className="hidden sm:flex justify-center gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-8 py-4 font-medium text-sm transition-all border-b-2 ${
                   activeTab === tab.id
                     ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10'
                     : 'border-transparent text-gray-400 hover:text-white hover:bg-gray-800/50'
                 }`}
               >
                 {tab.icon}
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
+                <span>{tab.label}</span>
               </button>
             ))}
           </nav>
@@ -720,6 +739,7 @@ const Dashboard = () => {
         onOpenPaymentModal={handleOpenPaymentModal}
         onOpenPricingModal={handleOpenPricingModal}
         currentUser={firestoreUser}
+        currentTab={activeTab}
       />
 
       {showPaymentModal && selectedInvoice && (
