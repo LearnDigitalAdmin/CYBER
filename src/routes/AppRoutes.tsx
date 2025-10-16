@@ -99,6 +99,7 @@ import SignupPage from "../pages/SignupPage";
 import Dashboard from "../pages/DashboardLayout";
 import { useAuth } from "../context/authContext";
 import UploadsPage from "../pages/Uploads";
+import AddServices from "../pages/AddServices";
 
 /**
  * AppRoutes:
@@ -142,6 +143,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/signin" element={<AuthPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/upload" element={<UploadsPage />} />
+        <Route path="/services" element={<AddServices />} />
         {/* <Route path="/terms" element={<TermsPage />} />
         <Route path="/contact" element={<ContactPage />} /> */}
 

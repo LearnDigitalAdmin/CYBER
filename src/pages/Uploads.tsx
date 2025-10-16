@@ -22,7 +22,7 @@ interface CyberDetails {
   email?: string;
   shopEmail?: string;
   address?: string;
-  uid?: string;
+  uid: string;
 }
 
 interface UploadedFile {
@@ -153,7 +153,7 @@ const UploadsPage = () => {
       const cyberDoc = snapshot.docs[0];
       const data = cyberDoc.data();
       const cyber: CyberDetails = {
-        id: cyberDoc.id,
+        id: data.id,
         pId: data.pId,
         name: data.name || 'N/A',
         shopName: data.shopName,

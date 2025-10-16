@@ -39,6 +39,7 @@ export interface Asset {
   name: string;
   email: string;
   phone: string;
+  paymentInfo: any;
   type: 'landlord' | 'agent';
   tier: 'solo' | 'pro';
   cyberId: string;
@@ -424,6 +425,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
           email: data.email,
           phone: data.phone,
           type: data.assetType,
+          paymentInfo: data.paymentInfo,
           tier: data.tier,
           cyberId: data.cyberId,
           company: data.company,
@@ -501,6 +503,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         name: data.name,
         email: data.email,
         phone: data.phone,
+        paymentInfo: data.paymentInfo,
         type: data.assetType,
         tier: data.tier,
         cyberId: data.cyberId,

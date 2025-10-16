@@ -43,7 +43,7 @@ export class Paystack{
     name: string;
     phone: string;
     userId: string;
-    pId: string;
+    pId: string | null;
   }): Promise<void> {
     try {
       const setupAccount = httpsCallable(functions, 'setupAccount');
