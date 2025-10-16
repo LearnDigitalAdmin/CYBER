@@ -9,7 +9,7 @@ import {
   deleteDoc,
   serverTimestamp,
   Timestamp,
-  getDocs
+  QueryConstraint
 } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { db, storage } from './firebaseService';
@@ -18,10 +18,10 @@ export interface Upload {
   id: string;
   name: string;
   phone: string;
-  type: string; // service type
+  type: string;
   time: string;
   status: 'pending' | 'completed';
-  files: string[]; // array of file URLs
+  files: string[];
   date: Timestamp;
   createdAt: Timestamp;
   amount?: number;
@@ -49,9 +49,188 @@ export interface DailyData {
   services: ServiceSummary[];
 }
 
+export interface IncomeRecord {
+  reference: string;
+  pId: string;
+  service: string;
+  grossAmount: number;
+  paystackFees: number;
+  netAfterPaystack: number;
+  platformCommission: number;
+  agentNetIncome: number;
+  commissionRate: number;
+  currency: string;
+  status: string;
+  type: string;
+  phone?: string;
+  createdAt: Timestamp;
+  paidAt: Timestamp;
+  splitCode?: string;
+  accountReference?: string;
+}
+
+export interface PlotIncomeRecord {
+  reference: string;
+  userId: string;
+  userName: string;
+  planId: string;
+  planName: string;
+  grossAmount: number;
+  netAmount: number;
+  agentCommission: number;
+  platformRevenue: number;
+  paystackFees: number;
+  commissionRate: number;
+  currency: string;
+  status: string;
+  type: string;
+  createdAt: Timestamp;
+  paidAt: Timestamp;
+  expiryDate: Timestamp;
+  splitCode?: string;
+}
+
+export interface IncomeData {
+  cyberIncome: number;
+  plotIncome: number;
+  totalIncome: number;
+  cyberCount: number;
+  plotCount: number;
+  records: {
+    cyber: IncomeRecord[];
+    plot: PlotIncomeRecord[];
+  };
+}
+
 class CyberService {
   private cache: Map<string, DailyData> = new Map();
   private listeners: Map<string, () => void> = new Map();
+  private incomeCache: Map<string, IncomeData> = new Map();
+  private incomeListeners: Map<string, () => void> = new Map();
+
+  /**
+   * Subscribe to income data (cyber-income and plot-income)
+   */
+  subscribeToIncomeData(
+    agentId: string,
+    period: 'today' | 'week' | 'month',
+    onUpdate: (data: IncomeData) => void,
+    onError?: (error: Error) => void
+  ): () => void {
+    const cacheKey = `${agentId}_${period}`;
+    const date = new Date();
+    const { startDate, endDate } = this.getDateRange(date, period);
+
+    // Check cache first
+    const cached = this.incomeCache.get(cacheKey);
+    if (cached) {
+      onUpdate(cached);
+    }
+
+    // Unsubscribe from previous listener if exists
+    const existingUnsubscribe = this.incomeListeners.get(cacheKey);
+    if (existingUnsubscribe) {
+      existingUnsubscribe();
+    }
+
+    // Subscribe to cyber-income
+    const cyberRef = collection(db, 'agents', agentId, 'cyber-income');
+    const cyberConstraints: QueryConstraint[] = [
+      where('status', '==', 'success'),
+      orderBy('paidAt', 'desc')
+    ];
+    
+    const cyberQuery = query(cyberRef, ...cyberConstraints);
+
+    const unsubscribeCyber = onSnapshot(
+      cyberQuery,
+      (cyberSnapshot) => {
+        // Subscribe to plot-income
+        const plotRef = collection(db, 'agents', agentId, 'plot-income');
+        const plotConstraints: QueryConstraint[] = [
+          where('status', '==', 'success'),
+          orderBy('paidAt', 'desc')
+        ];
+        
+        const plotQuery = query(plotRef, ...plotConstraints);
+
+        const unsubscribePlot = onSnapshot(
+          plotQuery,
+          (plotSnapshot) => {
+            try {
+              const cyberRecords: IncomeRecord[] = [];
+              const plotRecords: PlotIncomeRecord[] = [];
+
+              // Filter cyber records by date range
+              cyberSnapshot.forEach((doc) => {
+                const data = doc.data() as IncomeRecord;
+                const paidDate = data.paidAt?.toDate() || new Date();
+                if (paidDate >= startDate && paidDate <= endDate) {
+                  cyberRecords.push({
+                    ...data,
+                    reference: doc.id
+                  });
+                }
+              });
+
+              // Filter plot records by date range
+              plotSnapshot.forEach((doc) => {
+                const data = doc.data() as PlotIncomeRecord;
+                const paidDate = data.paidAt?.toDate() || new Date();
+                if (paidDate >= startDate && paidDate <= endDate) {
+                  plotRecords.push({
+                    ...data,
+                    reference: doc.id
+                  });
+                }
+              });
+
+              // Calculate totals
+              const cyberIncome = cyberRecords.reduce((sum, r) => sum + (r.agentNetIncome || 0), 0);
+              const plotIncome = plotRecords.reduce((sum, r) => sum + (r.agentCommission || 0), 0);
+              const totalIncome = cyberIncome + plotIncome;
+
+              const incomeData: IncomeData = {
+                cyberIncome,
+                plotIncome,
+                totalIncome,
+                cyberCount: cyberRecords.length,
+                plotCount: plotRecords.length,
+                records: {
+                  cyber: cyberRecords,
+                  plot: plotRecords
+                }
+              };
+
+              this.incomeCache.set(cacheKey, incomeData);
+              onUpdate(incomeData);
+            } catch (error: any) {
+              console.error('Error processing income data:', error);
+              onError?.(error);
+            }
+          },
+          (error) => {
+            console.error('Error in plot-income listener:', error);
+            onError?.(error);
+          }
+        );
+
+        // Store unsubscribe function
+        this.incomeListeners.set(cacheKey, unsubscribePlot);
+      },
+      (error) => {
+        console.error('Error in cyber-income listener:', error);
+        onError?.(error);
+      }
+    );
+
+    return () => {
+      unsubscribeCyber();
+      const unsubscribePlot = this.incomeListeners.get(cacheKey);
+      if (unsubscribePlot) unsubscribePlot();
+      this.incomeListeners.delete(cacheKey);
+    };
+  }
 
   /**
    * Get uploads for a specific date with real-time updates
@@ -65,13 +244,11 @@ class CyberService {
     const dateKey = this.getDateKey(date);
     const cacheKey = `${agentId}_${dateKey}`;
 
-    // Check cache first
     const cached = this.cache.get(cacheKey);
     if (cached) {
       onUpdate(cached);
     }
 
-    // Set up real-time listener
     const uploadsRef = collection(db, 'agents', agentId, 'uploads');
     const startOfDay = this.getStartOfDay(date);
     const endOfDay = this.getEndOfDay(date);
@@ -96,14 +273,12 @@ class CyberService {
           } as Upload);
         });
 
-        // Sort by time (most recent first)
         uploads.sort((a, b) => {
           const timeA = this.parseTime(a.time);
           const timeB = this.parseTime(b.time);
           return timeB - timeA;
         });
 
-        // Calculate stats
         const stats = this.calculateStats(uploads);
         const services = this.calculateServiceSummary(uploads);
 
@@ -114,10 +289,7 @@ class CyberService {
           services
         };
 
-        // Update cache
         this.cache.set(cacheKey, dailyData);
-
-        // Notify subscriber
         onUpdate(dailyData);
       },
       (error) => {
@@ -126,9 +298,7 @@ class CyberService {
       }
     );
 
-    // Store unsubscribe function
     this.listeners.set(cacheKey, unsubscribe);
-
     return unsubscribe;
   }
 
@@ -141,12 +311,10 @@ class CyberService {
     files: string[]
   ): Promise<void> {
     try {
-      // Download all files
       for (const fileUrl of files) {
         await this.downloadFile(fileUrl);
       }
 
-      // Update status to completed
       const uploadRef = doc(db, 'agents', agentId, 'uploads', uploadId);
       await updateDoc(uploadRef, {
         status: 'completed',
@@ -170,20 +338,17 @@ class CyberService {
     files: string[]
   ): Promise<void> {
     try {
-      // Delete files from storage
       const deletePromises = files.map(async (fileUrl) => {
         try {
           const fileRef = ref(storage, fileUrl);
           await deleteObject(fileRef);
         } catch (error) {
           console.warn('Failed to delete file from storage:', fileUrl, error);
-          // Continue even if file deletion fails
         }
       });
 
       await Promise.all(deletePromises);
 
-      // Delete upload document
       const uploadRef = doc(db, 'agents', agentId, 'uploads', uploadId);
       await deleteDoc(uploadRef);
 
@@ -195,51 +360,7 @@ class CyberService {
   }
 
   /**
-   * Get income data for cyber services
-   */
-  async getCyberIncome(agentId: string, period: 'today' | 'week' | 'month'): Promise<number> {
-    try {
-      const incomeRef = collection(db, 'agents', agentId, 'cyber-income');
-      const date = new Date();
-      let startDate: Date;
-
-      switch (period) {
-        case 'today':
-          startDate = this.getStartOfDay(date);
-          break;
-        case 'week':
-          startDate = new Date(date);
-          startDate.setDate(date.getDate() - 7);
-          break;
-        case 'month':
-          startDate = new Date(date);
-          startDate.setMonth(date.getMonth() - 1);
-          break;
-      }
-
-      const q = query(
-        incomeRef,
-        where('date', '>=', Timestamp.fromDate(startDate)),
-        where('date', '<=', Timestamp.fromDate(new Date()))
-      );
-
-      const snapshot = await getDocs(q);
-      let total = 0;
-
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        total += data.amount || 0;
-      });
-
-      return total;
-    } catch (error) {
-      console.error('Error fetching cyber income:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Clear cache for a specific date
+   * Clear cache
    */
   clearCache(agentId: string, date?: Date): void {
     if (date) {
@@ -247,9 +368,21 @@ class CyberService {
       const cacheKey = `${agentId}_${dateKey}`;
       this.cache.delete(cacheKey);
     } else {
-      // Clear all cache for this agent
       const keys = Array.from(this.cache.keys()).filter(key => key.startsWith(agentId));
       keys.forEach(key => this.cache.delete(key));
+    }
+  }
+
+  /**
+   * Clear income cache
+   */
+  clearIncomeCache(agentId: string, period?: 'today' | 'week' | 'month'): void {
+    if (period) {
+      const cacheKey = `${agentId}_${period}`;
+      this.incomeCache.delete(cacheKey);
+    } else {
+      const keys = Array.from(this.incomeCache.keys()).filter(key => key.startsWith(agentId));
+      keys.forEach(key => this.incomeCache.delete(key));
     }
   }
 
@@ -259,6 +392,8 @@ class CyberService {
   unsubscribeAll(): void {
     this.listeners.forEach(unsubscribe => unsubscribe());
     this.listeners.clear();
+    this.incomeListeners.forEach(unsubscribe => unsubscribe());
+    this.incomeListeners.clear();
   }
 
   // Helper methods
@@ -278,8 +413,30 @@ class CyberService {
     return end;
   }
 
+  private getDateRange(date: Date, period: 'today' | 'week' | 'month'): { startDate: Date; endDate: Date } {
+    const endDate = this.getEndOfDay(new Date());
+    let startDate: Date;
+
+    switch (period) {
+      case 'today':
+        startDate = this.getStartOfDay(new Date());
+        break;
+      case 'week':
+        startDate = new Date();
+        startDate.setDate(date.getDate() - 7);
+        startDate = this.getStartOfDay(startDate);
+        break;
+      case 'month':
+        startDate = new Date();
+        startDate.setMonth(date.getMonth() - 1);
+        startDate = this.getStartOfDay(startDate);
+        break;
+    }
+
+    return { startDate, endDate };
+  }
+
   private parseTime(timeStr: string): number {
-    // Parse time string like "09:15 AM" to timestamp
     const [time, period] = timeStr.split(' ');
     const [hours, minutes] = time.split(':').map(Number);
     
@@ -327,12 +484,10 @@ class CyberService {
       const response = await fetch(fileUrl);
       const blob = await response.blob();
       
-      // Extract filename from URL
       const urlParts = fileUrl.split('/');
       const fileNameWithQuery = urlParts[urlParts.length - 1];
       const fileName = fileNameWithQuery.split('?')[0].split('%2F').pop() || 'download.pdf';
       
-      // Create download link
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -348,5 +503,4 @@ class CyberService {
   }
 }
 
-// Export singleton instance
 export const cyberService = new CyberService();

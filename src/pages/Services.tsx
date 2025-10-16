@@ -163,9 +163,11 @@ const ProductCarousel: React.FC<ProductCarouselProps> = ({ cyber }) => {
 
       console.log('Charge result:', result.data);
 
+      const paymentRef = result.data?.data?.reference;
+
       // Set the reference to listen for status updates
-      if (result.data?.reference) {
-        setPaymentReference(result.data.reference);
+      if (paymentRef) {
+        setPaymentReference(paymentRef);
         toast.info('Payment request sent! Please enter your M-PESA PIN on your phone.');
       } else {
         throw new Error('No payment reference received');

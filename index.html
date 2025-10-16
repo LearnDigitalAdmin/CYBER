@@ -1,22 +1,67 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
+    <!-- Basic Meta -->
     <meta charset="UTF-8" />
-    <!-- Favicon and Icons -->
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <!-- <link rel="manifest" href="/site.webmanifest"> -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#10b981">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Cogvana Cyber | Digital Workspace for Cybers & Freelancers</title>
+    <meta name="description" content="Cogvana Cyber empowers cybercafés and freelancers with tools to manage uploads, payments, and Plot Yangu property clients — all in one secure digital workspace." />
+    <meta name="keywords" content="cyber cafe system, freelancers Kenya, plot yangu, online jobs Kenya, rent payment, paystack STK push, digital workspace, cogvana" />
+    <meta name="author" content="Cogvana Technologies" />
+    <meta name="robots" content="index, follow" />
 
+    <!-- Open Graph / Social Media -->
+    <meta property="og:title" content="Cogvana Cyber | Digital Workspace for Cybers & Freelancers" />
+    <meta property="og:description" content="Earn more with Cogvana Cyber — manage uploads, payments, and Plot Yangu rent systems from one simple dashboard." />
+    <meta property="og:image" content="/screenshots/og-preview.png" />
+    <meta property="og:url" content="https://cyber.cogvana.com" />
+    <meta property="og:type" content="website" />
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CYBER by Cogvana</title>
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Cogvana Cyber | Digital Workspace for Cybers & Freelancers" />
+    <meta name="twitter:description" content="Simplify cyber operations, rent payments, and client management with Cogvana Cyber." />
+    <meta name="twitter:image" content="/screenshots/og-preview.png" />
+
+    <!-- PWA & Icons -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" sizes="196x196" href="/icons/favicon-196.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-icon-180.png" />
+    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#4f46e5" />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Cogvana Cyber" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Structured Data (Google Rich Results) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Cogvana Cyber",
+        "operatingSystem": "Web",
+        "applicationCategory": "BusinessApplication",
+        "description": "Cogvana Cyber enables cybercafés and freelancers to manage clients, payments, and property systems with ease.",
+        "url": "https://cyber.cogvana.com",
+        "publisher": {
+          "@type": "Organization",
+          "name": "Cogvana Technologies",
+          "url": "https://cogvana.com"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0.00",
+          "priceCurrency": "KES"
+        }
+      }
+    </script>
   </head>
-  <body>
+
+  <body class="antialiased bg-white text-gray-900">
     <div id="root"></div>
+    <noscript>You need to enable JavaScript to run Cogvana Cyber.</noscript>
+
+    <!-- Entry Script -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

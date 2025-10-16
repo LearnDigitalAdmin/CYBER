@@ -94,12 +94,12 @@ const SignupPage: React.FC = () => {
         pId: nextPID,
         coords,
         uploads: { idUrl, kraUrl, shopUrl },
-        isVerified: false,
+        isVerified: true,
         createdAt: new Date().toISOString(),
       };
 
       await setDoc(doc(db, "agents", user.uid), data);
-      window.location.href = "/verify";
+      window.location.href = "/dashboard";
     } catch (err: any) {
       setMsg(err.message);
     } finally {

@@ -1,0 +1,104 @@
+{
+  "name": "Cogvana Cyber Platform",
+  "short_name": "Cyber",
+  "description": "Cogvana Cyber is a digital workspace for modern cybers and freelancers — enabling secure uploads, instant payments, and smart business tools. Seamlessly manage client uploads, handle rent payments via Plot Yangu, and grow your income with ease.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/manifest-icon-192.maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/manifest-icon-192.maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/manifest-icon-512.maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/manifest-icon-512.maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/mobile-1.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile view of Cogvana Cyber dashboard"
+    },
+    {
+      "src": "/screenshots/desktop-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Desktop interface for uploads and analytics"
+    }
+  ],
+  "categories": [
+    "business",
+    "finance",
+    "productivity",
+    "utilities"
+  ],
+  "shortcuts": [
+    {
+      "name": "Pay Rent or Invoice",
+      "short_name": "Pay",
+      "description": "Pay rent, invoices, or service fees instantly via STK Push.",
+      "url": "/dashboard",
+      "icons": [
+        {
+          "src": "/icons/pay-icon.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Cyber Dashboard",
+      "short_name": "Dashboard",
+      "description": "Access your dashboard for uploads, analytics, and payments.",
+      "url": "/dashboard",
+      "icons": [
+        {
+          "src": "/icons/dashboard-icon.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Manage Plot Yangu Clients",
+      "short_name": "PlotYangu",
+      "description": "View and manage landlords, tenants, and payment records.",
+      "url": "/dashboard",
+      "icons": [
+        {
+          "src": "/icons/plotyangu-icon.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "lang": "en",
+  "dir": "ltr"
+}

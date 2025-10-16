@@ -863,7 +863,7 @@ const PlotTab = ({ onOpenTerminal }: { onOpenTerminal: (asset: any) => void }) =
         <StatCard
           icon={<DollarSign className="w-5 h-5" />}
           label="Monthly Revenue"
-          value={`KES ${stats.monthlyRevenue.toLocaleString()}`}
+          value={`KES ${firestoreUser.totalIncome.toLocaleString()}`}
           trend="+23%"
           color="violet"
         />
