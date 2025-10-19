@@ -12,7 +12,6 @@ import {
   limit} from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebaseService';
-import { argon2id } from 'hash-wasm';
 
 export interface CompanyInfo {
   name: string;
@@ -119,89 +118,125 @@ class AssetsService {
    * Hash password using argon2
    */
 
-  private async hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const result = await argon2id({
-    password: password,
-    salt: salt,
-    hashLength: 32,
-    iterations: 3,
-    memorySize: 65536, // 64 MB in KB
-    parallelism: 1,
-    outputType: 'encoded'
-  });
-  return result;
-}
+//   private async hashPassword(password: string): Promise<string> {
+//   const salt = crypto.getRandomValues(new Uint8Array(16));
+//   const result = await argon2id({
+//     password: password,
+//     salt: salt,
+//     hashLength: 32,
+//     iterations: 3,
+//     memorySize: 65536, // 64 MB in KB
+//     parallelism: 1,
+//     outputType: 'encoded'
+//   });
+//   return result;
+// }
 
   /**
    * Create a new landlord or agent
    */
-  async createAsset(formData: AssetFormData, currentUserPId: string): Promise<void> {
-    try {
-      // Hash the password
-      const passwordHash = await this.hashPassword(formData.password);
-
-      // Prepare Firebase Auth data
-      const createUserWithFirebaseAuth = httpsCallable(functions, 'createUserWithFirebaseAuth');
-      
-      const firebaseAuthData = {
-        email: formData.email,
-        password: formData.password,
-        userData: {
-          localId: formData.id,
-          name: formData.name,
-          phone: formData.phone,
-          tier: formData.type === 'landlord' ? 'solo' : 'pro',
-          type: 'paid',
-          storage: true,
-          isPremium: true,
-          company: formData.type === 'agent' && formData.companyName ? {
-            name: formData.companyName,
-            address: formData.companyAddress || '',
-            phone: formData.companyPhone || '',
-            email: formData.companyEmail || ''
-          } : null
-        }
-      };
-
-      // Create user in Firebase Auth via Cloud Function
-      await createUserWithFirebaseAuth(firebaseAuthData);
-
-      // Create user document in Firestore
-      const userDocRef = doc(this.usersCollection, formData.id);
-      const userData: any = {
-        id: formData.id,
+  // In Assets.tsx - Agent creating user with CUSTOM UID
+async createAsset(formData: AssetFormData, currentUserPId: string): Promise<void> {
+  try {
+    const createUserWithFirebaseAuth = httpsCallable(functions, 'createUserWithFirebaseAuth');
+    
+    const userData = {
+      email: formData.email,
+      password: formData.password,
+      userData: {
+        localId: formData.id, // ✅ Custom UID = National ID
         name: formData.name,
-        email: formData.email,
         phone: formData.phone,
-        passwordHash,
         tier: formData.type === 'landlord' ? 'solo' : 'pro',
         type: 'paid',
         storage: true,
         isPremium: true,
-        cyberId: currentUserPId,
         assetType: formData.type,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        status: 'active'
-      };
-
-      if (formData.type === 'agent' && formData.companyName) {
-        userData.company = {
+        cyberId: currentUserPId, // ✅ Track who created this
+        company: formData.type === 'agent' && formData.companyName ? {
           name: formData.companyName,
           address: formData.companyAddress || '',
           phone: formData.companyPhone || '',
           email: formData.companyEmail || ''
-        };
-      }
+        } : null
+      },
+      creationType: 'agent' // ✅ Identifies agent creation
+    };
 
-      await setDoc(userDocRef, userData);
-
-    } catch (error) {
-      console.error('Error creating asset:', error);
-      throw new Error('Failed to create asset. Please try again.');
-    }
+    const result = await createUserWithFirebaseAuth(userData);
+    console.log('Asset created with custom UID:', result.data);
+    
+  } catch (error) {
+    console.error('Error creating asset:', error);
+    throw new Error('Failed to create asset. Please try again.');
   }
+}
+  // async createAsset(formData: AssetFormData, currentUserPId: string): Promise<void> {
+  //   try {
+  //     // Hash the password
+  //     const passwordHash = await this.hashPassword(formData.password);
+
+  //     // Prepare Firebase Auth data
+  //     const createUserWithFirebaseAuth = httpsCallable(functions, 'createUserWithFirebaseAuth');
+      
+  //     const firebaseAuthData = {
+  //       email: formData.email,
+  //       password: formData.password,
+  //       userData: {
+  //         localId: formData.id,
+  //         name: formData.name,
+  //         phone: formData.phone,
+  //         tier: formData.type === 'landlord' ? 'solo' : 'pro',
+  //         type: 'paid',
+  //         storage: true,
+  //         isPremium: true,
+  //         company: formData.type === 'agent' && formData.companyName ? {
+  //           name: formData.companyName,
+  //           address: formData.companyAddress || '',
+  //           phone: formData.companyPhone || '',
+  //           email: formData.companyEmail || ''
+  //         } : null
+  //       }
+  //     };
+
+  //     // Create user in Firebase Auth via Cloud Function
+  //     await createUserWithFirebaseAuth(firebaseAuthData);
+
+  //     // Create user document in Firestore
+  //     const userDocRef = doc(this.usersCollection, formData.id);
+  //     const userData: any = {
+  //       id: formData.id,
+  //       name: formData.name,
+  //       email: formData.email,
+  //       phone: formData.phone,
+  //       passwordHash,
+  //       tier: formData.type === 'landlord' ? 'solo' : 'pro',
+  //       type: 'paid',
+  //       storage: true,
+  //       isPremium: true,
+  //       cyberId: currentUserPId,
+  //       assetType: formData.type,
+  //       createdAt: Timestamp.now(),
+  //       updatedAt: Timestamp.now(),
+  //       status: 'active'
+  //     };
+
+  //     if (formData.type === 'agent' && formData.companyName) {
+  //       userData.company = {
+  //         name: formData.companyName,
+  //         address: formData.companyAddress || '',
+  //         phone: formData.companyPhone || '',
+  //         email: formData.companyEmail || ''
+  //       };
+  //     }
+
+  //     await setDoc(userDocRef, userData);
+
+  //   } catch (error) {
+  //     console.error('Error creating asset:', error);
+  //     throw new Error('Failed to create asset. Please try again.');
+  //   }
+  // }
 
     /**
    * Get next property ID using Firestore counter
