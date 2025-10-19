@@ -10,7 +10,10 @@ import {
   Banknote,
   CheckCircle,
   MessageCircle,
-  CreditCard} from 'lucide-react';
+  CreditCard,
+  Briefcase,
+  FileText,
+  Settings} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -272,6 +275,58 @@ const Dashboard = () => {
       <header className="fixed top-0 left-0 right-0 bg-gray-900/30 backdrop-blur-md border-b border-gray-700/30 z-40">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-3">
           <div className="flex items-center justify-between">
+            <div onClick={() => navigate('/')} className="flex-shrink-0">
+              <h1 className="text-lg sm:text-xl font-bold text-white">
+                Cogvana <span className="text-cyan-400">Cyber</span>
+              </h1>
+              <p className="text-xs text-gray-400 hidden sm:block">Dashboard Overview</p>
+            </div>
+
+            {/* Center Navigation Icons */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/services')}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="Services"
+              >
+                <Briefcase className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => navigate('/form')}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="Form"
+              >
+                <FileText className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowPaymentSettings(!showPaymentSettings)}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="Payment Settings"
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Profile Section */}
+            <div onClick={() => setShowPaymentSettings(!showPaymentSettings)} className="flex items-center gap-2 sm:gap-3 cursor-pointer flex-shrink-0">
+              <div className="text-right">
+                <div className="text-xs sm:text-sm font-medium text-white">
+                  {firestoreUser?.pId || 'COG-0000-12345'}
+                </div>
+                <div className="text-xs text-gray-400 hidden sm:block">
+                  {firestoreUser?.name || 'Cyber Operator'}
+                </div>
+              </div>
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-cyan-500 to-violet-500 rounded-full flex items-center justify-center text-white text-xs sm:text-sm font-semibold shadow-lg shadow-cyan-500/30">
+                {getInitials(firestoreUser?.name || 'Cyber Operator')}
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+      {/* <header className="fixed top-0 left-0 right-0 bg-gray-900/30 backdrop-blur-md border-b border-gray-700/30 z-40">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-3">
+          <div className="flex items-center justify-between">
             <div onClick={() => navigate('/services')} className="flex-shrink-0">
               <h1 className="text-lg sm:text-xl font-bold text-white">
                 Cogvana <span className="text-cyan-400">Cyber</span>
@@ -293,7 +348,7 @@ const Dashboard = () => {
             </div>
           </div>
         </div>
-      </header>
+      </header> */}
 
       {/* Fixed Tabs Navigation */}
       <div className="bg-gray-900/30 backdrop-blur-md border-b border-gray-800/50 fixed top-[73px] sm:top-[81px] left-0 right-0 z-40">

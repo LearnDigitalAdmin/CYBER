@@ -100,6 +100,7 @@ import Dashboard from "../pages/DashboardLayout";
 import { useAuth } from "../context/authContext";
 import UploadsPage from "../pages/Uploads";
 import AddServices from "../pages/AddServices";
+import FormPage from "../pages/Form";
 
 /**
  * AppRoutes:
@@ -144,6 +145,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/upload" element={<UploadsPage />} />
         <Route path="/services" element={<AddServices />} />
+        <Route path="/form" element={<FormPage />} />
         {/* <Route path="/terms" element={<TermsPage />} />
         <Route path="/contact" element={<ContactPage />} /> */}
 
