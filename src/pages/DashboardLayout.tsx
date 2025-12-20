@@ -26,6 +26,7 @@ import { Paystack } from '../services/paystackService';
 import { Screening } from '../services/Screening';
 import TerminalModal from '../components/global/Terminal';
 import IncomeTab from '../components/income/IncomeTab';
+import ShopTab from '../components/shop/ShopTab';
 import { useNavigate } from 'react-router-dom';
 
 
@@ -266,6 +267,7 @@ const Dashboard = () => {
 
   const tabs = [
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-4 h-4" /> },
+    { id: 'shops', label: 'Shops', icon: <Briefcase className="w-4 h-4" /> },
     { id: 'cyber', label: 'Cyber Services', icon: <Printer className="w-4 h-4" /> },
     { id: 'income', label: 'Income', icon: <BarChart3 className="w-4 h-4" /> }
   ];
@@ -393,6 +395,7 @@ const Dashboard = () => {
 
       <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-[120px] sm:pt-[128px] pb-24 sm:pb-8">
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
+        {activeTab === 'shops' && <ShopTab />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'income' && <IncomeTab />}
       </main>

@@ -109,8 +109,8 @@ const CyberPaymentModal = ({ isOpen, onClose, service, currentUser }: CyberPayme
       console.log('Charge result:', result.data);
 
       // Set the reference to listen for status updates
-      if (result.data?.reference) {
-        setPaymentReference(result.data.reference);
+      if (result.data.data.reference) {
+        setPaymentReference(result.data.data.reference);
         toast.info('Payment request sent! Customer should check their phone.');
       } else {
         throw new Error('No payment reference received');

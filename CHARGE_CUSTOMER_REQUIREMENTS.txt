@@ -1,0 +1,201 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║         CHARGE CUSTOMER - SHOP DATA REQUIREMENTS                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+
+WHEN SHOP OWNER TRIES TO CHARGE CUSTOMER (OPTION 7)
+════════════════════════════════════════════════════════════════════════════════
+
+System needs ONE piece of data from shop document:
+
+    shops/{shopId}.paymentAccount.paystackSubaccountId
+
+That's it! Just this one required field.
+
+
+WHAT'S IN paymentAccount?
+════════════════════════════════════════════════════════════════════════════════
+
+{
+  "type": "mpesa" | "airtel" | "bank",
+
+  "mpesa": {                              ← Only if type="mpesa"
+    "paybillOrTill": "123456",
+    "accountNumber": "ABC12345"
+  },
+
+  "airtel": {                             ← Only if type="airtel"
+    "businessNumber": "254712345678",
+    "accountDetails": "John's Account"
+  },
+
+  "bank": {                               ← Only if type="bank"
+    "bankName": "KCB",
+    "branch": "Nairobi CBD",
+    "accountNumber": "0123456789"
+  },
+
+  "paystackSubaccountId": "ACT_xxxx",  ← REQUIRED FOR CHARGING!
+  "createdAt": 1731411000,
+  "updatedAt": 1731411000
+}
+
+
+HOW IT GETS THERE
+════════════════════════════════════════════════════════════════════════════════
+
+Step 1: Shop Owner Does Option 6 (Setup Payment Account)
+   ├─ Selects method (M-Pesa, Airtel, or Bank)
+   ├─ Enters account details
+   ├─ Confirms
+   └─ Saved to: paymentSetupRequests/{requestId}
+                Status: "pending"
+
+Step 2: Admin Reviews Request
+   ├─ Checks paymentSetupRequests/{requestId}
+   ├─ Sees Shop ID, shop details, payment method, account info
+   └─ Sends WhatsApp to +254791286165 (Cogvana) with details
+
+Step 3: Admin Creates Paystack Sub-Account
+   ├─ Logs into Paystack Dashboard
+   ├─ Creates sub-account for this shop
+   └─ Gets ID: ACT_xxxxxx
+
+Step 4: Admin Updates Shop Document
+   ├─ Updates: shops/{shopId}.paymentAccount
+   ├─ Adds paystackSubaccountId: "ACT_xxxxxx"
+   └─ Updates request status to: "approved"
+
+Step 5: Shop Owner Can Now Charge
+   ├─ Option 7: Charge Customer works!
+   └─ STK push uses paystackSubaccountId from shop.paymentAccount
+
+
+CHARGE CUSTOMER FLOW
+════════════════════════════════════════════════════════════════════════════════
+
+User: "7"
+↓
+Bot: "Enter amount"
+User: "2000"
+↓
+Bot: "Enter customer phone"
+User: "0712345678"
+↓
+Bot: "Select network: 1=Safaricom, 2=Airtel"
+User: "1"
+↓
+[System checks: shop.paymentAccount.paystackSubaccountId exists?]
+↓
+IF YES:
+  ✅ Calls Paystack /charge API
+     ├─ Uses paystackSubaccountId
+     ├─ Sends to customer phone
+     └─ Returns STK Ref
+  ✅ Saves transaction to shops/{shopId}/transactions
+  ✅ Returns: "STK Push Sent!"
+
+IF NO:
+  ❌ Returns: "Payment account not configured. Contact support."
+
+
+KEY PIECE OF DATA
+════════════════════════════════════════════════════════════════════════════════
+
+                    paystackSubaccountId: "ACT_xxxx"
+
+This is THE critical field. Without it:
+  ❌ STK push fails
+  ❌ User can't charge customers
+  ❌ Payment can't be processed
+
+With it:
+  ✅ STK push sent to customer
+  ✅ Customer sees payment prompt
+  ✅ Webhook processes payment
+  ✅ Admin gets notification
+
+
+ADMIN SETUP CHECKLIST
+════════════════════════════════════════════════════════════════════════════════
+
+Before shop owner can use Option 7:
+
+  ☐ Shop owner completed Option 6
+  ☐ Request saved in paymentSetupRequests/{requestId}
+  ☐ Admin created Paystack sub-account (got ACT_xxxx)
+  ☐ Admin updated shops/{shopId}.paymentAccount with:
+      - type (mpesa/airtel/bank)
+      - method details (paybill, business#, or bank info)
+      - paystackSubaccountId: "ACT_xxxx"  ← THIS ONE!
+      - timestamps
+  ☐ Admin updated paymentSetupRequests status to "approved"
+
+Once all done → ✅ Shop owner can charge customers!
+
+
+FIRESTORE PATH
+════════════════════════════════════════════════════════════════════════════════
+
+shops
+└─ 1234
+   └─ paymentAccount
+      ├─ type: "mpesa"
+      ├─ mpesa: {...}
+      ├─ paystackSubaccountId: "ACT_xxxx"  ← Here!
+      ├─ createdAt: 1731411000
+      └─ updatedAt: 1731411000
+
+
+WHAT SYSTEM EXPECTS
+════════════════════════════════════════════════════════════════════════════════
+
+When user tries Option 7:
+
+1. Gets shopId from session
+2. Fetches: shops/{shopId}.paymentAccount
+3. Checks: paystackSubaccountId exists?
+4. Validates: Not empty, not null, is string
+5. Uses: Passes to Paystack API as "subaccount" param
+
+Example Paystack call:
+{
+  "type": "ussd",
+  "ussd": { "type": "pt" },           ← Safaricom
+  "amount": 200000,                   ← Cents
+  "phone": "254712345678",            ← Customer
+  "email": "stk-push-1234@cogvana.co.ke",
+  "subaccount": "ACT_xxxx",           ← FROM shop.paymentAccount!
+  "metadata": {...}
+}
+
+
+ERROR MESSAGES
+════════════════════════════════════════════════════════════════════════════════
+
+User sees: ❌ Payment account not configured. Please contact support.
+
+Reasons:
+  1. shop.paymentAccount doesn't exist
+  2. shop.paymentAccount.paystackSubaccountId is missing
+  3. shop.paymentAccount.paystackSubaccountId is empty/null
+
+Solution:
+  → Admin needs to complete Option 6 approval flow
+  → Admin needs to add paystackSubaccountId
+
+
+SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+What's needed:  shops/{shopId}.paymentAccount.paystackSubaccountId
+Format:         "ACT_xxxxxx" (from Paystack API)
+Created by:     Admin after approving Option 6 setup
+Used for:       STK push API call to Paystack
+Required:       YES - Without it, Option 7 won't work
+
+Everything else (payment method, account details) is informational.
+Only paystackSubaccountId is needed to process charges.
+
+✅ Build Status: 0 ERRORS
+✅ System Ready: YES

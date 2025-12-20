@@ -61,7 +61,10 @@ class UploadService {
       };
 
       // Add to cyber's uploads subcollection
+      console.log('Creating uploads ref for cyberId:', request.cyberId);
       const uploadsRef = collection(db, 'agents', request.cyberId, 'uploads');
+      console.log('Uploads ref path:', uploadsRef.path);
+      console.log('Upload data:', uploadData);
       const docRef = await addDoc(uploadsRef, uploadData);
 
       console.log('Upload submitted successfully:', docRef.id);

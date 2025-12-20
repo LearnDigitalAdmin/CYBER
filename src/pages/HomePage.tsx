@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
+import { Upload } from 'lucide-react'
 import SEO from '../components/SEO';
 
 
@@ -82,6 +83,29 @@ export default function HomePage() {
               </button>
             </motion.div>
           </main>
+
+          {/* Floating Action Button - Upload */}
+          <motion.button
+            onClick={() => navigate('/upload')}
+            className="fixed bottom-8 right-8 z-50 w-16 h-16 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 rounded-full shadow-2xl shadow-cyan-500/50 flex items-center justify-center group transition-all hover:scale-110"
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 1.5, duration: 0.5, type: "spring" }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.95 }}
+            aria-label="Upload documents or forms"
+          >
+            <Upload className="w-7 h-7 text-white group-hover:scale-110 transition-transform" />
+            
+            {/* Tooltip */}
+            <span className="absolute bottom-full mb-3 right-0 bg-gray-900 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+              Upload Documents
+              <span className="absolute top-full right-6 -mt-1 border-4 border-transparent border-t-gray-900"></span>
+            </span>
+
+            {/* Pulse animation */}
+            <span className="absolute inset-0 rounded-full bg-cyan-400 opacity-0 group-hover:opacity-20 group-hover:animate-ping"></span>
+          </motion.button>
           
           {/* Footer */}
           <footer className="absolute bottom-6 w-full text-center text-sm text-gray-500 px-4">

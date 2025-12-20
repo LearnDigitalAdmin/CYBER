@@ -939,11 +939,14 @@ const PricingModal: React.FC<PricingModalProps> = ({
   const formatPhoneNumber = async (phone: string) => {
     const digits = phone.replace(/\D/g, '');
     
+    
     if (digits.startsWith('254')) {
       return digits.length === 12 ? digits : '';
     } else if (digits.startsWith('0')) {
       return digits.length === 10 ? `254${digits.substring(1)}` : '';
     } else if (digits.startsWith('7') || digits.startsWith('1')) {
+      return digits.length === 9 ? `254${digits}` : '';
+    } else if (digits.startsWith('1') || digits.startsWith('1')) {
       return digits.length === 9 ? `254${digits}` : '';
     }
     

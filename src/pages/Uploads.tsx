@@ -75,6 +75,11 @@ const UploadsPage = () => {
   const [customerPhone, setCustomerPhone] = useState('');
   const [serviceType, setServiceType] = useState('');
   const [additionalNotes, setAdditionalNotes] = useState('');
+  const [errors, setErrors] = useState<{
+    name?: string;
+    phone?: string;
+    service?: string;
+  }>({});
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [, setUploadComplete] = useState(false);
@@ -142,9 +147,16 @@ const UploadsPage = () => {
     setCyberError('');
     try {
       const fullPId = `COG-${cyberId}`;
+      console.log('Searching for pId:', fullPId); // DEBUG
       const agentsRef = collection(db, 'agents');
       const q = query(agentsRef, where('pId', '==', fullPId));
+      console.log('Query created:', q); // DEBUG
       const snapshot = await getDocs(q);
+      console.log('Snapshot empty:', snapshot.empty, 'Docs found:', snapshot.size); // DEBUG
+      // const fullPId = `COG-${cyberId}`;
+      // const agentsRef = collection(db, 'agents');
+      // const q = query(agentsRef, where('pId', '==', fullPId));
+      // const snapshot = await getDocs(q);
       if (snapshot.empty) {
         setCyberError(`No cyber found with ID: ${fullPId}`);
         setSearchingCyber(false);
@@ -236,12 +248,15 @@ const UploadsPage = () => {
         continue;
       }
       try {
-        setFiles(prev => prev.map(f => 
+        console.log('Starting upload for file:', fileItem.file.name);
+        setFiles(prev => prev.map(f =>
           f.id === fileItem.id ? { ...f, status: 'uploading' } : f
         ));
         const timestamp = Date.now();
         const safeName = fileItem.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
         const storagePath = `uploads/${cyberDetails!.id}/${timestamp}_${safeName}`;
+        console.log('Storage path:', storagePath);
+        console.log('cyberDetails.id:', cyberDetails!.id);
         const storageRef = ref(storage, storagePath);
         const uploadTask = uploadBytesResumable(storageRef, fileItem.file);
         await new Promise<void>((resolve, reject) => {
@@ -249,12 +264,13 @@ const UploadsPage = () => {
             'state_changed',
             (snapshot) => {
               const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              console.log(`Upload progress for ${fileItem.file.name}: ${progress}%`);
               setFiles(prev => prev.map(f =>
                 f.id === fileItem.id ? { ...f, progress } : f
               ));
             },
             (error) => {
-              console.error('Upload error:', error);
+              console.error('Upload state_changed error:', error);
               setFiles(prev => prev.map(f =>
                 f.id === fileItem.id ? { ...f, status: 'error', error: error.message } : f
               ));
@@ -262,13 +278,16 @@ const UploadsPage = () => {
             },
             async () => {
               try {
+                console.log('Upload complete, getting download URL');
                 const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log('Download URL:', downloadURL);
                 setFiles(prev => prev.map(f =>
                   f.id === fileItem.id ? { ...f, status: 'success', url: downloadURL } : f
                 ));
                 uploadedUrls.push(downloadURL);
                 resolve();
               } catch (error: any) {
+                console.error('Error getting download URL:', error);
                 reject(error);
               }
             }
@@ -281,23 +300,57 @@ const UploadsPage = () => {
         ));
       }
     }
+    console.log('All files uploaded, returning URLs:', uploadedUrls);
     return uploadedUrls;
   };
 
-  const handleSubmit = async () => {
+  const formatPhoneNumber = (phone: string): string => {
+    const digits = phone.replace(/\D/g, '');
+
+    if (digits.startsWith('254')) {
+      return digits.length === 12 ? digits : '';
+    } else if (digits.startsWith('0')) {
+      return digits.length === 10 ? `254${digits.substring(1)}` : '';
+    } else if (digits.startsWith('7') || digits.startsWith('1')) {
+      return digits.length === 9 ? `254${digits}` : '';
+    }
+
+    return '';
+  };
+
+  const validateDetailsBeforeUpload = (): boolean => {
+    const newErrors: typeof errors = {};
+    let isValid = true;
+
     if (!customerName.trim()) {
-      toast.error('Please enter your name');
-      return;
+      newErrors.name = 'Name is required';
+      isValid = false;
     }
-    const formattedPhone = uploadService.formatPhoneNumber(customerPhone);
-    if (!uploadService.validatePhoneNumber(formattedPhone)) {
-      toast.error('Please enter a valid Kenyan phone number');
-      return;
+
+    const formattedPhone = formatPhoneNumber(customerPhone);
+    if (!customerPhone.trim()) {
+      newErrors.phone = 'Phone number is required';
+      isValid = false;
+    } else if (!formattedPhone) {
+      newErrors.phone = 'Invalid format. Use: 0712345678, +254712345678, or 254712345678';
+      isValid = false;
     }
+
     if (!serviceType) {
-      toast.error('Please select a service type');
-      return;
+      newErrors.service = 'Please select a service type';
+      isValid = false;
     }
+
+    setErrors(newErrors);
+
+    if (!isValid) {
+      toast.error('Please fix the errors below before continuing');
+    }
+
+    return isValid;
+  };
+
+  const handleSubmit = async () => {
     if (files.length === 0) {
       toast.error('Please select at least one file');
       return;
@@ -308,30 +361,35 @@ const UploadsPage = () => {
     }
     setUploading(true);
     try {
+      console.log('Starting file uploads...');
       const fileUrls = await uploadFiles();
+      console.log('File URLs returned:', fileUrls);
       if (fileUrls.length === 0) {
         throw new Error('No files were uploaded successfully');
       }
+      const formattedPhone = formatPhoneNumber(customerPhone);
       const uploadRequest: UploadRequest = {
         name: customerName.trim(),
         phone: formattedPhone,
         type: serviceType,
         notes: additionalNotes.trim(),
         files: fileUrls,
-        cyberId: cyberDetails!.id,
+        cyberId: cyberDetails!.uid,
         cyberName: cyberDetails!.shopName || cyberDetails!.name
       };
+      console.log('Upload request:', uploadRequest);
       const uploadId = await uploadService.submitUpload(uploadRequest);
       console.log('Upload submitted with ID:', uploadId);
       setUploadComplete(true);
       setStep('success');
       toast.success('Files uploaded successfully!');
-      
+
       setTimeout(() => {
         servicesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 500);
     } catch (error: any) {
       console.error('Error submitting upload:', error);
+      console.error('Error stack:', error.stack);
       toast.error(`Failed to submit: ${error.message}`);
     } finally {
       setUploading(false);
@@ -436,29 +494,87 @@ const UploadsPage = () => {
                       <label className="block text-sm font-medium text-gray-300 mb-2">Your Name *</label>
                       <div className="relative">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                        <input type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe" className="w-full pl-11 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white" />
+                        <input
+                          type="text"
+                          value={customerName}
+                          onChange={(e) => {
+                            setCustomerName(e.target.value);
+                            if (errors.name) setErrors({ ...errors, name: undefined });
+                          }}
+                          placeholder="John Doe"
+                          className={`w-full pl-11 pr-4 py-3 bg-gray-900/50 border rounded-lg focus:ring-2 focus:border-transparent text-white transition-colors ${
+                            errors.name ? 'border-red-500 focus:ring-red-500' : 'border-gray-700 focus:ring-cyan-500'
+                          }`}
+                        />
                       </div>
+                      {errors.name && (
+                        <p className="mt-2 text-sm text-red-400 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          {errors.name}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">Phone Number *</label>
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                        <input type="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="0712345678" className="w-full pl-11 pr-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white" />
+                        <input
+                          type="tel"
+                          value={customerPhone}
+                          onChange={(e) => {
+                            setCustomerPhone(e.target.value);
+                            if (errors.phone) setErrors({ ...errors, phone: undefined });
+                          }}
+                          placeholder="0712345678"
+                          className={`w-full pl-11 pr-4 py-3 bg-gray-900/50 border rounded-lg focus:ring-2 focus:border-transparent text-white transition-colors ${
+                            errors.phone ? 'border-red-500 focus:ring-red-500' : 'border-gray-700 focus:ring-cyan-500'
+                          }`}
+                        />
                       </div>
+                      {errors.phone && (
+                        <p className="mt-2 text-sm text-red-400 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          {errors.phone}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">Service Type *</label>
-                      <select value={serviceType} onChange={(e) => setServiceType(e.target.value)} className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white">
+                      <select
+                        value={serviceType}
+                        onChange={(e) => {
+                          setServiceType(e.target.value);
+                          if (errors.service) setErrors({ ...errors, service: undefined });
+                        }}
+                        className={`w-full px-4 py-3 bg-gray-900/50 border rounded-lg focus:ring-2 focus:border-transparent text-white transition-colors ${
+                          errors.service ? 'border-red-500 focus:ring-red-500' : 'border-gray-700 focus:ring-cyan-500'
+                        }`}
+                      >
                         <option value="">Select a service</option>
                         {SERVICE_TYPES.map(type => (<option key={type} value={type}>{type}</option>))}
                       </select>
+                      {errors.service && (
+                        <p className="mt-2 text-sm text-red-400 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4" />
+                          {errors.service}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-300 mb-2">Additional Notes (Optional)</label>
                       <textarea value={additionalNotes} onChange={(e) => setAdditionalNotes(e.target.value)} placeholder="Any special instructions..." rows={3} className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white resize-none" />
                     </div>
                   </div>
-                  <button onClick={() => setStep('upload')} disabled={!customerName.trim() || !customerPhone.trim() || !serviceType} className="w-full py-4 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-all font-semibold text-lg shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (validateDetailsBeforeUpload()) {
+                        setErrors({});
+                        setStep('upload');
+                      }
+                    }}
+                    disabled={!customerName.trim() || !customerPhone.trim() || !serviceType}
+                    className="w-full py-4 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-all font-semibold text-lg shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2"
+                  >
                     Continue to Upload<ArrowRight className="w-5 h-5" />
                   </button>
                 </motion.div>

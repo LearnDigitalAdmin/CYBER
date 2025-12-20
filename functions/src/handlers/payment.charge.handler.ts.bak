@@ -1,0 +1,241 @@
+/**
+ * Payment Charge Handler
+ * Handles customer payment via STK push (Safaricom/Airtel)
+ */
+
+import { Session } from '../types/session.types';
+import { updateSessionState, updateSessionContext, clearSessionContext } from '../services/session.service';
+import { getPaymentAccount } from '../services/payment.setup.service';
+import { sendStkPush, savePaymentTransaction } from '../services/payment.charge.service';
+import { validatePhoneNumber, checkNavigationCommand } from '../utils/validator';
+import { getMessage } from '../constants/messages';
+import { STATE } from '../constants/states';
+import { logger } from '../utils/logger';
+import { PaymentNetwork } from '../types/shop.types';
+
+/**
+ * Helper: Handle navigation
+ */
+async function handleNavigation(
+  phone: string,
+  input: string,
+  session: Session,
+  previousState?: STATE
+): Promise<{ response: string | null; handled: boolean }> {
+  const nav = checkNavigationCommand(input);
+
+  if (nav.type === 'exit') {
+    await clearSessionContext(phone);
+    await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
+    return { response: getMessage('CONFIRM_PAY', session.language), handled: true };
+  }
+
+  if (nav.type === 'restart') {
+    await clearSessionContext(phone);
+    await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+    return { response: getMessage('CONFIRM_PAY', session.language), handled: true };
+  }
+
+  if (nav.type === 'back') {
+    if (!previousState) {
+      return { response: null, handled: false };
+    }
+    await updateSessionState(phone, previousState, {});
+    return { response: null, handled: true };
+  }
+
+  return { response: null, handled: false };
+}
+
+/**
+ * Step 1: Enter amount to charge
+ */
+export async function handleChargeCustomerAmount(phone: string, input: string, session: Session): Promise<string> {
+  try {
+    const nav = await handleNavigation(phone, input, session);
+    if (nav.handled && nav.response) return nav.response;
+    if (nav.handled) {
+      const msg = session.language === 'en'
+        ? '*Charge Customer* 💳\n\nEnter amount to charge:\n(e.g., 500, 1000, 5000)'
+        : '*Kulipisha Mteja* 💳\n\nIngiza kiasi cha kulipisha:\n(mfano, 500, 1000, 5000)';
+      return msg;
+    }
+
+    const amountStr = input.trim();
+    const amount = parseFloat(amountStr);
+
+    if (isNaN(amount) || amount <= 0) {
+      const msg = session.language === 'en'
+        ? '❌ Invalid amount. Please enter a positive number.'
+        : '❌ Kiasi sio sahihi. Ingiza namba chanya.';
+      return msg;
+    }
+
+    // Validate amount is reasonable (between 1 and 100,000 KES)
+    if (amount < 1 || amount > 100000) {
+      const msg = session.language === 'en'
+        ? '❌ Amount must be between 1 and 100,000 KES.'
+        : '❌ Kiasi lazima kiwe kati ya 1 na 100,000 KES.';
+      return msg;
+    }
+
+    await updateSessionContext(phone, { chargeAmount: amount });
+    await updateSessionState(phone, STATE.CHARGE_CUSTOMER_PHONE, {});
+
+    const msg = session.language === 'en'
+      ? `✓ Amount: KES ${amount}\n\nNow enter customer phone number:\n(e.g., 0712345678 or +254712345678)`
+      : `✓ Kiasi: KES ${amount}\n\nSasa ingiza namba ya mteja:\n(mfano, 0712345678 au +254712345678)`;
+    return msg;
+  } catch (error) {
+    logger.error('Error handling charge amount', { phone, error });
+    return getMessage('SYSTEM_ERROR', session.language);
+  }
+}
+
+/**
+ * Step 2: Enter customer phone number
+ */
+export async function handleChargeCustomerPhone(phone: string, input: string, session: Session): Promise<string> {
+  try {
+    const nav = await handleNavigation(phone, input, session, STATE.CHARGE_CUSTOMER_AMOUNT);
+    if (nav.handled && nav.response) return nav.response;
+    if (nav.handled) {
+      const msg = session.language === 'en'
+        ? '*Charge Customer* 💳\n\nEnter customer phone number:'
+        : '*Kulipisha Mteja* 💳\n\nIngiza namba ya mteja:';
+      return msg;
+    }
+
+    const phoneInput = input.trim();
+    const validation = validatePhoneNumber(phoneInput);
+
+    if (!validation.valid || !validation.formatted) {
+      const msg = session.language === 'en'
+        ? '❌ Invalid phone number. Please try again.'
+        : '❌ Namba sio sahihi. Jaribu tena.';
+      return msg;
+    }
+
+    await updateSessionContext(phone, { customerPhone: validation.formatted });
+    await updateSessionState(phone, STATE.CHARGE_CUSTOMER_NETWORK, {});
+
+    const msg = session.language === 'en'
+      ? `✓ Customer: ${validation.formatted}\n\nSelect payment network:\n\n1️⃣ Safaricom M-Pesa\n2️⃣ Airtel Money`
+      : `✓ Mteja: ${validation.formatted}\n\nChagua mtandao wa kulipa:\n\n1️⃣ Safaricom M-Pesa\n2️⃣ Airtel Money`;
+    return msg;
+  } catch (error) {
+    logger.error('Error handling customer phone', { phone, error });
+    return getMessage('SYSTEM_ERROR', session.language);
+  }
+}
+
+/**
+ * Step 3: Select network and send STK push
+ */
+export async function handleChargeCustomerNetwork(phone: string, input: string, session: Session): Promise<string> {
+  try {
+    const nav = await handleNavigation(phone, input, session, STATE.CHARGE_CUSTOMER_PHONE);
+    if (nav.handled && nav.response) return nav.response;
+    if (nav.handled) {
+      const msg = session.language === 'en'
+        ? 'Select payment network:\n\n1️⃣ Safaricom M-Pesa\n2️⃣ Airtel Money'
+        : 'Chagua mtandao wa kulipa:\n\n1️⃣ Safaricom M-Pesa\n2️⃣ Airtel Money';
+      return msg;
+    }
+
+    const option = input.trim();
+
+    if (!['1', '2'].includes(option)) {
+      const msg = session.language === 'en'
+        ? '❌ Invalid choice. Select 1 or 2.'
+        : '❌ Chaguo lisilofaa. Chagua 1 au 2.';
+      return msg;
+    }
+
+    const network: PaymentNetwork = option === '1' ? 'safaricom' : 'airtel';
+
+    // Get shop info
+    const shopId = session.context.shopId as string;
+    const chargeAmount = session.context.chargeAmount as number;
+    const customerPhone = session.context.customerPhone as string;
+
+    if (!shopId || !chargeAmount || !customerPhone) {
+      logger.error('Missing charge details in context', { phone, shopId });
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+      return getMessage('SYSTEM_ERROR', session.language);
+    }
+
+    // Get payment account with Paystack split code
+    const paymentAccount = await getPaymentAccount(shopId);
+
+    if (!paymentAccount || !paymentAccount.paystackSplitCode) {
+      const msg = session.language === 'en'
+        ? '❌ Payment account not configured. Please contact support.'
+        : '❌ Akaunti ya kulipa haijaandaliwa. Tafadhali wasiliana na msaada.';
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+      return msg;
+    }
+
+    // Update state to processing
+    await updateSessionState(phone, STATE.CHARGE_CUSTOMER_PROCESSING, {});
+    await updateSessionContext(phone, { network });
+
+    // Send STK push
+    const result = await sendStkPush(
+      shopId,
+      chargeAmount,
+      customerPhone,
+      network,
+      paymentAccount.paystackSplitCode
+    );
+
+    if (!result.success) {
+      logger.error('STK push failed', { shopId, error: result.error });
+
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+
+      const errorMsg = session.language === 'en'
+        ? `❌ Failed to send payment request: ${result.error}`
+        : `❌ Ombi la kulipa halikuweza kutumwa: ${result.error}`;
+      return errorMsg;
+    }
+
+    // Save transaction
+    const transaction = await savePaymentTransaction(
+      shopId,
+      chargeAmount,
+      customerPhone,
+      network,
+      result.reference || `stk-${Date.now()}`
+    );
+
+    // Success message
+    const successMsg = session.language === 'en'
+      ? `✅ STK Push Sent!\n\n📱 Customer: ${customerPhone}\n💰 Amount: KES ${chargeAmount}\n🌐 Network: ${network === 'safaricom' ? 'Safaricom M-Pesa' : 'Airtel Money'}\n\n⏳ Customer should see prompt to enter PIN.\n\nOnce payment is complete, you'll receive a confirmation message.\n\nTransaction ID: ${transaction.id}`
+      : `✅ Ombi Lilitumwa!\n\n📱 Mteja: ${customerPhone}\n💰 Kiasi: KES ${chargeAmount}\n🌐 Mtandao: ${network === 'safaricom' ? 'Safaricom M-Pesa' : 'Airtel Money'}\n\n⏳ Mteja anakwanzia kuona ombi la kuingiza PIN.\n\nBaada ya kulipa, utakamatia ujumbe wa uthibitisho.\n\nKimli cha Muamala: ${transaction.id}`;
+
+    // Clear and return to menu
+    await clearSessionContext(phone);
+    await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+
+    return successMsg + '\n\n' + getMessage('NAVIGATION_HELP', session.language);
+  } catch (error) {
+    logger.error('Error handling charge network selection', { phone, error });
+
+    await clearSessionContext(phone);
+    await updateSessionState(phone, STATE.MY_SHOP_MENU, {});
+    return getMessage('SYSTEM_ERROR', session.language);
+  }
+}
+
+/**
+ * Processing state message (shown while STK push is being sent)
+ */
+export function getProcessingMessage(language: 'en' | 'sw'): string {
+  return language === 'en'
+    ? '⏳ Processing payment request... Please wait.'
+    : '⏳ Inakubadilisha ombi la kulipa... Tafadhali subiri.';
+}

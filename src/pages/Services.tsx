@@ -207,13 +207,17 @@ const ProductCarousel: React.FC<ProductCarouselProps> = ({ cyber }) => {
 
   const getCardSizes = () => {
     if (screenWidth < 768) {
-      return { normal: 33.333, expanded: 40 };
+      // 3 columns: 100 / 3 = 33.333%
+      return { normal: 33.333, expanded: 50 };
     } else if (screenWidth < 1024) {
-      return { normal: 25, expanded: 35 };
+      // 4 columns: 100 / 4 = 25%
+      return { normal: 25, expanded: 40 };
     } else if (screenWidth < 1280) {
-      return { normal: 20, expanded: 28 };
+      // 5 columns: 100 / 5 = 20%
+      return { normal: 20, expanded: 35 };
     } else {
-      return { normal: 16.666, expanded: 22 };
+      // 6 columns: 100 / 6 = 16.666%
+      return { normal: 16.666, expanded: 30 };
     }
   };
 
@@ -319,17 +323,17 @@ const ProductCarousel: React.FC<ProductCarouselProps> = ({ cyber }) => {
             <p className="text-gray-500 text-sm mt-2">Check back soon for new items!</p>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap" style={{ gap: '0px' }}>
             {products.map((product) => {
               const isSelected = selected === product.id;
               const isOtherSelected = selected && selected !== product.id;
-              
+
               return (
                 <motion.div
                   key={`${product.id}-${product.imageUrl}`}
                   className="relative cursor-pointer"
                   style={{
-                    width: `calc(${isSelected ? sizes.expanded : sizes.normal}% - 2px)`,
+                    width: `${isSelected ? sizes.expanded : sizes.normal}%`,
                   }}
                   onClick={() => setSelected(isSelected ? null : product.id)}
                   initial={false}
@@ -340,7 +344,7 @@ const ProductCarousel: React.FC<ProductCarouselProps> = ({ cyber }) => {
                   }}
                   transition={{ duration: 0.3, ease: 'easeOut' }}
                 >
-                  <div className="relative w-full overflow-hidden rounded-lg shadow-2xl" style={{ aspectRatio: '9/16' }}>
+                  <div className="relative w-full overflow-hidden rounded-lg shadow-2xl" style={{ aspectRatio: '9/16', padding: '2px' }}>
                     {/* Product Image */}
                     <img
                       src={product.imageUrl}
