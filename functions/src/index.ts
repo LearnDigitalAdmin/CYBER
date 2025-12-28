@@ -1,14 +1,39 @@
 import { onCall, HttpsError, onRequest } from 'firebase-functions/v2/https';
 import { Storage } from '@google-cloud/storage';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore } from 'firebase-admin/firestore';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { defineSecret } from 'firebase-functions/params';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
+// import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import axios from 'axios';
-import FormData from 'form-data';
+// import axios from 'axios';
+// import FormData from 'form-data';
+
+
+interface MovieDataRequest {
+  title: string;
+  year: number;
+  type: 'movie' | 'series';
+}
+
+interface MovieDataResponse {
+  success: boolean;
+  data?: {
+    title: string;
+    year: number;
+    type: 'movie' | 'series';
+    description: string;
+    category: string;
+    rating?: string;
+    seasons?: Array<{ season: number; episodes: number }>;
+    trailer?: string;
+  };
+  message?: string;
+}
+
+// Initialize Gemini AI
+// const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
 
 
 //initializeApp();
@@ -712,127 +737,271 @@ export const generateRegistrationForm = onCall(
 
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');//
+
+export const generateMovieData = onCall<MovieDataRequest, Promise<MovieDataResponse>>(
+  {
+    region: 'africa-south1',
+    maxInstances: 10,
+    timeoutSeconds: 60,
+    memory: '256MiB'
+  },
+  async (request) => {
+    try {
+      // Validate input
+      const { title, year, type } = request.data;
+      
+      if (!title || !year || !type) {
+        throw new HttpsError(
+          'invalid-argument',
+          'Missing required fields: title, year, and type are required'
+        );
+      }
+
+      if (year < 1900 || year > new Date().getFullYear() + 5) {
+        throw new HttpsError('invalid-argument', 'Invalid year provided');
+      }
+
+      if (!['movie', 'series'].includes(type)) {
+        throw new HttpsError('invalid-argument', 'Type must be either "movie" or "series"');
+      }
+
+      // Prepare prompt for Gemini
+      const prompt = type === 'movie'
+        ? `You are a movie database API. Provide detailed information about the movie "${title}" released in ${year}.
+
+Return a JSON object with the following structure (no markdown, just raw JSON):
+{
+  "title": "Official movie title",
+  "year": ${year},
+  "type": "movie",
+  "description": "A comprehensive 2-3 sentence plot summary",
+  "category": "Main genre (e.g., Action, Drama, Sci-Fi, Comedy, Horror)",
+  "rating": "IMDb or Rotten Tomatoes rating if available (e.g., 8.5/10 or 95%)",
+  "trailer": "YouTube video ID if available (11 characters)"
+}
+
+If you cannot find exact information, provide best estimates based on similar titles, but ensure the description is relevant to the title and year provided.`
+        : `You are a TV series database API. Provide detailed information about the series "${title}" that premiered in ${year}.
+
+Return a JSON object with the following structure (no markdown, just raw JSON):
+{
+  "title": "Official series title",
+  "year": ${year},
+  "type": "series",
+  "description": "A comprehensive 2-3 sentence series overview",
+  "category": "Main genre (e.g., Drama, Thriller, Comedy, Fantasy)",
+  "rating": "IMDb rating if available (e.g., 8.7/10)",
+  "seasons": [
+    {"season": 1, "episodes": 10},
+    {"season": 2, "episodes": 13}
+  ],
+  "trailer": "YouTube video ID if available"
+}
+
+Include all available seasons with their episode counts. If you cannot find exact information, provide reasonable estimates based on the title and year.`;
+
+      // Call Gemini API
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      // Parse JSON response
+      let movieData;
+      try {
+        // Remove markdown code blocks if present
+        const cleanText = text
+          .replace(/```json\n?/g, '')
+          .replace(/```\n?/g, '')
+          .trim();
+        
+        movieData = JSON.parse(cleanText);
+      } catch (parseError) {
+        console.error('Failed to parse AI response:', text);
+        throw new HttpsError(
+          'internal',
+          'Failed to parse AI response. Please try again.'
+        );
+      }
+
+      // Validate response structure
+      if (!movieData.title || !movieData.description || !movieData.category) {
+        throw new HttpsError(
+          'internal',
+          'AI response missing required fields'
+        );
+      }
+
+      // Ensure correct type
+      movieData.type = type;
+      movieData.year = year;
+
+      // Validate seasons for series
+      if (type === 'series') {
+        if (!movieData.seasons || !Array.isArray(movieData.seasons) || movieData.seasons.length === 0) {
+          // Provide default seasons if not available
+          movieData.seasons = [
+            { season: 1, episodes: 10 }
+          ];
+        }
+      }
+
+      return {
+        success: true,
+        data: movieData
+      };
+
+    } catch (error: any) {
+      console.error('Error generating movie data:', error);
+
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      // Handle Gemini API errors
+      if (error.message?.includes('API key')) {
+        throw new HttpsError(
+          'internal',
+          'AI service configuration error. Please contact support.'
+        );
+      }
+
+      if (error.message?.includes('quota')) {
+        throw new HttpsError(
+          'resource-exhausted',
+          'AI service temporarily unavailable. Please try again later.'
+        );
+      }
+
+      throw new HttpsError(
+        'internal',
+        'Failed to generate content data. Please try again.'
+      );
+    }
+  }
+);
 //const META_ACCESS_TOKEN = defineSecret('META_ACCESS_TOKEN');//
-const COGVANA_PAGE_ID = defineSecret('COGVANA_PAGE_ID');//
-const SMB_PAGE_ID = defineSecret('SMB_PAGE_ID');//
-const COGVANA_PAGE_TOKEN = defineSecret('COGVANA_PAGE_TOKEN');
-const SMB_PAGE_TOKEN = defineSecret('SMB_PAGE_TOKEN');
+// const COGVANA_PAGE_ID = defineSecret('COGVANA_PAGE_ID');//
+// const SMB_PAGE_ID = defineSecret('SMB_PAGE_ID');//
+// const COGVANA_PAGE_TOKEN = defineSecret('COGVANA_PAGE_TOKEN');
+// const SMB_PAGE_TOKEN = defineSecret('SMB_PAGE_TOKEN');
 // const LINKEDIN_ACCESS_TOKEN = defineSecret('LINKEDIN_ACCESS_TOKEN');//
 // const SMB_LINKEDIN_ORG_URN = defineSecret('SMB_LINKEDIN_ORG_URN');
 // const COGVANA_LINKEDIN_ORG_URN = defineSecret('COGVANA_LINKEDIN_ORG_URN');
 //const FIREBASE_FUNCTION_URL = "https://us-central1-learn-000111.cloudfunctions.net/getVertexAIToken";
 
 
-// Brand context for AI
-const BRAND_CONTEXT = {
-  cogvana: {
-    name: "Cogvana",
-    owner: "Cogvana Technologies (subsidiary of Cogvana Corporation)",
-    description: "AI-powered e-learning platform transforming education in Africa",
-    apps: {
-      cogvana: {
-        name: "Cogvana App",
-        description: "Free Android app for students with subscriptions for premium content",
-        features: "Offline-capable, gamified learning experience, social network for interactive learning, groups, virtual classrooms",
-        availability: "Android (with web/PWA in development)"
-      },
-      cognitutor: {
-        name: "Cogni Tutor",
-        description: "Platform for teachers to create and sell digital certified courses",
-        features: "Course creation tools, monetization platform, virtual classrooms with video/audio, content management for schools",
-        availability: "Web, PWA, Android",
-        preRegistration: "cogvana.co.ke/platforms/cogni"
-      }
-    },
-    features: "AI-powered personalized learning, offline-first design for limited connectivity, virtual classrooms with video and audio support, dedicated social network for students, gamified engagement, tiered affordable subscriptions, courses on any category from K-12 to professional and tertiary education",
-    target: "Students (K-12 to tertiary), teachers, educators creating courses, school administrators, educational institutions",
-    demographics: "Kenyan youth, students with limited internet access, educators seeking monetization, schools needing digital content delivery",
-    tone: "Casual and informal with touch of professionalism - use English, Swahili, Sheng, and slang to connect with Kenyan youth",
-    languages: "English, Swahili, Sheng, and slang",
-    mainLink: "https://cogvana.co.ke",
-    links: {
-      main: "https://cogvana.co.ke",
-      cogniPreReg: "https://cogvana.co.ke/platforms/cogni",
-      platforms: "https://cogvana.co.ke/platforms"
-    },
-    objectives: "Create awareness for apps and platform, drive installations, engage users with fun interactive posts, brand exposure and visibility, increase page following and likes, joke and engage in trivial ways, have informative fun, collect user views and feedback"
-  },
-  smb: {
-    name: "SMB KENYA LTD",
-    owner: "Cogvana Corporation",
-    description: "Property management company offering digital solutions for landlords, agents, caretakers, and property managers in Kenya",
-    product: {
-      name: "Plot Yangu",
-      fullName: "Plot Yangu Property Management System (PMS)",
-      developer: "Developed by Cogvana Technologies and SMB KENYA LTD",
-      description: "Simple offline-capable tool for managing properties digitally"
-    },
-    features: {
-      core: "Tenant management, invoice generation and management, payments and rent collection, property accounting, financial statements, tenant assessment, data-driven screening, transcription and management record sheets",
-      access: "Web portal (admin.cogvana.co.ke), PWA, full Android app, accessible via agents at any cyber cafe",
-      offline: "Fully functional offline - no internet required for daily operations"
-    },
-    services: "Property management, tenant screening, property marketing, consultations, digital property management tools",
-    cyberPlatform: {
-      description: "Platform for cyber cafes and freelancers to become Plot Yangu agents",
-      commission: "Up to 45% commission on Plot Yangu services",
-      features: "File sharing with clients, products and services catalog page, payment gateway with M-Pesa support, financial insights and trends, tools to run and manage cyber operations",
-      access: "cyber.cogvana.co.ke",
-      explore: "cyber.cogvana.co.ke/explore"
-    },
-    target: "Landlords, property managers, real estate agents, caretakers, cyber cafe owners, freelancers seeking agency opportunities",
-    demographics: "Property owners with 5-200 units, professional property managers, cyber cafes in residential areas, entrepreneurs",
-    tone: "Professional with engaging elements - authoritative but accessible",
-    mainLink: "https://cogvana.co.ke",
-    links: {
-      main: "https://cogvana.co.ke",
-      admin: "https://admin.cogvana.co.ke",
-      payments: "https://payments.cogvana.co.ke",
-      cyber: "https://cyber.cogvana.co.ke",
-      cyberExplore: "https://cyber.cogvana.co.ke/explore"
-    },
-    objectives: "Campaign for Plot Yangu PMS, educate users and public on product, drive adoption, engage users professionally, increase page following and likes, brand exposure, drive calls and messages, recruit cyber agents"
-  }
-};
-
-const FORMATTING = {
-  bullet: '•',
-  arrow: '→',
-  checkmark: '✓',
-  star: '★',
-  line: '━━━━━━━━━━',
-  doubleArrow: '»',
-  dot: '·',
-  diamond: '◆',
-  circle: '○'
-};
-
-const COMMON_HASHTAGS = "#Cogvana #CogniTutor #cogvana #sammuhia #plot #plotyangu #smbkenya #samuhia";
-
-// const LINKEDIN_CONTEXT = {
-//   smb: {
-//     ...BRAND_CONTEXT.smb,
-//     tone: "Professional, authoritative, data-driven, solution-focused B2B communication",
-//     postTypes: ['thought-leadership', 'case-study', 'industry-insight', 'product-feature', 'partner-opportunity', 'best-practices', 'market-trends'],
-//     hashtags: "#PropertyManagement #RealEstate #PropTech #KenyaBusiness #DigitalTransformation #RealEstateKenya #PropertyTech"
-//   },
+// // Brand context for AI
+// const BRAND_CONTEXT = {
 //   cogvana: {
-//     ...BRAND_CONTEXT.cogvana,
-//     tone: "Professional yet innovative, education-focused, impact-driven, thought leadership in EdTech",
-//     postTypes: ['edtech-trends', 'learning-innovation', 'educator-spotlight', 'platform-update', 'education-insights', 'impact-story'],
-//     hashtags: "#EdTech #Education #ELearning #DigitalLearning #EducationTechnology #AfricaEducation #LearningInnovation"
+//     name: "Cogvana",
+//     owner: "Cogvana Technologies (subsidiary of Cogvana Corporation)",
+//     description: "AI-powered e-learning platform transforming education in Africa",
+//     apps: {
+//       cogvana: {
+//         name: "Cogvana App",
+//         description: "Free Android app for students with subscriptions for premium content",
+//         features: "Offline-capable, gamified learning experience, social network for interactive learning, groups, virtual classrooms",
+//         availability: "Android (with web/PWA in development)"
+//       },
+//       cognitutor: {
+//         name: "Cogni Tutor",
+//         description: "Platform for teachers to create and sell digital certified courses",
+//         features: "Course creation tools, monetization platform, virtual classrooms with video/audio, content management for schools",
+//         availability: "Web, PWA, Android",
+//         preRegistration: "cogvana.co.ke/platforms/cogni"
+//       }
+//     },
+//     features: "AI-powered personalized learning, offline-first design for limited connectivity, virtual classrooms with video and audio support, dedicated social network for students, gamified engagement, tiered affordable subscriptions, courses on any category from K-12 to professional and tertiary education",
+//     target: "Students (K-12 to tertiary), teachers, educators creating courses, school administrators, educational institutions",
+//     demographics: "Kenyan youth, students with limited internet access, educators seeking monetization, schools needing digital content delivery",
+//     tone: "Casual and informal with touch of professionalism - use English, Swahili, Sheng, and slang to connect with Kenyan youth",
+//     languages: "English, Swahili, Sheng, and slang",
+//     mainLink: "https://cogvana.co.ke",
+//     links: {
+//       main: "https://cogvana.co.ke",
+//       cogniPreReg: "https://cogvana.co.ke/platforms/cogni",
+//       platforms: "https://cogvana.co.ke/platforms"
+//     },
+//     objectives: "Create awareness for apps and platform, drive installations, engage users with fun interactive posts, brand exposure and visibility, increase page following and likes, joke and engage in trivial ways, have informative fun, collect user views and feedback"
+//   },
+//   smb: {
+//     name: "SMB KENYA LTD",
+//     owner: "Cogvana Corporation",
+//     description: "Property management company offering digital solutions for landlords, agents, caretakers, and property managers in Kenya",
+//     product: {
+//       name: "Plot Yangu",
+//       fullName: "Plot Yangu Property Management System (PMS)",
+//       developer: "Developed by Cogvana Technologies and SMB KENYA LTD",
+//       description: "Simple offline-capable tool for managing properties digitally"
+//     },
+//     features: {
+//       core: "Tenant management, invoice generation and management, payments and rent collection, property accounting, financial statements, tenant assessment, data-driven screening, transcription and management record sheets",
+//       access: "Web portal (admin.cogvana.co.ke), PWA, full Android app, accessible via agents at any cyber cafe",
+//       offline: "Fully functional offline - no internet required for daily operations"
+//     },
+//     services: "Property management, tenant screening, property marketing, consultations, digital property management tools",
+//     cyberPlatform: {
+//       description: "Platform for cyber cafes and freelancers to become Plot Yangu agents",
+//       commission: "Up to 45% commission on Plot Yangu services",
+//       features: "File sharing with clients, products and services catalog page, payment gateway with M-Pesa support, financial insights and trends, tools to run and manage cyber operations",
+//       access: "cyber.cogvana.co.ke",
+//       explore: "cyber.cogvana.co.ke/explore"
+//     },
+//     target: "Landlords, property managers, real estate agents, caretakers, cyber cafe owners, freelancers seeking agency opportunities",
+//     demographics: "Property owners with 5-200 units, professional property managers, cyber cafes in residential areas, entrepreneurs",
+//     tone: "Professional with engaging elements - authoritative but accessible",
+//     mainLink: "https://cogvana.co.ke",
+//     links: {
+//       main: "https://cogvana.co.ke",
+//       admin: "https://admin.cogvana.co.ke",
+//       payments: "https://payments.cogvana.co.ke",
+//       cyber: "https://cyber.cogvana.co.ke",
+//       cyberExplore: "https://cyber.cogvana.co.ke/explore"
+//     },
+//     objectives: "Campaign for Plot Yangu PMS, educate users and public on product, drive adoption, engage users professionally, increase page following and likes, brand exposure, drive calls and messages, recruit cyber agents"
 //   }
 // };
 
-interface Post {
-  content: string;
-  postType: string;
-  sent: boolean;
-  scheduledTime: string | null;
-  sentAt: Timestamp | null;
-  index: number;
-  error?: string;
-}
+// const FORMATTING = {
+//   bullet: '•',
+//   arrow: '→',
+//   checkmark: '✓',
+//   star: '★',
+//   line: '━━━━━━━━━━',
+//   doubleArrow: '»',
+//   dot: '·',
+//   diamond: '◆',
+//   circle: '○'
+// };
+
+// const COMMON_HASHTAGS = "#Cogvana #CogniTutor #cogvana #sammuhia #plot #plotyangu #smbkenya #samuhia";
+
+// // const LINKEDIN_CONTEXT = {
+// //   smb: {
+// //     ...BRAND_CONTEXT.smb,
+// //     tone: "Professional, authoritative, data-driven, solution-focused B2B communication",
+// //     postTypes: ['thought-leadership', 'case-study', 'industry-insight', 'product-feature', 'partner-opportunity', 'best-practices', 'market-trends'],
+// //     hashtags: "#PropertyManagement #RealEstate #PropTech #KenyaBusiness #DigitalTransformation #RealEstateKenya #PropertyTech"
+// //   },
+// //   cogvana: {
+// //     ...BRAND_CONTEXT.cogvana,
+// //     tone: "Professional yet innovative, education-focused, impact-driven, thought leadership in EdTech",
+// //     postTypes: ['edtech-trends', 'learning-innovation', 'educator-spotlight', 'platform-update', 'education-insights', 'impact-story'],
+// //     hashtags: "#EdTech #Education #ELearning #DigitalLearning #EducationTechnology #AfricaEducation #LearningInnovation"
+// //   }
+// // };
+
+// interface Post {
+//   content: string;
+//   postType: string;
+//   sent: boolean;
+//   scheduledTime: string | null;
+//   sentAt: Timestamp | null;
+//   index: number;
+//   error?: string;
+// }
 
 // ============================================================================
 // SOCIAL MEDIA (FACEBOOK/INSTAGRAM) FUNCTIONS
@@ -853,98 +1022,98 @@ interface Post {
 // }
 
 // Generate social media posts daily at 2 AM EAT
-export const generateDailyPosts = onSchedule(
-  {
-    schedule: '0 2 * * *',
-    timeZone: 'Africa/Nairobi',
-    secrets: [GEMINI_API_KEY],
-    region: 'us-central1',
-    memory: '512MiB',
-    timeoutSeconds: 540
-  },
-  async (event) => {
-    try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-      const today = getTodayDateString();
+// export const generateDailyPosts = onSchedule(
+//   {
+//     schedule: '0 2 * * *',
+//     timeZone: 'Africa/Nairobi',
+//     secrets: [GEMINI_API_KEY],
+//     region: 'us-central1',
+//     memory: '512MiB',
+//     timeoutSeconds: 540
+//   },
+//   async (event) => {
+//     try {
+//       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
+//       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+//       const today = getTodayDateString();
 
-      console.log(`Generating social media posts for ${today}`);
+//       console.log(`Generating social media posts for ${today}`);
 
-      // Generate for Cogvana
-      const cogvanaPosts = await generatePostsForPage('cogvana', model, 10);
-      await db.collection('social_cogvana').doc(today).set({
-        date: today,
-        posts: cogvanaPosts,
-        createdAt: Timestamp.now(),
-        platform: 'facebook_instagram'
-      });
+//       // Generate for Cogvana
+//       const cogvanaPosts = await generatePostsForPage('cogvana', model, 10);
+//       await db.collection('social_cogvana').doc(today).set({
+//         date: today,
+//         posts: cogvanaPosts,
+//         createdAt: Timestamp.now(),
+//         platform: 'facebook_instagram'
+//       });
 
-      // Generate for SMB
-      const smbPosts = await generatePostsForPage('smb', model, 10);
-      await db.collection('social_smb').doc(today).set({
-        date: today,
-        posts: smbPosts,
-        createdAt: Timestamp.now(),
-        platform: 'facebook_instagram'
-      });
+//       // Generate for SMB
+//       const smbPosts = await generatePostsForPage('smb', model, 10);
+//       await db.collection('social_smb').doc(today).set({
+//         date: today,
+//         posts: smbPosts,
+//         createdAt: Timestamp.now(),
+//         platform: 'facebook_instagram'
+//       });
 
-      console.log(`✅ Generated ${cogvanaPosts.length} posts for Cogvana and ${smbPosts.length} for SMB`);
-    } catch (error) {
-      console.error('❌ Error generating daily posts:', error);
-      throw error;
-    }
-  }
-);
+//       console.log(`✅ Generated ${cogvanaPosts.length} posts for Cogvana and ${smbPosts.length} for SMB`);
+//     } catch (error) {
+//       console.error('❌ Error generating daily posts:', error);
+//       throw error;
+//     }
+//   }
+// );
 
 // Schedule social media posts at 3 AM EAT
-export const scheduleSocialPosts = onSchedule(
-  {
-    schedule: '0 3 * * *',
-    timeZone: 'Africa/Nairobi',
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60
-  },
-  async (event) => {
-    try {
-      const today = getTodayDateString();
+// export const scheduleSocialPosts = onSchedule(
+//   {
+//     schedule: '0 3 * * *',
+//     timeZone: 'Africa/Nairobi',
+//     region: 'us-central1',
+//     memory: '256MiB',
+//     timeoutSeconds: 60
+//   },
+//   async (event) => {
+//     try {
+//       const today = getTodayDateString();
       
-      const cogvanaDoc = await db.collection('social_cogvana').doc(today).get();
-      const smbDoc = await db.collection('social_smb').doc(today).get();
+//       const cogvanaDoc = await db.collection('social_cogvana').doc(today).get();
+//       const smbDoc = await db.collection('social_smb').doc(today).get();
 
-      if (!cogvanaDoc.exists || !smbDoc.exists) {
-        throw new Error('Social posts not found for today');
-      }
+//       if (!cogvanaDoc.exists || !smbDoc.exists) {
+//         throw new Error('Social posts not found for today');
+//       }
 
-      // Generate staggered time slots (7 AM - 9 PM)
-      const timeSlots = generateTimeSlots(20, 7, 21);
+//       // Generate staggered time slots (7 AM - 9 PM)
+//       const timeSlots = generateTimeSlots(20, 7, 21);
       
-      const cogvanaPosts: Post[] = cogvanaDoc.data()!.posts;
-      const smbPosts: Post[] = smbDoc.data()!.posts;
+//       const cogvanaPosts: Post[] = cogvanaDoc.data()!.posts;
+//       const smbPosts: Post[] = smbDoc.data()!.posts;
 
-      // Alternate between pages
-      const cogvanaSlots: string[] = [];
-      const smbSlots: string[] = [];
+//       // Alternate between pages
+//       const cogvanaSlots: string[] = [];
+//       const smbSlots: string[] = [];
       
-      timeSlots.forEach((slot, idx) => {
-        if (idx % 2 === 0) cogvanaSlots.push(slot);
-        else smbSlots.push(slot);
-      });
+//       timeSlots.forEach((slot, idx) => {
+//         if (idx % 2 === 0) cogvanaSlots.push(slot);
+//         else smbSlots.push(slot);
+//       });
 
-      // Assign times
-      cogvanaPosts.forEach((post, idx) => { post.scheduledTime = cogvanaSlots[idx]; });
-      smbPosts.forEach((post, idx) => { post.scheduledTime = smbSlots[idx]; });
+//       // Assign times
+//       cogvanaPosts.forEach((post, idx) => { post.scheduledTime = cogvanaSlots[idx]; });
+//       smbPosts.forEach((post, idx) => { post.scheduledTime = smbSlots[idx]; });
 
-      await db.collection('social_cogvana').doc(today).update({ posts: cogvanaPosts });
-      await db.collection('social_smb').doc(today).update({ posts: smbPosts });
+//       await db.collection('social_cogvana').doc(today).update({ posts: cogvanaPosts });
+//       await db.collection('social_smb').doc(today).update({ posts: smbPosts });
 
-      console.log('✅ Social posts scheduled successfully');
-    } catch (error) {
-      console.error('❌ Error scheduling social posts:', error);
-      throw error;
-    }
-  }
-);
+//       console.log('✅ Social posts scheduled successfully');
+//     } catch (error) {
+//       console.error('❌ Error scheduling social posts:', error);
+//       throw error;
+//     }
+//   }
+// );
 
 // Publish scheduled social media posts every 5 minutes490706184128700
 
@@ -1065,206 +1234,206 @@ export const scheduleSocialPosts = onSchedule(
 // MANUAL TRIGGER FOR TESTING
 // ============================================================================
 
-export const manualGenerateAllPosts = onRequest(
-  {
-    secrets: [GEMINI_API_KEY],
-    region: 'us-central1',
-    memory: '1GiB',
-    timeoutSeconds: 540
-  },
-  async (req, res) => {
-    try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-      const today = getTodayDateString();
+// export const manualGenerateAllPosts = onRequest(
+//   {
+//     secrets: [GEMINI_API_KEY],
+//     region: 'us-central1',
+//     memory: '1GiB',
+//     timeoutSeconds: 540
+//   },
+//   async (req, res) => {
+//     try {
+//       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
+//       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+//       const today = getTodayDateString();
 
-      console.log(`🔧 MANUAL: Generating all posts for ${today}`);
+//       console.log(`🔧 MANUAL: Generating all posts for ${today}`);
 
-      // Social Media Posts
-      const cogvanaSocial = await generatePostsForPage('cogvana', model, 10);
-      const smbSocial = await generatePostsForPage('smb', model, 10);
+//       // Social Media Posts
+//       const cogvanaSocial = await generatePostsForPage('cogvana', model, 10);
+//       const smbSocial = await generatePostsForPage('smb', model, 10);
 
-      // LinkedIn Posts
-    //   const smbLinkedIn = await generateLinkedInPostsForPage('smb', model, 7);
-    //   const cogvanaLinkedIn = await generateLinkedInPostsForPage('cogvana', model, 5);
+//       // LinkedIn Posts
+//     //   const smbLinkedIn = await generateLinkedInPostsForPage('smb', model, 7);
+//     //   const cogvanaLinkedIn = await generateLinkedInPostsForPage('cogvana', model, 5);
 
-      // Save to Firestore
-      await Promise.all([
-        db.collection('social_cogvana').doc(today).set({
-          date: today,
-          posts: cogvanaSocial,
-          createdAt: Timestamp.now(),
-          platform: 'facebook_instagram',
-          generatedManually: true
-        }),
-        db.collection('social_smb').doc(today).set({
-          date: today,
-          posts: smbSocial,
-          createdAt: Timestamp.now(),
-          platform: 'facebook_instagram',
-          generatedManually: true
-        }),
-        // db.collection('linkedin_smb').doc(today).set({
-        //   date: today,
-        //   posts: smbLinkedIn,
-        //   createdAt: Timestamp.now(),
-        //   platform: 'linkedin',
-        //   generatedManually: true
-        // }),
-        // db.collection('linkedin_cogvana').doc(today).set({
-        //   date: today,
-        //   posts: cogvanaLinkedIn,
-        //   createdAt: Timestamp.now(),
-        //   platform: 'linkedin',
-        //   generatedManually: true
-        // })
-      ]);
+//       // Save to Firestore
+//       await Promise.all([
+//         db.collection('social_cogvana').doc(today).set({
+//           date: today,
+//           posts: cogvanaSocial,
+//           createdAt: Timestamp.now(),
+//           platform: 'facebook_instagram',
+//           generatedManually: true
+//         }),
+//         db.collection('social_smb').doc(today).set({
+//           date: today,
+//           posts: smbSocial,
+//           createdAt: Timestamp.now(),
+//           platform: 'facebook_instagram',
+//           generatedManually: true
+//         }),
+//         // db.collection('linkedin_smb').doc(today).set({
+//         //   date: today,
+//         //   posts: smbLinkedIn,
+//         //   createdAt: Timestamp.now(),
+//         //   platform: 'linkedin',
+//         //   generatedManually: true
+//         // }),
+//         // db.collection('linkedin_cogvana').doc(today).set({
+//         //   date: today,
+//         //   posts: cogvanaLinkedIn,
+//         //   createdAt: Timestamp.now(),
+//         //   platform: 'linkedin',
+//         //   generatedManually: true
+//         // })
+//       ]);
 
-      // Schedule all posts
-      const socialTimeSlots = generateTimeSlots(20, 7, 21);
-      //const linkedInTimes = ['08:00', '09:30', '11:00', '12:30', '14:00', '15:00', '16:00', '17:00', '09:00', '10:30', '13:00', '15:30'];
+//       // Schedule all posts
+//       const socialTimeSlots = generateTimeSlots(20, 7, 21);
+//       //const linkedInTimes = ['08:00', '09:30', '11:00', '12:30', '14:00', '15:00', '16:00', '17:00', '09:00', '10:30', '13:00', '15:30'];
 
-      const cogvanaSocialSlots: string[] = [];
-      const smbSocialSlots: string[] = [];
+//       const cogvanaSocialSlots: string[] = [];
+//       const smbSocialSlots: string[] = [];
       
-      socialTimeSlots.forEach((slot, idx) => {
-        if (idx % 2 === 0) cogvanaSocialSlots.push(slot);
-        else smbSocialSlots.push(slot);
-      });
+//       socialTimeSlots.forEach((slot, idx) => {
+//         if (idx % 2 === 0) cogvanaSocialSlots.push(slot);
+//         else smbSocialSlots.push(slot);
+//       });
 
-      cogvanaSocial.forEach((post, idx) => { post.scheduledTime = cogvanaSocialSlots[idx]; });
-      smbSocial.forEach((post, idx) => { post.scheduledTime = smbSocialSlots[idx]; });
-    //   smbLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx]; });
-    //   cogvanaLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx + 7]; });
+//       cogvanaSocial.forEach((post, idx) => { post.scheduledTime = cogvanaSocialSlots[idx]; });
+//       smbSocial.forEach((post, idx) => { post.scheduledTime = smbSocialSlots[idx]; });
+//     //   smbLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx]; });
+//     //   cogvanaLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx + 7]; });
 
-      await Promise.all([
-        db.collection('social_cogvana').doc(today).update({ posts: cogvanaSocial }),
-        db.collection('social_smb').doc(today).update({ posts: smbSocial }),
-        // db.collection('linkedin_smb').doc(today).update({ posts: smbLinkedIn }),
-        // db.collection('linkedin_cogvana').doc(today).update({ posts: cogvanaLinkedIn })
-      ]);
+//       await Promise.all([
+//         db.collection('social_cogvana').doc(today).update({ posts: cogvanaSocial }),
+//         db.collection('social_smb').doc(today).update({ posts: smbSocial }),
+//         // db.collection('linkedin_smb').doc(today).update({ posts: smbLinkedIn }),
+//         // db.collection('linkedin_cogvana').doc(today).update({ posts: cogvanaLinkedIn })
+//       ]);
 
-      res.status(200).json({
-        success: true,
-        message: 'All posts generated and scheduled',
-        date: today,
-        counts: {
-          cogvanaSocial: cogvanaSocial.length,
-          smbSocial: smbSocial.length,
-        //   smbLinkedIn: smbLinkedIn.length,
-        //   cogvanaLinkedIn: cogvanaLinkedIn.length
-        }
-      });
+//       res.status(200).json({
+//         success: true,
+//         message: 'All posts generated and scheduled',
+//         date: today,
+//         counts: {
+//           cogvanaSocial: cogvanaSocial.length,
+//           smbSocial: smbSocial.length,
+//         //   smbLinkedIn: smbLinkedIn.length,
+//         //   cogvanaLinkedIn: cogvanaLinkedIn.length
+//         }
+//       });
 
-    } catch (error) {
-      console.error('❌ Manual generation error:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  }
-);
+//     } catch (error) {
+//       console.error('❌ Manual generation error:', error);
+//       res.status(500).json({
+//         success: false,
+//         error: error instanceof Error ? error.message : 'Unknown error'
+//       });
+//     }
+//   }
+// );
 
-async function processSocialPagePosts(collection: string, today: string, currentTime: string, pageId: string, token: string) {
-  console.log(`🔍 [${collection}] Starting processing for ${today} at ${currentTime}`);
-  console.log(`🔍 [${collection}] PageId: ${pageId ? pageId.substring(0, 10) + '...' : 'MISSING'}`);
-  console.log(`🔍 [${collection}] Token: ${token ? 'Present (length: ' + token.length + ')' : 'MISSING'}`);
+// async function processSocialPagePosts(collection: string, today: string, currentTime: string, pageId: string, token: string) {
+//   console.log(`🔍 [${collection}] Starting processing for ${today} at ${currentTime}`);
+//   console.log(`🔍 [${collection}] PageId: ${pageId ? pageId.substring(0, 10) + '...' : 'MISSING'}`);
+//   console.log(`🔍 [${collection}] Token: ${token ? 'Present (length: ' + token.length + ')' : 'MISSING'}`);
   
-  const docRef = db.collection(collection).doc(today);
+//   const docRef = db.collection(collection).doc(today);
   
-  let doc;
-  try {
-    doc = await docRef.get();
-    console.log(`✓ [${collection}] Firestore doc.get() completed`);
-  } catch (error) {
-    console.error(`❌ [${collection}] Firestore doc.get() failed:`, error);
-    throw error;
-  }
+//   let doc;
+//   try {
+//     doc = await docRef.get();
+//     console.log(`✓ [${collection}] Firestore doc.get() completed`);
+//   } catch (error) {
+//     console.error(`❌ [${collection}] Firestore doc.get() failed:`, error);
+//     throw error;
+//   }
 
-  if (!doc.exists) {
-    console.log(`⚠️ [${collection}] No document exists for ${today}`);
-    return;
-  }
+//   if (!doc.exists) {
+//     console.log(`⚠️ [${collection}] No document exists for ${today}`);
+//     return;
+//   }
 
-  const data = doc.data();
-  console.log(`✓ [${collection}] Document data retrieved:`, data ? 'YES' : 'NO');
+//   const data = doc.data();
+//   console.log(`✓ [${collection}] Document data retrieved:`, data ? 'YES' : 'NO');
   
-  const posts: Post[] = data?.posts || [];
-  console.log(`📊 [${collection}] Total posts found: ${posts.length}`);
+//   const posts: Post[] = data?.posts || [];
+//   console.log(`📊 [${collection}] Total posts found: ${posts.length}`);
 
-  if (posts.length === 0) {
-    console.log(`⚠️ [${collection}] No posts array or empty array`);
-    return;
-  }
+//   if (posts.length === 0) {
+//     console.log(`⚠️ [${collection}] No posts array or empty array`);
+//     return;
+//   }
 
-  for (let i = 0; i < posts.length; i++) {
-    const post = posts[i];
-    console.log(`\n📝 [${collection}] Post ${i}:`, {
-      sent: post.sent,
-      scheduledTime: post.scheduledTime,
-      hasContent: !!post.content,
-      contentLength: post.content?.length || 0
-    });
+//   for (let i = 0; i < posts.length; i++) {
+//     const post = posts[i];
+//     console.log(`\n📝 [${collection}] Post ${i}:`, {
+//       sent: post.sent,
+//       scheduledTime: post.scheduledTime,
+//       hasContent: !!post.content,
+//       contentLength: post.content?.length || 0
+//     });
     
-    if (!post.scheduledTime) {
-      console.log(`⚠️ [${collection}] Post ${i}: No scheduledTime`);
-      continue;
-    }
+//     if (!post.scheduledTime) {
+//       console.log(`⚠️ [${collection}] Post ${i}: No scheduledTime`);
+//       continue;
+//     }
 
-    if (post.sent) {
-      console.log(`⏭️ [${collection}] Post ${i}: Already sent, skipping`);
-      continue;
-    }
+//     if (post.sent) {
+//       console.log(`⏭️ [${collection}] Post ${i}: Already sent, skipping`);
+//       continue;
+//     }
 
-    console.log(`⏰ [${collection}] Post ${i}: Comparing times - scheduled: ${post.scheduledTime}, current: ${currentTime}`);
+//     console.log(`⏰ [${collection}] Post ${i}: Comparing times - scheduled: ${post.scheduledTime}, current: ${currentTime}`);
     
-    if (post.scheduledTime <= currentTime) {
-      console.log(`🚀 [${collection}] Post ${i}: Ready to post!`);
+//     if (post.scheduledTime <= currentTime) {
+//       console.log(`🚀 [${collection}] Post ${i}: Ready to post!`);
       
-      try {
-        console.log(`📤 [${collection}] Post ${i}: Calling postToFacebook...`);
-        const result = await postToFacebook(pageId, post.content, token);
-        console.log(`✅ [${collection}] Post ${i}: Facebook API response:`, result);
+//       try {
+//         console.log(`📤 [${collection}] Post ${i}: Calling postToFacebook...`);
+//         const result = await postToFacebook(pageId, post.content, token);
+//         console.log(`✅ [${collection}] Post ${i}: Facebook API response:`, result);
         
-        post.sent = true;
-        post.sentAt = Timestamp.now();
+//         post.sent = true;
+//         post.sentAt = Timestamp.now();
         
-        console.log(`💾 [${collection}] Post ${i}: Updating Firestore...`);
-        await docRef.update({ posts });
-        console.log(`✅ [${collection}] Post ${i}: Successfully posted and marked as sent at ${currentTime}`);
+//         console.log(`💾 [${collection}] Post ${i}: Updating Firestore...`);
+//         await docRef.update({ posts });
+//         console.log(`✅ [${collection}] Post ${i}: Successfully posted and marked as sent at ${currentTime}`);
         
-      } catch (error) {
-        console.error(`❌ [${collection}] Post ${i}: Error during posting:`, error);
-        console.error(`❌ [${collection}] Post ${i}: Error details:`, {
-          message: error instanceof Error ? error.message : 'Unknown error',
-          stack: error instanceof Error ? error.stack : undefined,
-          response: (error as any).response?.data
-        });
+//       } catch (error) {
+//         console.error(`❌ [${collection}] Post ${i}: Error during posting:`, error);
+//         console.error(`❌ [${collection}] Post ${i}: Error details:`, {
+//           message: error instanceof Error ? error.message : 'Unknown error',
+//           stack: error instanceof Error ? error.stack : undefined,
+//           response: (error as any).response?.data
+//         });
         
-        post.error = error instanceof Error ? error.message : 'Unknown error';
+//         post.error = error instanceof Error ? error.message : 'Unknown error';
         
-        try {
-          await docRef.update({ posts });
-          console.log(`💾 [${collection}] Post ${i}: Error logged to Firestore`);
-        } catch (updateError) {
-          console.error(`❌ [${collection}] Post ${i}: Failed to update error in Firestore:`, updateError);
-        }
+//         try {
+//           await docRef.update({ posts });
+//           console.log(`💾 [${collection}] Post ${i}: Error logged to Firestore`);
+//         } catch (updateError) {
+//           console.error(`❌ [${collection}] Post ${i}: Failed to update error in Firestore:`, updateError);
+//         }
         
-        try {
-          await logError('social', collection, today, i, error instanceof Error ? error.message : 'Unknown error');
-          console.log(`📋 [${collection}] Post ${i}: Error logged via logError()`);
-        } catch (logError) {
-          console.error(`❌ [${collection}] Post ${i}: Failed to call logError():`, logError);
-        }
-      }
-    } else {
-      console.log(`⏸️ [${collection}] Post ${i}: Not yet time (scheduled: ${post.scheduledTime}, current: ${currentTime})`);
-    }
-  }
+//         try {
+//           await logError('social', collection, today, i, error instanceof Error ? error.message : 'Unknown error');
+//           console.log(`📋 [${collection}] Post ${i}: Error logged via logError()`);
+//         } catch (logError) {
+//           console.error(`❌ [${collection}] Post ${i}: Failed to call logError():`, logError);
+//         }
+//       }
+//     } else {
+//       console.log(`⏸️ [${collection}] Post ${i}: Not yet time (scheduled: ${post.scheduledTime}, current: ${currentTime})`);
+//     }
+//   }
   
-  console.log(`✓ [${collection}] Processing complete for ${today}\n`);
-}
+//   console.log(`✓ [${collection}] Processing complete for ${today}\n`);
+// }
 
 // export const publishSocialPosts = onSchedule(
 //   {
@@ -1311,322 +1480,322 @@ async function processSocialPagePosts(collection: string, today: string, current
 //     }
 //   }
 // );
-export const publishSocialPosts = onSchedule(
-  {
-    schedule: '*/5 * * * *',
-    timeZone: 'Africa/Nairobi',
-    secrets: [COGVANA_PAGE_TOKEN, SMB_PAGE_TOKEN, COGVANA_PAGE_ID, SMB_PAGE_ID],
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60
-  },
-  async (event) => {
-    try {
-      // Convert UTC to EAT (UTC+3)
-      const nowUTC = new Date();
-      const nowEAT = new Date(nowUTC.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
+// export const publishSocialPosts = onSchedule(
+//   {
+//     schedule: '*/5 * * * *',
+//     timeZone: 'Africa/Nairobi',
+//     secrets: [COGVANA_PAGE_TOKEN, SMB_PAGE_TOKEN, COGVANA_PAGE_ID, SMB_PAGE_ID],
+//     region: 'us-central1',
+//     memory: '256MiB',
+//     timeoutSeconds: 60
+//   },
+//   async (event) => {
+//     try {
+//       // Convert UTC to EAT (UTC+3)
+//       const nowUTC = new Date();
+//       const nowEAT = new Date(nowUTC.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
       
-      const today = getTodayDateString(); // Make sure this also uses EAT!
-      const currentTime = `${nowEAT.getHours().toString().padStart(2, '0')}:${nowEAT.getMinutes().toString().padStart(2, '0')}`;
+//       const today = getTodayDateString(); // Make sure this also uses EAT!
+//       const currentTime = `${nowEAT.getHours().toString().padStart(2, '0')}:${nowEAT.getMinutes().toString().padStart(2, '0')}`;
 
-      console.log(`🕐 UTC Time: ${nowUTC.toISOString()}`);
-      console.log(`🕐 EAT Time: ${currentTime} on ${today}`);
+//       console.log(`🕐 UTC Time: ${nowUTC.toISOString()}`);
+//       console.log(`🕐 EAT Time: ${currentTime} on ${today}`);
 
-      await processSocialPagePosts('social_cogvana', today, currentTime, COGVANA_PAGE_ID.value(), COGVANA_PAGE_TOKEN.value());
-      await processSocialPagePosts('social_smb', today, currentTime, SMB_PAGE_ID.value(), SMB_PAGE_TOKEN.value());
+//       await processSocialPagePosts('social_cogvana', today, currentTime, COGVANA_PAGE_ID.value(), COGVANA_PAGE_TOKEN.value());
+//       await processSocialPagePosts('social_smb', today, currentTime, SMB_PAGE_ID.value(), SMB_PAGE_TOKEN.value());
 
-    } catch (error) {
-      console.error('❌ Error publishing social posts:', error);
-    }
-  }
-);
+//     } catch (error) {
+//       console.error('❌ Error publishing social posts:', error);
+//     }
+//   }
+// );
 
 // Update your generatePostsForPage function
-async function generatePostsForPage(pageType: 'cogvana' | 'smb', model: any, count: number): Promise<Post[]> {
-  const brand = BRAND_CONTEXT[pageType];
-  const posts: Post[] = [];
+// async function generatePostsForPage(pageType: 'cogvana' | 'smb', model: any, count: number): Promise<Post[]> {
+//   const brand = BRAND_CONTEXT[pageType];
+//   const posts: Post[] = [];
   
-  const postTypes = [
-    'promotional', 'promotional',
-    'educational', 'educational',
-    'engagement', 'engagement',
-    'user-story-testimonial',
-    'tips-and-tricks',
-    'fun-fact-trivia',
-    'strong-cta-conversion'
-  ];
+//   const postTypes = [
+//     'promotional', 'promotional',
+//     'educational', 'educational',
+//     'engagement', 'engagement',
+//     'user-story-testimonial',
+//     'tips-and-tricks',
+//     'fun-fact-trivia',
+//     'strong-cta-conversion'
+//   ];
 
-  for (let i = 0; i < count; i++) {
-    const postType = postTypes[i];
-    const prompt = buildSocialPrompt(brand, postType, pageType);
+//   for (let i = 0; i < count; i++) {
+//     const postType = postTypes[i];
+//     const prompt = buildSocialPrompt(brand, postType, pageType);
     
-    try {
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let text = response.text().trim();
+//     try {
+//       const result = await model.generateContent(prompt);
+//       const response = await result.response;
+//       let text = response.text().trim();
       
-      // 🔥 Clean and convert the text
-      text = cleanPostContent(text);
+//       // 🔥 Clean and convert the text
+//       text = cleanPostContent(text);
       
-      posts.push({
-        content: text,
-        postType,
-        sent: false,
-        scheduledTime: null,
-        sentAt: null,
-        index: i
-      });
+//       posts.push({
+//         content: text,
+//         postType,
+//         sent: false,
+//         scheduledTime: null,
+//         sentAt: null,
+//         index: i
+//       });
       
-      if (i < count - 1) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    } catch (error) {
-      console.error(`Error generating post ${i} for ${pageType}:`, error);
-      posts.push({
-        content: `Error generating post. Please check logs.`,
-        postType,
-        sent: false,
-        scheduledTime: null,
-        sentAt: null,
-        index: i,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  }
+//       if (i < count - 1) {
+//         await new Promise(resolve => setTimeout(resolve, 2000));
+//       }
+//     } catch (error) {
+//       console.error(`Error generating post ${i} for ${pageType}:`, error);
+//       posts.push({
+//         content: `Error generating post. Please check logs.`,
+//         postType,
+//         sent: false,
+//         scheduledTime: null,
+//         sentAt: null,
+//         index: i,
+//         error: error instanceof Error ? error.message : 'Unknown error'
+//       });
+//     }
+//   }
 
-  return posts;
-}
+//   return posts;
+// }
 
 // Also update your Facebook posting function
-async function postToFacebook(pageId: string, message: string, accessToken: string): Promise<any> {
-  console.log(`🌐 [Facebook API] Starting post request`);
-  console.log(`🌐 [Facebook API] PageId: ${pageId}`);
-  console.log(`🌐 [Facebook API] Message length: ${message?.length || 0}`);
-  console.log(`🌐 [Facebook API] Token present: ${!!accessToken}`);
+// async function postToFacebook(pageId: string, message: string, accessToken: string): Promise<any> {
+//   console.log(`🌐 [Facebook API] Starting post request`);
+//   console.log(`🌐 [Facebook API] PageId: ${pageId}`);
+//   console.log(`🌐 [Facebook API] Message length: ${message?.length || 0}`);
+//   console.log(`🌐 [Facebook API] Token present: ${!!accessToken}`);
   
-  // Clean the message one more time before posting
-  const cleanedMessage = cleanPostContent(message);
+//   // Clean the message one more time before posting
+//   const cleanedMessage = cleanPostContent(message);
   
-  const url = `https://graph.facebook.com/v21.0/${pageId}/feed`;
-  console.log(`🌐 [Facebook API] URL: ${url}`);
+//   const url = `https://graph.facebook.com/v21.0/${pageId}/feed`;
+//   console.log(`🌐 [Facebook API] URL: ${url}`);
   
-  try {
-    const form = new FormData();
-    form.append('message', cleanedMessage); // Use cleaned message
-    form.append('access_token', accessToken);
+//   try {
+//     const form = new FormData();
+//     form.append('message', cleanedMessage); // Use cleaned message
+//     form.append('access_token', accessToken);
     
-    console.log(`🌐 [Facebook API] FormData created, making POST request...`);
+//     console.log(`🌐 [Facebook API] FormData created, making POST request...`);
     
-    const response = await axios.post(url, form, {
-      headers: {
-        ...form.getHeaders(),
-        'Content-Type': 'multipart/form-data; charset=UTF-8' // Ensure UTF-8
-      }
-    });
+//     const response = await axios.post(url, form, {
+//       headers: {
+//         ...form.getHeaders(),
+//         'Content-Type': 'multipart/form-data; charset=UTF-8' // Ensure UTF-8
+//       }
+//     });
 
-    console.log(`🌐 [Facebook API] Response status: ${response.status}`);
-    console.log(`🌐 [Facebook API] Response data:`, response.data);
+//     console.log(`🌐 [Facebook API] Response status: ${response.status}`);
+//     console.log(`🌐 [Facebook API] Response data:`, response.data);
     
-    return response.data;
+//     return response.data;
     
-  } catch (error) {
-    console.error(`🌐 [Facebook API] Request failed`);
-    console.error(`🌐 [Facebook API] Error:`, error);
+//   } catch (error) {
+//     console.error(`🌐 [Facebook API] Request failed`);
+//     console.error(`🌐 [Facebook API] Error:`, error);
     
-    if (axios.isAxiosError(error)) {
-      console.error(`🌐 [Facebook API] Status: ${error.response?.status}`);
-      console.error(`🌐 [Facebook API] Response data:`, error.response?.data);
-      console.error(`🌐 [Facebook API] Headers:`, error.response?.headers);
-    }
+//     if (axios.isAxiosError(error)) {
+//       console.error(`🌐 [Facebook API] Status: ${error.response?.status}`);
+//       console.error(`🌐 [Facebook API] Response data:`, error.response?.data);
+//       console.error(`🌐 [Facebook API] Headers:`, error.response?.headers);
+//     }
     
-    throw error;
-  }
-}
+//     throw error;
+//   }
+// }
 
-function convertMarkdownBoldToUnicode(text: string): string {
-  return text.replace(/\*\*(.*?)\*\*/g, (match, content) => {
-    return content.split('').map((char: string) => {
-      const code = char.charCodeAt(0);
+// function convertMarkdownBoldToUnicode(text: string): string {
+//   return text.replace(/\*\*(.*?)\*\*/g, (match, content) => {
+//     return content.split('').map((char: string) => {
+//       const code = char.charCodeAt(0);
       
-      // Uppercase A-Z → Mathematical Bold Capital A-Z
-      if (code >= 0x41 && code <= 0x5A) {
-        return String.fromCodePoint(code - 0x41 + 0x1D400);
-      }
-      // Lowercase a-z → Mathematical Bold Small A-Z
-      else if (code >= 0x61 && code <= 0x7A) {
-        return String.fromCodePoint(code - 0x61 + 0x1D41A);
-      }
-      // Digits 0-9 → Mathematical Bold Digit 0-9
-      else if (code >= 0x30 && code <= 0x39) {
-        return String.fromCodePoint(code - 0x30 + 0x1D7CE);
-      }
+//       // Uppercase A-Z → Mathematical Bold Capital A-Z
+//       if (code >= 0x41 && code <= 0x5A) {
+//         return String.fromCodePoint(code - 0x41 + 0x1D400);
+//       }
+//       // Lowercase a-z → Mathematical Bold Small A-Z
+//       else if (code >= 0x61 && code <= 0x7A) {
+//         return String.fromCodePoint(code - 0x61 + 0x1D41A);
+//       }
+//       // Digits 0-9 → Mathematical Bold Digit 0-9
+//       else if (code >= 0x30 && code <= 0x39) {
+//         return String.fromCodePoint(code - 0x30 + 0x1D7CE);
+//       }
       
-      // Keep everything else (spaces, punctuation, emojis)
-      return char;
-    }).join('');
-  });
-}
+//       // Keep everything else (spaces, punctuation, emojis)
+//       return char;
+//     }).join('');
+//   });
+// }
 
-// Clean up function
-function cleanPostContent(text: string): string {
-  // Remove [object Object] artifacts
-  let cleaned = text.replace(/\[object Object\]/g, '');
+// // Clean up function
+// function cleanPostContent(text: string): string {
+//   // Remove [object Object] artifacts
+//   let cleaned = text.replace(/\[object Object\]/g, '');
   
-  // Convert markdown bold to Unicode bold
-  cleaned = convertMarkdownBoldToUnicode(cleaned);
+//   // Convert markdown bold to Unicode bold
+//   cleaned = convertMarkdownBoldToUnicode(cleaned);
   
-  // Normalize Unicode to prevent encoding issues
-  cleaned = cleaned.normalize('NFC');
+//   // Normalize Unicode to prevent encoding issues
+//   cleaned = cleaned.normalize('NFC');
   
-  return cleaned;
-}
+//   return cleaned;
+// }
 
-function buildSocialPrompt(brand: any, postType: string, pageType: string): string {
-  return `You are an expert social media content creator for ${brand.name}.
+// function buildSocialPrompt(brand: any, postType: string, pageType: string): string {
+//   return `You are an expert social media content creator for ${brand.name}.
 
-CRITICAL INSTRUCTIONS - READ CAREFULLY:
-1. You MUST use ONLY the context provided below
-2. NEVER invent features, services, or information not explicitly mentioned
-3. NEVER make assumptions about the brand
-4. If a detail isn't in the context, DON'T mention it
-5. Stay 100% faithful to the brand voice and tone described
+// CRITICAL INSTRUCTIONS - READ CAREFULLY:
+// 1. You MUST use ONLY the context provided below
+// 2. NEVER invent features, services, or information not explicitly mentioned
+// 3. NEVER make assumptions about the brand
+// 4. If a detail isn't in the context, DON'T mention it
+// 5. Stay 100% faithful to the brand voice and tone described
 
-COMPLETE BRAND CONTEXT:
-Company: ${brand.name}
-Owner: ${brand.owner}
-Description: ${brand.description}
+// COMPLETE BRAND CONTEXT:
+// Company: ${brand.name}
+// Owner: ${brand.owner}
+// Description: ${brand.description}
 
-${pageType === 'cogvana' ? `
-APPS AND PLATFORMS:
-Cogvana App: ${brand.apps.cogvana.description}
-- Features: ${brand.apps.cogvana.features}
-- Availability: ${brand.apps.cogvana.availability}
+// ${pageType === 'cogvana' ? `
+// APPS AND PLATFORMS:
+// Cogvana App: ${brand.apps.cogvana.description}
+// - Features: ${brand.apps.cogvana.features}
+// - Availability: ${brand.apps.cogvana.availability}
 
-Cogni Tutor: ${brand.apps.cognitutor.description}
-- Features: ${brand.apps.cognitutor.features}
-- Availability: ${brand.apps.cognitutor.availability}
-- Pre-registration: ${brand.apps.cognitutor.preRegistration}
-` : ''}
+// Cogni Tutor: ${brand.apps.cognitutor.description}
+// - Features: ${brand.apps.cognitutor.features}
+// - Availability: ${brand.apps.cognitutor.availability}
+// - Pre-registration: ${brand.apps.cognitutor.preRegistration}
+// ` : ''}
 
-${pageType === 'smb' ? `
-PRODUCT: ${brand.product.fullName}
-- ${brand.product.description}
-- Developed by: ${brand.product.developer}
+// ${pageType === 'smb' ? `
+// PRODUCT: ${brand.product.fullName}
+// - ${brand.product.description}
+// - Developed by: ${brand.product.developer}
 
-CORE FEATURES:
-${brand.features.core}
+// CORE FEATURES:
+// ${brand.features.core}
 
-ACCESS METHODS:
-${brand.features.access}
+// ACCESS METHODS:
+// ${brand.features.access}
 
-OFFLINE CAPABILITY:
-${brand.features.offline}
+// OFFLINE CAPABILITY:
+// ${brand.features.offline}
 
-SERVICES OFFERED:
-${brand.services}
+// SERVICES OFFERED:
+// ${brand.services}
 
-CYBER AGENT PLATFORM:
-${brand.cyberPlatform.description}
-- Commission: ${brand.cyberPlatform.commission}
-- Features: ${brand.cyberPlatform.features}
-- Access: ${brand.cyberPlatform.access}
-- Details: ${brand.cyberPlatform.explore}
-` : ''}
+// CYBER AGENT PLATFORM:
+// ${brand.cyberPlatform.description}
+// - Commission: ${brand.cyberPlatform.commission}
+// - Features: ${brand.cyberPlatform.features}
+// - Access: ${brand.cyberPlatform.access}
+// - Details: ${brand.cyberPlatform.explore}
+// ` : ''}
 
-COMPLETE FEATURE LIST:
-${brand.features}
+// COMPLETE FEATURE LIST:
+// ${brand.features}
 
-TARGET AUDIENCE:
-${brand.target}
+// TARGET AUDIENCE:
+// ${brand.target}
 
-DEMOGRAPHICS:
-${brand.demographics}
+// DEMOGRAPHICS:
+// ${brand.demographics}
 
-BRAND TONE & VOICE:
-${brand.tone}
+// BRAND TONE & VOICE:
+// ${brand.tone}
 
-${pageType === 'cogvana' ? `LANGUAGES TO USE: ${brand.languages}` : ''}
+// ${pageType === 'cogvana' ? `LANGUAGES TO USE: ${brand.languages}` : ''}
 
-AVAILABLE LINKS (use contextually appropriate link):
-${Object.entries(brand.links).map(([key, url]) => `- ${key}: ${url}`).join('\n')}
+// AVAILABLE LINKS (use contextually appropriate link):
+// ${Object.entries(brand.links).map(([key, url]) => `- ${key}: ${url}`).join('\n')}
 
-OBJECTIVES:
-${brand.objectives}
+// OBJECTIVES:
+// ${brand.objectives}
 
-POST TYPE: ${postType.toUpperCase()}
+// POST TYPE: ${postType.toUpperCase()}
 
-POST TYPE SPECIFIC GUIDELINES:
-${getPostTypeGuidance(postType, pageType)}
+// POST TYPE SPECIFIC GUIDELINES:
+// ${getPostTypeGuidance(postType, pageType)}
 
-MANDATORY POST REQUIREMENTS:
-1. Length: 100-200 words
-2. Use proper spacing (double line breaks between sections)
-3. Include relevant emojis (moderate use - 3-5 per post)
-4. Use headings with ** for bold where appropriate
-5. Use emojis strategically:
-   - 1 emoji in opening line (hook)
-   - Emojis as bullet points (✅, →, •)
-   - 1 emoji before CTA
-   - Total: 5-8 emojis per post
-6. Use **bold** for key phrases (1-2 per post max)
-7. Use Unicode symbols for structure:
-   • Bullet points: ${FORMATTING.bullet}
-   → Arrows: ${FORMATTING.arrow} or ${FORMATTING.doubleArrow}
-   ✓ Checkmarks: ${FORMATTING.checkmark}
-   ★ Stars: ${FORMATTING.star}
-   ◆ Diamonds: ${FORMATTING.diamond}
-   ━ Lines for separators: ${FORMATTING.line}
+// MANDATORY POST REQUIREMENTS:
+// 1. Length: 100-200 words
+// 2. Use proper spacing (double line breaks between sections)
+// 3. Include relevant emojis (moderate use - 3-5 per post)
+// 4. Use headings with ** for bold where appropriate
+// 5. Use emojis strategically:
+//    - 1 emoji in opening line (hook)
+//    - Emojis as bullet points (✅, →, •)
+//    - 1 emoji before CTA
+//    - Total: 5-8 emojis per post
+// 6. Use **bold** for key phrases (1-2 per post max)
+// 7. Use Unicode symbols for structure:
+//    • Bullet points: ${FORMATTING.bullet}
+//    → Arrows: ${FORMATTING.arrow} or ${FORMATTING.doubleArrow}
+//    ✓ Checkmarks: ${FORMATTING.checkmark}
+//    ★ Stars: ${FORMATTING.star}
+//    ◆ Diamonds: ${FORMATTING.diamond}
+//    ━ Lines for separators: ${FORMATTING.line}
 
-9. Make it conversational and engaging
+// 9. Make it conversational and engaging
 
-10. MUST INCLUDE A CLEAR CTA (Call-to-Action):
-   ${pageType === 'cogvana' ? `
-   - "Download now and start learning! 📱"
-   - "Comment below with your learning goals 💬"
-   - "Share with a student who needs this! ❤️"
-   - "Follow us for daily learning tips! 🎓"
-   - "Click the link to explore our platform 👇"
-   ` : `
-   - "Send us a message to schedule a demo 📩"
-   - "Visit the link to learn more 👇"
-   - "Comment 'INTERESTED' for more details 💬"
-   - "Call us today to get started! 📞"
-   - "Follow for property management tips! ❤️"
-   `}
+// 10. MUST INCLUDE A CLEAR CTA (Call-to-Action):
+//    ${pageType === 'cogvana' ? `
+//    - "Download now and start learning! 📱"
+//    - "Comment below with your learning goals 💬"
+//    - "Share with a student who needs this! ❤️"
+//    - "Follow us for daily learning tips! 🎓"
+//    - "Click the link to explore our platform 👇"
+//    ` : `
+//    - "Send us a message to schedule a demo 📩"
+//    - "Visit the link to learn more 👇"
+//    - "Comment 'INTERESTED' for more details 💬"
+//    - "Call us today to get started! 📞"
+//    - "Follow for property management tips! ❤️"
+//    `}
 
-11. MUST INCLUDE relevant link from links above
+// 11. MUST INCLUDE relevant link from links above
 
-12. MUST END WITH: ${COMMON_HASHTAGS}
+// 12. MUST END WITH: ${COMMON_HASHTAGS}
 
-STRICT CONTENT RULES:
-- Write in ${brand.tone}
-- Base EVERYTHING on the context provided above
-- Do NOT mention features not explicitly listed
-- Do NOT invent statistics or data
-- Do NOT reference competitors
-- Keep it authentic, not salesy
-- Focus on value and benefits
-- Make it shareable
+// STRICT CONTENT RULES:
+// - Write in ${brand.tone}
+// - Base EVERYTHING on the context provided above
+// - Do NOT mention features not explicitly listed
+// - Do NOT invent statistics or data
+// - Do NOT reference competitors
+// - Keep it authentic, not salesy
+// - Focus on value and benefits
+// - Make it shareable
 
-OUTPUT FORMAT:
-Generate ONLY the post content. No explanations, no meta-commentary, just the post itself.
+// OUTPUT FORMAT:
+// Generate ONLY the post content. No explanations, no meta-commentary, just the post itself.
 
-Generate the post now:`;
-}
+// Generate the post now:`;
+// }
 
-function getPostTypeGuidance(postType: string, pageType: string): string {
-  const guidance: Record<string, string> = {
-    'promotional': 'Highlight specific product features and benefits. Include a strong reason to act now. Make the value proposition crystal clear.',
-    'educational': 'Teach something valuable related to your product. Provide actionable insights. Position your brand as a helpful expert.',
-    'engagement': 'Ask questions, create polls (mention "what do you think?"), share relatable scenarios. Encourage comments and discussion.',
-    'user-story-testimonial': 'Share a realistic success story (can be hypothetical but believable). Focus on transformation and results.',
-    'tips-and-tricks': pageType === 'cogvana' ? 'Quick study tips, learning hacks, or productivity advice' : 'Property management best practices, rental tips, or business advice',
-    'fun-fact-trivia': pageType === 'cogvana' ? 'Interesting education statistics or learning science facts' : 'Property market insights or real estate trivia',
-    'strong-cta-conversion': 'Direct action-driving post. Clear benefit + urgent CTA + easy next step. Conversion-focused.'
-  };
+// function getPostTypeGuidance(postType: string, pageType: string): string {
+//   const guidance: Record<string, string> = {
+//     'promotional': 'Highlight specific product features and benefits. Include a strong reason to act now. Make the value proposition crystal clear.',
+//     'educational': 'Teach something valuable related to your product. Provide actionable insights. Position your brand as a helpful expert.',
+//     'engagement': 'Ask questions, create polls (mention "what do you think?"), share relatable scenarios. Encourage comments and discussion.',
+//     'user-story-testimonial': 'Share a realistic success story (can be hypothetical but believable). Focus on transformation and results.',
+//     'tips-and-tricks': pageType === 'cogvana' ? 'Quick study tips, learning hacks, or productivity advice' : 'Property management best practices, rental tips, or business advice',
+//     'fun-fact-trivia': pageType === 'cogvana' ? 'Interesting education statistics or learning science facts' : 'Property market insights or real estate trivia',
+//     'strong-cta-conversion': 'Direct action-driving post. Clear benefit + urgent CTA + easy next step. Conversion-focused.'
+//   };
   
-  return guidance[postType] || 'Create engaging, valuable content that resonates with the target audience.';
-}
+//   return guidance[postType] || 'Create engaging, valuable content that resonates with the target audience.';
+// }
 
 // ============================================================================
 // HELPER FUNCTIONS - LINKEDIN
@@ -1915,151 +2084,151 @@ function getPostTypeGuidance(postType: string, pageType: string): string {
 //   return `${day}${month}${year}`;
 // }
 
-function getTodayDateString(): string {
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Africa/Nairobi',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
+// function getTodayDateString(): string {
+//   const formatter = new Intl.DateTimeFormat('en-GB', {
+//     timeZone: 'Africa/Nairobi',
+//     day: '2-digit',
+//     month: '2-digit',
+//     year: 'numeric'
+//   });
   
-  const parts = formatter.formatToParts(new Date());
-  const day = parts.find(p => p.type === 'day')!.value;
-  const month = parts.find(p => p.type === 'month')!.value;
-  const year = parts.find(p => p.type === 'year')!.value;
+//   const parts = formatter.formatToParts(new Date());
+//   const day = parts.find(p => p.type === 'day')!.value;
+//   const month = parts.find(p => p.type === 'month')!.value;
+//   const year = parts.find(p => p.type === 'year')!.value;
   
-  return `${day}${month}${year}`;
-}
+//   return `${day}${month}${year}`;
+// }
 
-function generateTimeSlots(count: number, startHour: number, endHour: number): string[] {
-  const slots: string[] = [];
-  const totalMinutes = (endHour - startHour) * 60;
-  const baseInterval = Math.floor(totalMinutes / count);
+// function generateTimeSlots(count: number, startHour: number, endHour: number): string[] {
+//   const slots: string[] = [];
+//   const totalMinutes = (endHour - startHour) * 60;
+//   const baseInterval = Math.floor(totalMinutes / count);
 
-  for (let i = 0; i < count; i++) {
-    const randomOffset = Math.floor(Math.random() * 15);
-    const minutesFromStart = (i * baseInterval) + randomOffset;
-    const hour = startHour + Math.floor(minutesFromStart / 60);
-    const minute = minutesFromStart % 60;
+//   for (let i = 0; i < count; i++) {
+//     const randomOffset = Math.floor(Math.random() * 15);
+//     const minutesFromStart = (i * baseInterval) + randomOffset;
+//     const hour = startHour + Math.floor(minutesFromStart / 60);
+//     const minute = minutesFromStart % 60;
     
-    if (hour < endHour) {
-      slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
-    }
-  }
-
-  return slots.sort();
-}
-
-async function logError(platform: string, collection: string, date: string, postIndex: number, errorMessage: string) {
-  try {
-    await db.collection('post_errors').add({
-      platform,
-      collection,
-      date,
-      postIndex,
-      error: errorMessage,
-      timestamp: Timestamp.now()
-    });
-  } catch (error) {
-    console.error('Failed to log error to Firestore:', error);
-  }
-}
-
-// ============================================================================
-// ADMIN/UTILITY ENDPOINTS
-// ============================================================================
-
-// Get LinkedIn Organization Info (run once during setup)
-// export const getLinkedInOrgInfo = onRequest(
-//   {
-//     secrets: [LINKEDIN_ACCESS_TOKEN],
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 30
-//   },
-//   async (req, res) => {
-//     try {
-//       const response = await axios.get(
-//         'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee',
-//         {
-//           headers: {
-//             'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
-//             'X-Restli-Protocol-Version': '2.0.0'
-//           }
-//         }
-//       );
-
-//       const orgs = response.data.elements.map((element: any) => ({
-//         organizationUrn: element.organizationTarget,
-//         role: element.role,
-//         state: element.state
-//       }));
-
-//       // Get details for each org
-//       const orgDetails = await Promise.all(
-//         orgs.map(async (org: any) => {
-//           try {
-//             const orgId = org.organizationUrn.split(':').pop();
-//             const detailResponse = await axios.get(
-//               `https://api.linkedin.com/v2/organizations/${orgId}`,
-//               {
-//                 headers: {
-//                   'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
-//                   'X-Restli-Protocol-Version': '2.0.0'
-//                 }
-//               }
-//             );
-            
-//             return {
-//               ...org,
-//               name: detailResponse.data.localizedName,
-//               vanityName: detailResponse.data.vanityName
-//             };
-//           } catch (error) {
-//             return org;
-//           }
-//         })
-//       );
-
-//       res.status(200).json({
-//         success: true,
-//         organizations: orgDetails
-//       });
-
-//     } catch (error) {
-//       console.error('Error fetching LinkedIn org info:', error);
-//       res.status(500).json({
-//         success: false,
-//         error: error instanceof Error ? error.message : 'Unknown error'
-//       });
+//     if (hour < endHour) {
+//       slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
 //     }
 //   }
-// );
 
-// Health check endpoint
-export const healthCheck = onRequest(
-  {
-    region: 'us-central1',
-    memory: '128MiB',
-    timeoutSeconds: 10
-  },
-  async (req, res) => {
-    res.status(200).json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      service: 'social-media-automation',
-      functions: [
-        'generateDailyPosts',
-        'scheduleSocialPosts', 
-        'publishSocialPosts',
-        'generateLinkedInPosts',
-        'scheduleLinkedInPosts',
-        'publishLinkedInPosts',
-        'manualGenerateAllPosts'
-      ]
-    });
-  }
-);
+//   return slots.sort();
+// }
+
+// async function logError(platform: string, collection: string, date: string, postIndex: number, errorMessage: string) {
+//   try {
+//     await db.collection('post_errors').add({
+//       platform,
+//       collection,
+//       date,
+//       postIndex,
+//       error: errorMessage,
+//       timestamp: Timestamp.now()
+//     });
+//   } catch (error) {
+//     console.error('Failed to log error to Firestore:', error);
+//   }
+// }
+
+// // ============================================================================
+// // ADMIN/UTILITY ENDPOINTS
+// // ============================================================================
+
+// // Get LinkedIn Organization Info (run once during setup)
+// // export const getLinkedInOrgInfo = onRequest(
+// //   {
+// //     secrets: [LINKEDIN_ACCESS_TOKEN],
+// //     region: 'us-central1',
+// //     memory: '256MiB',
+// //     timeoutSeconds: 30
+// //   },
+// //   async (req, res) => {
+// //     try {
+// //       const response = await axios.get(
+// //         'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee',
+// //         {
+// //           headers: {
+// //             'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
+// //             'X-Restli-Protocol-Version': '2.0.0'
+// //           }
+// //         }
+// //       );
+
+// //       const orgs = response.data.elements.map((element: any) => ({
+// //         organizationUrn: element.organizationTarget,
+// //         role: element.role,
+// //         state: element.state
+// //       }));
+
+// //       // Get details for each org
+// //       const orgDetails = await Promise.all(
+// //         orgs.map(async (org: any) => {
+// //           try {
+// //             const orgId = org.organizationUrn.split(':').pop();
+// //             const detailResponse = await axios.get(
+// //               `https://api.linkedin.com/v2/organizations/${orgId}`,
+// //               {
+// //                 headers: {
+// //                   'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
+// //                   'X-Restli-Protocol-Version': '2.0.0'
+// //                 }
+// //               }
+// //             );
+            
+// //             return {
+// //               ...org,
+// //               name: detailResponse.data.localizedName,
+// //               vanityName: detailResponse.data.vanityName
+// //             };
+// //           } catch (error) {
+// //             return org;
+// //           }
+// //         })
+// //       );
+
+// //       res.status(200).json({
+// //         success: true,
+// //         organizations: orgDetails
+// //       });
+
+// //     } catch (error) {
+// //       console.error('Error fetching LinkedIn org info:', error);
+// //       res.status(500).json({
+// //         success: false,
+// //         error: error instanceof Error ? error.message : 'Unknown error'
+// //       });
+// //     }
+// //   }
+// // );
+
+// // Health check endpoint
+// export const healthCheck = onRequest(
+//   {
+//     region: 'us-central1',
+//     memory: '128MiB',
+//     timeoutSeconds: 10
+//   },
+//   async (req, res) => {
+//     res.status(200).json({
+//       status: 'healthy',
+//       timestamp: new Date().toISOString(),
+//       service: 'social-media-automation',
+//       functions: [
+//         'generateDailyPosts',
+//         'scheduleSocialPosts', 
+//         'publishSocialPosts',
+//         'generateLinkedInPosts',
+//         'scheduleLinkedInPosts',
+//         'publishLinkedInPosts',
+//         'manualGenerateAllPosts'
+//       ]
+//     });
+//   }
+// );
 
 /**
  * ========================================

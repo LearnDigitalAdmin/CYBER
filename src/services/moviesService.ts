@@ -1,26 +1,36 @@
-// import { 
-//   collection, 
-//   doc, 
-//   getDocs, 
-//   addDoc, 
-//   updateDoc, 
-//   deleteDoc,
-//   query,
-//   where,
-//   Timestamp 
-// } from 'firebase/firestore';
-// import { db } from './firebaseService';
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  getDoc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  Timestamp,
+  limit as firestoreLimit
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, storage, functions } from './firebaseService';
+import { httpsCallable } from 'firebase/functions';
 
 // Types
 export interface MovieContent {
   id: string;
   title: string;
-  type: 'movie' | 'series';
+  year: number;
+  type: 'movie' | 'series' | 'music';
   category: string;
-  year?: number;
-  seasons?: number;
+  description?: string;
+  poster?: string;
+  trailer?: string; // YouTube video ID or full URL
+  seasons?: Array<{ season: number; episodes: number }>;
   rating?: string;
-  added?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  agentId: string;
 }
 
 export interface UserRequest {
@@ -28,215 +38,451 @@ export interface UserRequest {
   userId: string;
   userName: string;
   contentId: string;
-  quality: string;
+  quality: '360p' | '720p' | '1080p' | '4K';
   plan: 'hustler' | 'jeshi' | 'legend' | 'bazuu' | 'lipa';
   watchDate: string;
   requestedDate: string;
-  status: 'pending' | 'ready' | 'completed';
+  status: 'pending' | 'processing' | 'ready' | 'completed';
   cyberId: string;
   season?: number;
   notes?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
 export interface DashboardStats {
-  totalRequests: number;
+  totalContent: number;
   pendingRequests: number;
   readyRequests: number;
   completedRequests: number;
-  totalUsers: number;
-  totalContent: number;
+  activeUsers: number;
+  todayRevenue: number;
 }
 
-// Demo Data
-const DEMO_CONTENT: MovieContent[] = [
-  { id: '1', title: 'The Mandalorian', type: 'series', category: 'Sci-Fi', year: 2019, seasons: 3, rating: '8.7/10', added: '2024-01-15' },
-  { id: '2', title: 'Inception', type: 'movie', category: 'Thriller', year: 2010, rating: '8.8/10', added: '2024-01-10' },
-  { id: '3', title: 'Breaking Bad', type: 'series', category: 'Drama', year: 2008, seasons: 5, rating: '9.5/10', added: '2024-01-05' },
-  { id: '4', title: 'The Dark Knight', type: 'movie', category: 'Action', year: 2008, rating: '9.0/10', added: '2024-01-20' },
-  { id: '5', title: 'Stranger Things', type: 'series', category: 'Horror', year: 2016, seasons: 4, rating: '8.7/10', added: '2024-01-12' },
-  { id: '6', title: 'Avatar', type: 'movie', category: 'Sci-Fi', year: 2009, rating: '7.8/10', added: '2024-01-18' },
-  { id: '7', title: 'Game of Thrones', type: 'series', category: 'Fantasy', year: 2011, seasons: 8, rating: '9.3/10', added: '2024-01-08' },
-  { id: '8', title: 'Interstellar', type: 'movie', category: 'Sci-Fi', year: 2014, rating: '8.6/10', added: '2024-01-14' }
-];
-
-const DEMO_REQUESTS: UserRequest[] = [
-  {
-    id: '1',
-    userId: 'USER001',
-    userName: 'John Doe',
-    contentId: '1',
-    quality: '1080p',
-    plan: 'hustler',
-    watchDate: '2024-02-15',
-    requestedDate: '2024-02-10',
-    status: 'pending',
-    cyberId: 'COG-0001',
-    season: 2
-  },
-  {
-    id: '2',
-    userId: 'USER002',
-    userName: 'Jane Smith',
-    contentId: '2',
-    quality: '4K',
-    plan: 'legend',
-    watchDate: '2024-02-14',
-    requestedDate: '2024-02-09',
-    status: 'ready',
-    cyberId: 'COG-0001'
-  },
-  {
-    id: '3',
-    userId: 'USER003',
-    userName: 'Mike Johnson',
-    contentId: '3',
-    quality: '720p',
-    plan: 'jeshi',
-    watchDate: '2024-02-13',
-    requestedDate: '2024-02-08',
-    status: 'completed',
-    cyberId: 'COG-0001',
-    season: 5
-  },
-  {
-    id: '4',
-    userId: 'USER004',
-    userName: 'Sarah Williams',
-    contentId: '5',
-    quality: '1080p',
-    plan: 'legend',
-    watchDate: '2024-02-16',
-    requestedDate: '2024-02-11',
-    status: 'pending',
-    cyberId: 'COG-0001',
-    season: 4
-  },
-  {
-    id: '5',
-    userId: 'USER005',
-    userName: 'David Brown',
-    contentId: '4',
-    quality: '1080p',
-    plan: 'hustler',
-    watchDate: '2024-02-12',
-    requestedDate: '2024-02-07',
-    status: 'ready',
-    cyberId: 'COG-0001'
-  }
-];
+export interface AIContentData {
+  title: string;
+  year: number;
+  type: 'movie' | 'series';
+  description: string;
+  category: string;
+  rating?: string;
+  seasons?: Array<{ season: number; episodes: number }>;
+  trailer?: string;
+}
 
 class MoviesService {
-  // Content Library Management
-  async getContentLibrary(_cyberId: string): Promise<MovieContent[]> {
+  /**
+   * Get next content ID
+   */
+  private async getNextContentId(agentId: string): Promise<number> {
     try {
-      // For now, return demo data
-      // In production, fetch from Firestore
-      return DEMO_CONTENT;
+      const moviesRef = collection(db, 'agents', agentId, 'movies');
+      const q = query(moviesRef, orderBy('id', 'desc'), firestoreLimit(1));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        return 1;
+      }
+      
+      const lastContent = snapshot.docs[0].data();
+      return (lastContent.id || 0) + 1;
     } catch (error) {
-      console.error('Error fetching content library:', error);
-      throw error;
+      console.error('Error getting next content ID:', error);
+      return 1;
     }
   }
 
-  async addContent(_cyberId: string, content: Omit<MovieContent, 'id'>): Promise<MovieContent> {
+  /**
+   * Upload poster image
+   */
+  async uploadPoster(
+    agentId: string,
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        const timestamp = Date.now();
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storagePath = `movies/${agentId}/posters/${timestamp}_${safeName}`;
+        const storageRef = ref(storage, storagePath);
+        
+        const uploadTask = uploadBytes(storageRef, file);
+        
+        uploadTask.then(async (snapshot) => {
+          const downloadURL = await getDownloadURL(snapshot.ref);
+          if (onProgress) onProgress(100);
+          resolve(downloadURL);
+        }).catch((error) => {
+          console.error('Upload error:', error);
+          reject(error);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Extract YouTube video ID from URL
+   */
+  extractYouTubeId(url: string): string {
+    if (!url) return '';
+    
+    // If already just an ID
+    if (url.length === 11 && !url.includes('/') && !url.includes('?')) {
+      return url;
+    }
+    
+    // Extract from full URL
+    const patterns = [
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+      /^([a-zA-Z0-9_-]{11})$/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+    
+    return url;
+  }
+
+  /**
+   * Fetch content data from AI (Cloud Function)
+   */
+  async fetchAIContent(
+    title: string,
+    year: number,
+    type: 'movie' | 'series'
+  ): Promise<AIContentData> {
     try {
-      const newContent: MovieContent = {
-        ...content,
-        id: Date.now().toString(),
-        added: new Date().toISOString().split('T')[0]
+      const generateMovieData = httpsCallable(functions, 'generateMovieData');
+      const result: any = await generateMovieData({ title, year, type });
+      
+      if (!result.data.success) {
+        throw new Error(result.data.message || 'Failed to fetch AI content data');
+      }
+      
+      return result.data.data as AIContentData;
+    } catch (error: any) {
+      console.error('Error fetching AI content:', error);
+      throw new Error(error.message || 'Failed to fetch content data from AI');
+    }
+  }
+
+  /**
+   * Add content (manual or AI)
+   */
+  async addContent(
+    agentId: string,
+    contentData: {
+      title: string;
+      year: number;
+      type: 'movie' | 'series' | 'music';
+      category: string;
+      description?: string;
+      poster?: File;
+      posterUrl?: string;
+      trailer?: string;
+      seasons?: Array<{ season: number; episodes: number }>;
+      rating?: string;
+    },
+    onProgress?: (progress: number) => void
+  ): Promise<MovieContent> {
+    try {
+      const contentId = await this.getNextContentId(agentId);
+      
+      // Upload poster if provided
+      let posterUrl = contentData.posterUrl || '';
+      if (contentData.poster) {
+        posterUrl = await this.uploadPoster(agentId, contentData.poster, onProgress);
+      }
+      
+      // Extract YouTube ID from trailer
+      const trailerVideoId = contentData.trailer 
+        ? this.extractYouTubeId(contentData.trailer) 
+        : '';
+      
+      const content: any = {
+        id: contentId,
+        title: contentData.title,
+        year: contentData.year,
+        type: contentData.type,
+        category: contentData.category,
+        description: contentData.description || '',
+        poster: posterUrl,
+        trailer: trailerVideoId,
+        rating: contentData.rating || '',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        agentId
       };
       
-      // In production, add to Firestore
-      DEMO_CONTENT.push(newContent);
-      return newContent;
+      if (contentData.type === 'series' && contentData.seasons) {
+        content.seasons = contentData.seasons;
+      }
+      
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentId.toString());
+      await setDoc(contentRef, content);
+      
+      return { ...content, id: contentId.toString() } as MovieContent;
     } catch (error) {
       console.error('Error adding content:', error);
       throw error;
     }
   }
 
-  async updateContent(contentId: string, updates: Partial<MovieContent>): Promise<void> {
+  /**
+   * Get content library
+   */
+  async getContentLibrary(agentId: string): Promise<MovieContent[]> {
     try {
-      const index = DEMO_CONTENT.findIndex(c => c.id === contentId);
-      if (index !== -1) {
-        DEMO_CONTENT[index] = { ...DEMO_CONTENT[index], ...updates };
+      const moviesRef = collection(db, 'agents', agentId, 'movies');
+      const q = query(moviesRef, orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as MovieContent));
+    } catch (error) {
+      console.error('Error fetching content library:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get single content by ID
+   */
+  async getContentById(agentId: string, contentId: string): Promise<MovieContent | null> {
+    try {
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      const contentDoc = await getDoc(contentRef);
+      
+      if (contentDoc.exists()) {
+        return { id: contentDoc.id, ...contentDoc.data() } as MovieContent;
       }
+      return null;
+    } catch (error) {
+      console.error('Error fetching content:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update content
+   */
+  async updateContent(
+    agentId: string,
+    contentId: string,
+    updates: Partial<{
+      title: string;
+      year: number;
+      category: string;
+      description: string;
+      poster: File;
+      posterUrl: string;
+      trailer: string;
+      seasons: Array<{ season: number; episodes: number }>;
+      rating: string;
+    }>,
+    onProgress?: (progress: number) => void
+  ): Promise<void> {
+    try {
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      const contentDoc = await getDoc(contentRef);
+      
+      if (!contentDoc.exists()) {
+        throw new Error('Content not found');
+      }
+      
+      const updateData: any = {
+        ...updates,
+        updatedAt: Timestamp.now()
+      };
+      
+      // Upload new poster if provided
+      if (updates.poster) {
+        updateData.poster = await this.uploadPoster(agentId, updates.poster, onProgress);
+        delete updateData.posterUrl;
+      } else if (updates.posterUrl) {
+        updateData.poster = updates.posterUrl;
+        delete updateData.posterUrl;
+      }
+      
+      // Extract YouTube ID from trailer
+      if (updates.trailer) {
+        updateData.trailer = this.extractYouTubeId(updates.trailer);
+      }
+      
+      // Remove File object from updates
+      delete updateData.poster;
+      
+      await updateDoc(contentRef, updateData);
     } catch (error) {
       console.error('Error updating content:', error);
       throw error;
     }
   }
 
-  async deleteContent(contentId: string): Promise<void> {
+  /**
+   * Delete content
+   */
+  async deleteContent(agentId: string, contentId: string): Promise<void> {
     try {
-      const index = DEMO_CONTENT.findIndex(c => c.id === contentId);
-      if (index !== -1) {
-        DEMO_CONTENT.splice(index, 1);
+      // Get content to delete poster
+      const content = await this.getContentById(agentId, contentId);
+      
+      if (content && content.poster) {
+        try {
+          const posterRef = ref(storage, content.poster);
+          await deleteObject(posterRef);
+        } catch (error) {
+          console.warn('Error deleting poster from storage:', error);
+        }
       }
+      
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      await deleteDoc(contentRef);
     } catch (error) {
       console.error('Error deleting content:', error);
       throw error;
     }
   }
 
-  // User Requests Management
+  /**
+   * Get user requests
+   */
   async getUserRequests(cyberId: string): Promise<UserRequest[]> {
     try {
-      // For now, return demo data
-      // In production, fetch from Firestore
-      return DEMO_REQUESTS.filter(r => r.cyberId === cyberId);
+      const requestsRef = collection(db, 'agents', cyberId, 'movie-requests');
+      const q = query(requestsRef, orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as UserRequest));
     } catch (error) {
       console.error('Error fetching user requests:', error);
-      throw error;
+      return [];
     }
   }
 
-  async updateRequest(requestId: string, updates: Partial<UserRequest>): Promise<void> {
+  /**
+   * Get requests by status
+   */
+  async getRequestsByStatus(
+    cyberId: string,
+    status: 'pending' | 'processing' | 'ready' | 'completed'
+  ): Promise<UserRequest[]> {
     try {
-      const index = DEMO_REQUESTS.findIndex(r => r.id === requestId);
-      if (index !== -1) {
-        DEMO_REQUESTS[index] = { ...DEMO_REQUESTS[index], ...updates };
-      }
+      const requestsRef = collection(db, 'agents', cyberId, 'movie-requests');
+      const q = query(
+        requestsRef,
+        where('status', '==', status),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as UserRequest));
+    } catch (error) {
+      console.error('Error fetching requests by status:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Update request
+   */
+  async updateRequest(
+    cyberId: string,
+    requestId: string,
+    updates: Partial<{
+      status: 'pending' | 'processing' | 'ready' | 'completed';
+      notes: string;
+    }>
+  ): Promise<void> {
+    try {
+      const requestRef = doc(db, 'agents', cyberId, 'movie-requests', requestId);
+      await updateDoc(requestRef, {
+        ...updates,
+        updatedAt: Timestamp.now()
+      });
     } catch (error) {
       console.error('Error updating request:', error);
       throw error;
     }
   }
 
-  async deleteRequest(requestId: string): Promise<void> {
+  /**
+   * Delete request
+   */
+  async deleteRequest(cyberId: string, requestId: string): Promise<void> {
     try {
-      const index = DEMO_REQUESTS.findIndex(r => r.id === requestId);
-      if (index !== -1) {
-        DEMO_REQUESTS.splice(index, 1);
-      }
+      const requestRef = doc(db, 'agents', cyberId, 'movie-requests', requestId);
+      await deleteDoc(requestRef);
     } catch (error) {
       console.error('Error deleting request:', error);
       throw error;
     }
   }
 
-  // Dashboard Stats
+  /**
+   * Get dashboard stats
+   */
   async getDashboardStats(cyberId: string): Promise<DashboardStats> {
     try {
-      const requests = await this.getUserRequests(cyberId);
+      const [content, requests] = await Promise.all([
+        this.getContentLibrary(cyberId),
+        this.getUserRequests(cyberId)
+      ]);
+      
+      const activeRequests = requests.filter(r => r.status !== 'completed');
       
       return {
-        totalRequests: requests.length,
+        totalContent: content.length,
         pendingRequests: requests.filter(r => r.status === 'pending').length,
         readyRequests: requests.filter(r => r.status === 'ready').length,
         completedRequests: requests.filter(r => r.status === 'completed').length,
-        totalUsers: new Set(requests.map(r => r.userId)).size,
-        totalContent: DEMO_CONTENT.length
+        activeUsers: new Set(activeRequests.map(r => r.userId)).size,
+        todayRevenue: 0 // Calculate from revenue data if available
       };
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
-      throw error;
+      return {
+        totalContent: 0,
+        pendingRequests: 0,
+        readyRequests: 0,
+        completedRequests: 0,
+        activeUsers: 0,
+        todayRevenue: 0
+      };
     }
   }
 
-  // Helper: Get content by ID
-  getContentById(contentId: string): MovieContent | undefined {
-    return DEMO_CONTENT.find(c => c.id === contentId);
+  /**
+   * Validate image file
+   */
+  validateImage(file: File): string | null {
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const maxSize = 5 * 1024 * 1024; // 5MB
+
+    if (!validTypes.includes(file.type)) {
+      return 'Only JPEG, PNG, and WebP images are allowed';
+    }
+
+    if (file.size > maxSize) {
+      return 'Image must be less than 5MB';
+    }
+
+    return null;
   }
 }
 

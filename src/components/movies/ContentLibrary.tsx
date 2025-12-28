@@ -7,30 +7,27 @@ import {
   Edit2, 
   Trash2, 
   Loader2, 
-  X} from 'lucide-react';
+  X,
+  Play,
+  Calendar,
+  Star
+} from 'lucide-react';
 import { moviesService, type MovieContent } from '../../services/moviesService';
 import { useAuth } from '../../context/authContext';
 import { toast } from 'react-toastify';
+import AddContentModal from './AddContentModal';
+import EditContentModal from './EditContentModal';
 
 const ContentLibrary = () => {
   const { firestoreUser } = useAuth();
   const [content, setContent] = useState<MovieContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'movie' | 'series'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'movie' | 'series' | 'music'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedContent, setSelectedContent] = useState<MovieContent | null>(null);
-
-  // Form state
-  const [formData, setFormData] = useState({
-    title: '',
-    type: 'movie' as 'movie' | 'series',
-    category: '',
-    year: new Date().getFullYear(),
-    seasons: 1,
-    rating: ''
-  });
 
   useEffect(() => {
     loadContent();
@@ -41,7 +38,7 @@ const ContentLibrary = () => {
 
     try {
       setLoading(true);
-      const data = await moviesService.getContentLibrary(firestoreUser.pId);
+      const data = await moviesService.getContentLibrary(firestoreUser.uid);
       setContent(data);
     } catch (error) {
       console.error('Error loading content:', error);
@@ -51,44 +48,11 @@ const ContentLibrary = () => {
     }
   };
 
-  const handleAddContent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firestoreUser?.pId) return;
-
-    try {
-      await moviesService.addContent(firestoreUser.pId, formData);
-      toast.success('Content added successfully');
-      setShowAddModal(false);
-      resetForm();
-      loadContent();
-    } catch (error) {
-      console.error('Error adding content:', error);
-      toast.error('Failed to add content');
-    }
-  };
-
-  const handleEditContent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedContent) return;
-
-    try {
-      await moviesService.updateContent(selectedContent.id, formData);
-      toast.success('Content updated successfully');
-      setShowEditModal(false);
-      setSelectedContent(null);
-      resetForm();
-      loadContent();
-    } catch (error) {
-      console.error('Error updating content:', error);
-      toast.error('Failed to update content');
-    }
-  };
-
   const handleDeleteContent = async (contentId: string) => {
     if (!confirm('Are you sure you want to delete this content?')) return;
 
     try {
-      await moviesService.deleteContent(contentId);
+      await moviesService.deleteContent(firestoreUser!.uid, contentId);
       toast.success('Content deleted successfully');
       loadContent();
     } catch (error) {
@@ -97,28 +61,14 @@ const ContentLibrary = () => {
     }
   };
 
-  const openEditModal = (item: MovieContent) => {
+  const openDetailsModal = (item: MovieContent) => {
     setSelectedContent(item);
-    setFormData({
-      title: item.title,
-      type: item.type,
-      category: item.category,
-      year: item.year || new Date().getFullYear(),
-      seasons: item.seasons || 1,
-      rating: item.rating || ''
-    });
-    setShowEditModal(true);
+    setShowDetailsModal(true);
   };
 
-  const resetForm = () => {
-    setFormData({
-      title: '',
-      type: 'movie',
-      category: '',
-      year: new Date().getFullYear(),
-      seasons: 1,
-      rating: ''
-    });
+  const openEditModal = (item: MovieContent) => {
+    setSelectedContent(item);
+    setShowEditModal(true);
   };
 
   const filteredContent = content.filter(item => {
@@ -170,6 +120,7 @@ const ContentLibrary = () => {
           <option value="all">All Types</option>
           <option value="movie">Movies</option>
           <option value="series">Series</option>
+          <option value="music">Music</option>
         </select>
       </div>
 
@@ -180,278 +131,246 @@ const ContentLibrary = () => {
           <p className="text-gray-400">No content found</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filteredContent.map((item) => (
             <div
               key={item.id}
-              className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 hover:border-cyan-500/50 transition-all"
+              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-cyan-500/50 transition-all cursor-pointer group"
+              onClick={() => openDetailsModal(item)}
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2">
+              {/* Poster */}
+              <div className="aspect-[2/3] bg-gray-900 relative overflow-hidden">
+                {item.poster ? (
+                  <img
+                    src={item.poster}
+                    alt={item.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <span className="text-4xl font-bold text-gray-600">
+                      {item.title.substring(0, 2).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                
+                {/* Type Badge */}
+                <div className="absolute top-2 right-2">
                   {item.type === 'movie' ? (
                     <Film className="w-5 h-5 text-cyan-400" />
-                  ) : (
+                  ) : item.type === 'series' ? (
                     <Tv className="w-5 h-5 text-violet-400" />
+                  ) : (
+                    <Play className="w-5 h-5 text-pink-400" />
                   )}
-                  <span className="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-300 capitalize">
-                    {item.type}
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => openEditModal(item)}
-                    className="text-gray-400 hover:text-cyan-400 transition-colors"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteContent(item.id)}
-                    className="text-gray-400 hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
 
-              <h4 className="font-semibold text-white mb-2">{item.title}</h4>
-              
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between text-gray-400">
-                  <span>Category:</span>
-                  <span className="text-white">{item.category}</span>
+              {/* Info */}
+              <div className="p-3">
+                <h4 className="font-semibold text-white text-sm mb-1 truncate">
+                  {item.title}
+                </h4>
+                <div className="flex items-center justify-between text-xs text-gray-400">
+                  <span>{item.year}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 capitalize">
+                    {item.type}
+                  </span>
                 </div>
-                {item.year && (
-                  <div className="flex justify-between text-gray-400">
-                    <span>Year:</span>
-                    <span className="text-white">{item.year}</span>
-                  </div>
-                )}
-                {item.type === 'series' && item.seasons && (
-                  <div className="flex justify-between text-gray-400">
-                    <span>Seasons:</span>
-                    <span className="text-white">{item.seasons}</span>
-                  </div>
-                )}
-                {item.rating && (
-                  <div className="flex justify-between text-gray-400">
-                    <span>Rating:</span>
-                    <span className="text-white">{item.rating}</span>
-                  </div>
-                )}
+              </div>
+
+              {/* Actions on Hover */}
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditModal(item);
+                  }}
+                  className="p-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
+                  title="Edit"
+                >
+                  <Edit2 className="w-4 h-4 text-white" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteContent(item.id);
+                  }}
+                  className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4 text-white" />
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Add Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white">Add Content</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-white">
-                <X className="w-5 h-5" />
+      {/* Details Modal */}
+      {showDetailsModal && selectedContent && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="relative">
+              {/* Close Button */}
+              <button
+                onClick={() => setShowDetailsModal(false)}
+                className="absolute top-4 right-4 z-10 p-2 bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5 text-white" />
               </button>
-            </div>
 
-            <form onSubmit={handleAddContent} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Title *</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  required
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                  placeholder="Enter title"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Type *</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                >
-                  <option value="movie">Movie</option>
-                  <option value="series">Series</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Category *</label>
-                <input
-                  type="text"
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  required
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                  placeholder="e.g., Action, Drama, Sci-Fi"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Year</label>
-                  <input
-                    type="number"
-                    value={formData.year}
-                    onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) })}
-                    min="1900"
-                    max={new Date().getFullYear() + 1}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
+              {/* Backdrop */}
+              <div className="h-64 bg-gradient-to-b from-gray-800 to-gray-900 relative overflow-hidden">
+                {selectedContent.poster && (
+                  <img
+                    src={selectedContent.poster}
+                    alt={selectedContent.title}
+                    className="w-full h-full object-cover opacity-30 blur-sm"
                   />
-                </div>
-
-                {formData.type === 'series' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Seasons</label>
-                    <input
-                      type="number"
-                      value={formData.seasons}
-                      onChange={(e) => setFormData({ ...formData, seasons: parseInt(e.target.value) })}
-                      min="1"
-                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                    />
-                  </div>
                 )}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Rating</label>
-                <input
-                  type="text"
-                  value={formData.rating}
-                  onChange={(e) => setFormData({ ...formData, rating: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                  placeholder="e.g., 8.5/10"
-                />
-              </div>
+              {/* Content */}
+              <div className="p-6 -mt-32 relative z-10">
+                <div className="flex gap-6">
+                  {/* Poster */}
+                  <div className="w-48 flex-shrink-0">
+                    <div className="aspect-[2/3] bg-gray-800 rounded-lg overflow-hidden border-2 border-gray-700">
+                      {selectedContent.poster ? (
+                        <img
+                          src={selectedContent.poster}
+                          alt={selectedContent.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-4xl font-bold text-gray-600">
+                            {selectedContent.title.substring(0, 2).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors font-medium"
-                >
-                  Add Content
-                </button>
+                  {/* Details */}
+                  <div className="flex-1">
+                    <h2 className="text-3xl font-bold text-white mb-2">
+                      {selectedContent.title}
+                    </h2>
+                    
+                    <div className="flex items-center gap-4 mb-4">
+                      <span className="flex items-center gap-1 text-gray-400">
+                        <Calendar className="w-4 h-4" />
+                        {selectedContent.year}
+                      </span>
+                      <span className="px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 capitalize text-sm">
+                        {selectedContent.type}
+                      </span>
+                      {selectedContent.rating && (
+                        <span className="flex items-center gap-1 text-yellow-400">
+                          <Star className="w-4 h-4 fill-current" />
+                          {selectedContent.rating}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-400 mb-1">Category</h3>
+                        <p className="text-white">{selectedContent.category}</p>
+                      </div>
+
+                      {selectedContent.description && (
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-400 mb-1">Description</h3>
+                          <p className="text-gray-300 leading-relaxed">{selectedContent.description}</p>
+                        </div>
+                      )}
+
+                      {selectedContent.seasons && selectedContent.seasons.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-400 mb-2">Seasons</h3>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedContent.seasons.map((season) => (
+                              <div
+                                key={season.season}
+                                className="px-3 py-2 bg-gray-800 rounded-lg border border-gray-700"
+                              >
+                                <div className="text-xs text-gray-400">Season {season.season}</div>
+                                <div className="text-sm text-white font-semibold">{season.episodes} Episodes</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedContent.trailer && (
+                        <div>
+                          <h3 className="text-sm font-semibold text-gray-400 mb-2">Trailer</h3>
+                          <div className="aspect-video bg-black rounded-lg overflow-hidden">
+                            <iframe
+                              src={`https://www.youtube.com/embed/${selectedContent.trailer}`}
+                              title="Trailer"
+                              className="w-full h-full"
+                              allowFullScreen
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        onClick={() => {
+                          setShowDetailsModal(false);
+                          openEditModal(selectedContent);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowDetailsModal(false);
+                          handleDeleteContent(selectedContent.id);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Edit Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white">Edit Content</h3>
-              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Add Modal - Will be separate component */}
+      {showAddModal && (
+        <AddContentModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => {
+            setShowAddModal(false);
+            loadContent();
+          }}
+        />
+      )}
 
-            <form onSubmit={handleEditContent} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Title *</label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  required
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Type *</label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                >
-                  <option value="movie">Movie</option>
-                  <option value="series">Series</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Category *</label>
-                <input
-                  type="text"
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  required
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Year</label>
-                  <input
-                    type="number"
-                    value={formData.year}
-                    onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) })}
-                    min="1900"
-                    max={new Date().getFullYear() + 1}
-                    className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                  />
-                </div>
-
-                {formData.type === 'series' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Seasons</label>
-                    <input
-                      type="number"
-                      value={formData.seasons}
-                      onChange={(e) => setFormData({ ...formData, seasons: parseInt(e.target.value) })}
-                      min="1"
-                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Rating</label>
-                <input
-                  type="text"
-                  value={formData.rating}
-                  onChange={(e) => setFormData({ ...formData, rating: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
-                  placeholder="e.g., 8.5/10"
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors font-medium"
-                >
-                  Update
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Edit Modal - Will be separate component */}
+      {showEditModal && selectedContent && (
+        <EditContentModal
+          content={selectedContent}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={() => {
+            setShowEditModal(false);
+            loadContent();
+          }}
+        />
       )}
     </div>
   );

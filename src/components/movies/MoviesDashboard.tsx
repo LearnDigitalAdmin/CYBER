@@ -17,6 +17,7 @@ const MoviesDashboard = () => {
   const [recentRequests, setRecentRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'ready' | 'completed'>('pending');
+  const [contentTitles, setContentTitles] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadDashboardData();
@@ -28,12 +29,25 @@ const MoviesDashboard = () => {
     try {
       setLoading(true);
       const [statsData, requestsData] = await Promise.all([
-        moviesService.getDashboardStats(firestoreUser.pId),
-        moviesService.getUserRequests(firestoreUser.pId)
+        moviesService.getDashboardStats(firestoreUser.uid),
+        moviesService.getUserRequests(firestoreUser.uid)
       ]);
 
       setStats(statsData);
       setRecentRequests(requestsData.slice(0, 10)); // Get latest 10
+      
+      // Fetch content titles for all unique content IDs
+      const uniqueContentIds = [...new Set(requestsData.map(r => r.contentId))];
+      const titles: Record<string, string> = {};
+      
+      await Promise.all(
+        uniqueContentIds.map(async (contentId) => {
+          const content = await moviesService.getContentById(firestoreUser.uid, contentId);
+          titles[contentId] = content?.title || 'Unknown';
+        })
+      );
+      
+      setContentTitles(titles);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -51,8 +65,7 @@ const MoviesDashboard = () => {
   };
 
   const getContentTitle = (contentId: string) => {
-    const content = moviesService.getContentById(contentId);
-    return content?.title || 'Unknown';
+    return contentTitles[contentId] || 'Loading...';
   };
 
   if (loading) {

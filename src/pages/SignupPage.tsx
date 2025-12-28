@@ -121,16 +121,23 @@ const SignupPage: React.FC = () => {
       if (!querySnapshot.empty) {
         const lastDoc = querySnapshot.docs[0];
         const lastPID = lastDoc.data().pId;
-        const lastNumber = parseInt(lastPID.replace("COG-", ""), 10);
-        if (!isNaN(lastNumber)) {
-          nextNumber = lastNumber + 1;
+        
+        // Safely extract and parse the number
+        if (lastPID && typeof lastPID === 'string') {
+          const lastNumber = parseInt(lastPID.replace("COG-", ""), 10);
+          if (!isNaN(lastNumber) && lastNumber >= 0) {
+            nextNumber = lastNumber + 1;
+          }
         }
       }
 
-      return `COG-${nextNumber}`;
+      // Always return COG- followed by exactly 4 digits
+      return `COG-${String(nextNumber).padStart(4, '0')}`;
     } catch (error) {
       console.error("Error generating PID:", error);
-      return `COG-${Date.now().toString().slice(-6)}`;
+      // Fallback also uses 4 digits
+      const fallbackNumber = parseInt(Date.now().toString().slice(-4), 10);
+      return `COG-${String(fallbackNumber).padStart(4, '0')}`;
     }
   };
 

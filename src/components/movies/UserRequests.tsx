@@ -6,7 +6,9 @@ import {
   CheckCircle, 
   Trash2, 
   Loader2, 
-  X} from 'lucide-react';
+  X,
+  Eye
+} from 'lucide-react';
 import { moviesService, type UserRequest } from '../../services/moviesService';
 import { useAuth } from '../../context/authContext';
 import { toast } from 'react-toastify';
@@ -22,7 +24,7 @@ const UserRequests = () => {
   const [selectedRequest, setSelectedRequest] = useState<UserRequest | null>(null);
 
   // Edit form state
-  const [editStatus, setEditStatus] = useState<'pending' | 'ready' | 'completed'>('pending');
+  const [editStatus, setEditStatus] = useState<'pending' | 'processing' | 'ready' | 'completed'>('pending');
   const [editNotes, setEditNotes] = useState('');
 
   useEffect(() => {
@@ -34,7 +36,7 @@ const UserRequests = () => {
 
     try {
       setLoading(true);
-      const data = await moviesService.getUserRequests(firestoreUser.pId);
+      const data = await moviesService.getUserRequests(firestoreUser.uid);
       setRequests(data);
     } catch (error) {
       console.error('Error loading requests:', error);
@@ -58,10 +60,10 @@ const UserRequests = () => {
 
   const handleUpdateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRequest) return;
+    if (!selectedRequest || !firestoreUser?.uid) return;
 
     try {
-      await moviesService.updateRequest(selectedRequest.id, {
+      await moviesService.updateRequest(firestoreUser.uid, selectedRequest.id, {
         status: editStatus,
         notes: editNotes
       });
@@ -76,8 +78,10 @@ const UserRequests = () => {
   };
 
   const handleMarkComplete = async (requestId: string) => {
+    if (!firestoreUser?.uid) return;
+
     try {
-      await moviesService.updateRequest(requestId, { status: 'completed' });
+      await moviesService.updateRequest(firestoreUser.uid, requestId, { status: 'completed' });
       toast.success('Request marked as completed');
       loadRequests();
     } catch (error) {
@@ -88,9 +92,10 @@ const UserRequests = () => {
 
   const handleDeleteRequest = async (requestId: string) => {
     if (!confirm('Are you sure you want to delete this request?')) return;
+    if (!firestoreUser?.uid) return;
 
     try {
-      await moviesService.deleteRequest(requestId);
+      await moviesService.deleteRequest(firestoreUser.uid, requestId);
       toast.success('Request deleted successfully');
       loadRequests();
     } catch (error) {
@@ -104,27 +109,32 @@ const UserRequests = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const getContentTitle = (contentId: string) => {
-    const content = moviesService.getContentById(contentId);
-    return content?.title || 'Unknown';
-  };
+  // const getContentTitle = async (contentId: string): Promise<string> => {
+  //   if (!firestoreUser?.pId) return 'Unknown';
+  //   try {
+  //     const content = await moviesService.getContentById(firestoreUser.pId, contentId);
+  //     return content?.title || 'Unknown';
+  //   } catch {
+  //     return 'Unknown';
+  //   }
+  // };
 
   const filteredRequests = requests.filter(request => {
     const matchesSearch = request.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         request.userId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         getContentTitle(request.contentId).toLowerCase().includes(searchTerm.toLowerCase());
+                         request.userId.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesPlan = planFilter === 'all' || request.plan === planFilter;
     return matchesSearch && matchesPlan;
   });
 
-  // Count requests by plan
+  // Count requests by plan (excluding completed)
+  const activeRequests = requests.filter(r => r.status !== 'completed');
   const planCounts = {
-    all: requests.filter(r => r.status !== 'completed').length,
-    hustler: requests.filter(r => r.plan === 'hustler' && r.status !== 'completed').length,
-    jeshi: requests.filter(r => r.plan === 'jeshi' && r.status !== 'completed').length,
-    legend: requests.filter(r => r.plan === 'legend' && r.status !== 'completed').length,
-    bazuu: requests.filter(r => r.plan === 'bazuu' && r.status !== 'completed').length,
-    lipa: requests.filter(r => r.plan === 'lipa' && r.status !== 'completed').length
+    all: activeRequests.length,
+    hustler: activeRequests.filter(r => r.plan === 'hustler').length,
+    jeshi: activeRequests.filter(r => r.plan === 'jeshi').length,
+    legend: activeRequests.filter(r => r.plan === 'legend').length,
+    bazuu: activeRequests.filter(r => r.plan === 'bazuu').length,
+    lipa: activeRequests.filter(r => r.plan === 'lipa').length
   };
 
   if (loading) {
@@ -143,30 +153,39 @@ const UserRequests = () => {
         User Requests
       </h3>
 
+      {/* Tabs */}
+      <div className="flex overflow-x-auto gap-2 pb-2 border-b-2 border-gray-700">
+        {(['all', 'hustler', 'jeshi', 'legend', 'bazuu', 'lipa'] as const).map((plan) => (
+          <button
+            key={plan}
+            onClick={() => setPlanFilter(plan)}
+            className={`px-4 py-2 whitespace-nowrap transition-colors relative ${
+              planFilter === plan
+                ? 'text-cyan-400'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <span className="capitalize">{plan}</span>
+            <span className="ml-2 px-2 py-0.5 rounded-full bg-cyan-500 text-black text-xs font-bold">
+              {planCounts[plan]}
+            </span>
+            {planFilter === plan && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-500" />
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search requests..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-gray-500"
-          />
-        </div>
-        <select
-          value={planFilter}
-          onChange={(e) => setPlanFilter(e.target.value as any)}
-          className="px-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-sm text-white"
-        >
-          <option value="all">All Plans ({planCounts.all})</option>
-          <option value="hustler">Hustler ({planCounts.hustler})</option>
-          <option value="jeshi">Jeshi ({planCounts.jeshi})</option>
-          <option value="legend">Legend ({planCounts.legend})</option>
-          <option value="bazuu">Bazuu ({planCounts.bazuu})</option>
-          <option value="lipa">Lipa ({planCounts.lipa})</option>
-        </select>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Search requests..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full pl-10 pr-4 py-2 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm text-white placeholder-gray-500"
+        />
       </div>
 
       {/* Requests Table */}
@@ -203,7 +222,7 @@ const UserRequests = () => {
                     </td>
                     <td className="py-4 px-4">
                       <div className="text-sm text-white">
-                        {getContentTitle(request.contentId)}
+                        Content ID: {request.contentId}
                         {request.season && (
                           <span className="text-gray-400 ml-1">- S{request.season}</span>
                         )}
@@ -227,6 +246,8 @@ const UserRequests = () => {
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
                             : request.status === 'ready'
                             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                            : request.status === 'processing'
+                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
                             : 'bg-orange-500/10 text-orange-400 border border-orange-500/30'
                         }`}
                       >
@@ -235,6 +256,13 @@ const UserRequests = () => {
                     </td>
                     <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleViewRequest(request)}
+                          className="text-gray-400 hover:text-cyan-400 transition-colors"
+                          title="View"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleEditRequest(request)}
                           className="text-cyan-400 hover:text-cyan-300 transition-colors"
@@ -270,7 +298,7 @@ const UserRequests = () => {
 
       {/* View Modal */}
       {showViewModal && selectedRequest && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-lg w-full p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-white">Request Details</h3>
@@ -281,9 +309,9 @@ const UserRequests = () => {
 
             <div className="space-y-4">
               <div>
-                <div className="text-xs text-gray-400 mb-1">Content</div>
+                <div className="text-xs text-gray-400 mb-1">Content ID</div>
                 <div className="text-lg font-semibold text-white">
-                  {getContentTitle(selectedRequest.contentId)}
+                  {selectedRequest.contentId}
                   {selectedRequest.season && ` - Season ${selectedRequest.season}`}
                 </div>
               </div>
@@ -330,6 +358,8 @@ const UserRequests = () => {
                       ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
                       : selectedRequest.status === 'ready'
                       ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                      : selectedRequest.status === 'processing'
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
                       : 'bg-orange-500/10 text-orange-400 border border-orange-500/30'
                   }`}
                 >
@@ -370,7 +400,7 @@ const UserRequests = () => {
 
       {/* Edit Modal */}
       {showEditModal && selectedRequest && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-white">Edit Request</h3>
@@ -388,6 +418,7 @@ const UserRequests = () => {
                   className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500"
                 >
                   <option value="pending">Pending</option>
+                  <option value="processing">Processing</option>
                   <option value="ready">Ready</option>
                   <option value="completed">Completed</option>
                 </select>

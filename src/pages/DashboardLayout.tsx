@@ -403,13 +403,34 @@ const Dashboard = () => {
         {activeTab === 'income' && <IncomeTab />}
       </main>
 
-      <button
+      {['plot', 'cyber'].includes(activeTab) && (
+        <button
         onClick={() => handleOpenTerminal(null)}
         className="fixed bottom-6 right-6 w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-full shadow-2xl shadow-cyan-500/50 hover:shadow-cyan-500/70 hover:scale-110 transition-all duration-300 flex items-center justify-center z-40 group"
         title="Open Payment Terminal"
       >
         <CreditCard className="w-6 h-6 sm:w-7 sm:h-7 group-hover:rotate-12 transition-transform" />
       </button>
+      )}
+
+      {/* {activeTab === 'plot' && (
+        <button
+        onClick={() => handleOpenTerminal(null)}
+        className="fixed bottom-6 right-6 w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-full shadow-2xl shadow-cyan-500/50 hover:shadow-cyan-500/70 hover:scale-110 transition-all duration-300 flex items-center justify-center z-40 group"
+        title="Open Payment Terminal"
+      >
+        <CreditCard className="w-6 h-6 sm:w-7 sm:h-7 group-hover:rotate-12 transition-transform" />
+      </button>
+        )}
+
+      {activeTab === 'cyber' && (
+        <button
+        onClick={() => handleOpenTerminal(null)}
+        className="fixed bottom-6 right-6 w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-cyan-500 to-cyan-600 text-white rounded-full shadow-2xl shadow-cyan-500/50 hover:shadow-cyan-500/70 hover:scale-110 transition-all duration-300 flex items-center justify-center z-40 group"
+        title="Open Payment Terminal"
+      >
+        <CreditCard className="w-6 h-6 sm:w-7 sm:h-7 group-hover:rotate-12 transition-transform" />
+      </button>)} */}
 
       {showPaymentSettings && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowPaymentSettings(false)}>
