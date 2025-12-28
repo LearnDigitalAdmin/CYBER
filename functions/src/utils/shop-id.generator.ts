@@ -1,6 +1,7 @@
 /**
  * Shop ID Generator
  * Generates sequential numeric shop IDs while skipping easy-to-guess patterns
+ * FIXED: Added attempts++ to enable retry logic
  */
 
 import { db } from '../config/firebase.config';
@@ -65,6 +66,7 @@ function isEasyPattern(id: number): boolean {
 /**
  * Get the next valid shop ID
  * Reads current counter from Firestore and generates next valid ID
+ * FIXED: Now properly increments attempts counter
  */
 export async function generateNextShopId(): Promise<string> {
   const counterDocRef = db.collection('_metadata').doc('shopIdCounter');
@@ -73,6 +75,8 @@ export async function generateNextShopId(): Promise<string> {
 
   try {
     while (attempts < maxAttempts) {
+      attempts++; // ← FIX: INCREMENT THE COUNTER!
+      
       // Use transaction to ensure atomicity
       const result = await db.runTransaction(async (transaction) => {
         // Read current counter

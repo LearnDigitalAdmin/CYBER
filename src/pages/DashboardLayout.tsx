@@ -13,7 +13,8 @@ import {
   CreditCard,
   Briefcase,
   FileText,
-  Settings} from 'lucide-react';
+  Settings,
+  Film} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -28,7 +29,7 @@ import TerminalModal from '../components/global/Terminal';
 import IncomeTab from '../components/income/IncomeTab';
 import ShopTab from '../components/shop/ShopTab';
 import { useNavigate } from 'react-router-dom';
-
+import MoviesTab from '../components/movies/MoviesTab';
 
 
 const getInitials = (name: string): string => {
@@ -269,6 +270,7 @@ const Dashboard = () => {
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-4 h-4" /> },
     { id: 'shops', label: 'Shops', icon: <Briefcase className="w-4 h-4" /> },
     { id: 'cyber', label: 'Cyber Services', icon: <Printer className="w-4 h-4" /> },
+    { id: 'movies', label: 'Movies', icon: <Film className="w-4 h-4" /> }, // ADD THIS LINE
     { id: 'income', label: 'Income', icon: <BarChart3 className="w-4 h-4" /> }
   ];
 
@@ -397,6 +399,7 @@ const Dashboard = () => {
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'shops' && <ShopTab />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
+        {activeTab === 'movies' && <MoviesTab />}
         {activeTab === 'income' && <IncomeTab />}
       </main>
 

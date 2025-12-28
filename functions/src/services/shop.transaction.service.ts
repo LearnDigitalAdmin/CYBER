@@ -168,8 +168,8 @@ export async function recordSale(
         product: parsed.productName,
         quantity: parsed.quantity,
         totalPrice: parsed.totalPrice,
-        stockBefore,
-        stockAfter: Math.max(0, stockAfter),
+        stockBefore: result.stockBefore,
+        stockAfter: result.stockAfter,
       });
 
       return result;
@@ -412,6 +412,7 @@ export async function addStock(
 
       return {
         success: true,
+        stockBefore,
         stockAfter,
       };
     });
@@ -420,8 +421,8 @@ export async function addStock(
       shopId,
       product: parsed.productName,
       quantity: parsed.quantity,
-      stockBefore,
-      stockAfter,
+      stockBefore: result.stockBefore,
+      stockAfter: result.stockAfter,
     });
 
     return result;
@@ -543,8 +544,8 @@ export async function editStock(
       shopId,
       product: parsed.productName,
       change: parsed.quantity,
-      stockBefore,
-      stockAfter: Math.max(0, stockAfter),
+      stockBefore: result.stockBefore,
+      stockAfter: result.stockAfter,
     });
 
     return result;
