@@ -61,6 +61,12 @@ const ContentLibrary = () => {
     }
   };
 
+  const handleOpenAddModal = () => {
+    setShowDetailsModal(false);
+    setSelectedContent(null);
+    setShowAddModal(true);
+  };
+
   const openDetailsModal = (item: MovieContent) => {
     setSelectedContent(item);
     setShowDetailsModal(true);
@@ -92,7 +98,7 @@ const ContentLibrary = () => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h3 className="text-lg font-semibold text-white">Content Library</h3>
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={handleOpenAddModal}
           className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors font-medium"
         >
           <Plus className="w-4 h-4" />
