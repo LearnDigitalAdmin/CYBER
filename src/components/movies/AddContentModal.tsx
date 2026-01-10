@@ -122,8 +122,8 @@ const AddContentModal = ({ onClose, onSuccess }: AddContentModalProps) => {
       setAiLoading(true);
       const result = await moviesService.fetchAIContent(
         aiForm.title,
-        aiForm.year,
-        aiForm.type
+        aiForm.type,
+        firestoreUser
       );
       setAiResult(result);
       toast.success('Content data fetched successfully!');
@@ -180,7 +180,7 @@ const AddContentModal = ({ onClose, onSuccess }: AddContentModalProps) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-70 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <h2 className="text-xl font-bold text-white">Add Content</h2>
@@ -412,7 +412,7 @@ const AddContentModal = ({ onClose, onSuccess }: AddContentModalProps) => {
           )}
 
           {/* AI Mode */}
-          {mode === 'ai' && (
+          {mode === 'ai' && firestoreUser?.paid === true && (
             <div>
               {!aiResult ? (
                 <form onSubmit={handleAiFetch} className="space-y-4">

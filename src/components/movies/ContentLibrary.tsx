@@ -63,16 +63,21 @@ const ContentLibrary = () => {
 
   const handleOpenAddModal = () => {
     setShowDetailsModal(false);
+    setShowEditModal(false);
     setSelectedContent(null);
     setShowAddModal(true);
   };
 
   const openDetailsModal = (item: MovieContent) => {
+    setShowAddModal(false);
+    setShowEditModal(false);
     setSelectedContent(item);
     setShowDetailsModal(true);
   };
 
   const openEditModal = (item: MovieContent) => {
+    setShowAddModal(false);
+    setShowDetailsModal(false);
     setSelectedContent(item);
     setShowEditModal(true);
   };
@@ -141,11 +146,13 @@ const ContentLibrary = () => {
           {filteredContent.map((item) => (
             <div
               key={item.id}
-              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-cyan-500/50 transition-all cursor-pointer group"
-              onClick={() => openDetailsModal(item)}
+              className="bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden hover:border-cyan-500/50 transition-all cursor-pointer group relative"
             >
               {/* Poster */}
-              <div className="aspect-[2/3] bg-gray-900 relative overflow-hidden">
+              <div 
+                className="aspect-[2/3] bg-gray-900 relative overflow-hidden"
+                onClick={() => openDetailsModal(item)}
+              >
                 {item.poster ? (
                   <img
                     src={item.poster}
@@ -170,10 +177,37 @@ const ContentLibrary = () => {
                     <Play className="w-5 h-5 text-pink-400" />
                   )}
                 </div>
+
+                {/* Actions on Hover */}
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditModal(item);
+                    }}
+                    className="p-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
+                    title="Edit"
+                  >
+                    <Edit2 className="w-4 h-4 text-white" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteContent(item.id);
+                    }}
+                    className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-4 h-4 text-white" />
+                  </button>
+                </div>
               </div>
 
               {/* Info */}
-              <div className="p-3">
+              <div 
+                className="p-3"
+                onClick={() => openDetailsModal(item)}
+              >
                 <h4 className="font-semibold text-white text-sm mb-1 truncate">
                   {item.title}
                 </h4>
@@ -184,30 +218,6 @@ const ContentLibrary = () => {
                   </span>
                 </div>
               </div>
-
-              {/* Actions on Hover */}
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEditModal(item);
-                  }}
-                  className="p-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg transition-colors"
-                  title="Edit"
-                >
-                  <Edit2 className="w-4 h-4 text-white" />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteContent(item.id);
-                  }}
-                  className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
-                  title="Delete"
-                >
-                  <Trash2 className="w-4 h-4 text-white" />
-                </button>
-              </div>
             </div>
           ))}
         </div>
@@ -215,8 +225,14 @@ const ContentLibrary = () => {
 
       {/* Details Modal */}
       {showDetailsModal && selectedContent && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        <div 
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowDetailsModal(false)}
+        >
+          <div 
+            className="bg-gray-900 border border-gray-700 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="relative">
               {/* Close Button */}
               <button
@@ -356,7 +372,7 @@ const ContentLibrary = () => {
         </div>
       )}
 
-      {/* Add Modal - Will be separate component */}
+      {/* Add Modal */}
       {showAddModal && (
         <AddContentModal
           onClose={() => setShowAddModal(false)}
@@ -367,7 +383,7 @@ const ContentLibrary = () => {
         />
       )}
 
-      {/* Edit Modal - Will be separate component */}
+      {/* Edit Modal */}
       {showEditModal && selectedContent && (
         <EditContentModal
           content={selectedContent}

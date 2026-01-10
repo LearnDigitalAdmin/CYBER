@@ -38,8 +38,9 @@ export interface UserRequest {
   userId: string;
   userName: string;
   contentId: string;
+  contentTitle: string;
   quality: '360p' | '720p' | '1080p' | '4K';
-  plan: 'hustler' | 'jeshi' | 'legend' | 'bazuu' | 'lipa';
+  plan: 'hustler' | 'jeshi' | 'legend' | 'bazuu' | 'lipa' | 'lipa-cash';
   watchDate: string;
   requestedDate: string;
   status: 'pending' | 'processing' | 'ready' | 'completed';
@@ -85,7 +86,8 @@ class MoviesService {
       }
       
       const lastContent = snapshot.docs[0].data();
-      return (lastContent.id || 0) + 1;
+      const lastId = typeof lastContent.id === 'number' ? lastContent.id : parseInt(lastContent.id) || 0;
+      return lastId + 1;
     } catch (error) {
       console.error('Error getting next content ID:', error);
       return 1;
@@ -155,12 +157,16 @@ class MoviesService {
    */
   async fetchAIContent(
     title: string,
-    year: number,
-    type: 'movie' | 'series'
+    type: 'movie' | 'series',
+    user: any
   ): Promise<AIContentData> {
     try {
+      if (!user?.paid !== true) {
+        throw new Error('User does not have an active paid plan');
+      }
+      
       const generateMovieData = httpsCallable(functions, 'generateMovieData');
-      const result: any = await generateMovieData({ title, year, type });
+      const result: any = await generateMovieData({ title, type });
       
       if (!result.data.success) {
         throw new Error(result.data.message || 'Failed to fetch AI content data');
@@ -257,9 +263,12 @@ class MoviesService {
   /**
    * Get single content by ID
    */
-  async getContentById(agentId: string, contentId: string): Promise<MovieContent | null> {
+  async getContentById(agentId: string, contentId: string | number): Promise<MovieContent | null> {
     try {
-      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      // Ensure contentId is a string for Firestore operations
+      const contentIdStr = String(contentId);
+      
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentIdStr);
       const contentDoc = await getDoc(contentRef);
       
       if (contentDoc.exists()) {
@@ -277,7 +286,7 @@ class MoviesService {
    */
   async updateContent(
     agentId: string,
-    contentId: string,
+    contentId: string | number,
     updates: Partial<{
       title: string;
       year: number;
@@ -292,7 +301,10 @@ class MoviesService {
     onProgress?: (progress: number) => void
   ): Promise<void> {
     try {
-      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      // Ensure contentId is a string for Firestore operations
+      const contentIdStr = String(contentId);
+      
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentIdStr);
       const contentDoc = await getDoc(contentRef);
       
       if (!contentDoc.exists()) {
@@ -300,26 +312,28 @@ class MoviesService {
       }
       
       const updateData: any = {
-        ...updates,
         updatedAt: Timestamp.now()
       };
       
       // Upload new poster if provided
       if (updates.poster) {
         updateData.poster = await this.uploadPoster(agentId, updates.poster, onProgress);
-        delete updateData.posterUrl;
       } else if (updates.posterUrl) {
         updateData.poster = updates.posterUrl;
-        delete updateData.posterUrl;
       }
       
       // Extract YouTube ID from trailer
-      if (updates.trailer) {
-        updateData.trailer = this.extractYouTubeId(updates.trailer);
+      if (updates.trailer !== undefined) {
+        updateData.trailer = updates.trailer ? this.extractYouTubeId(updates.trailer) : '';
       }
       
-      // Remove File object from updates
-      delete updateData.poster;
+      // Add other fields
+      if (updates.title !== undefined) updateData.title = updates.title;
+      if (updates.year !== undefined) updateData.year = updates.year;
+      if (updates.category !== undefined) updateData.category = updates.category;
+      if (updates.description !== undefined) updateData.description = updates.description;
+      if (updates.rating !== undefined) updateData.rating = updates.rating;
+      if (updates.seasons !== undefined) updateData.seasons = updates.seasons;
       
       await updateDoc(contentRef, updateData);
     } catch (error) {
@@ -331,21 +345,27 @@ class MoviesService {
   /**
    * Delete content
    */
-  async deleteContent(agentId: string, contentId: string): Promise<void> {
+  async deleteContent(agentId: string, contentId: string | number): Promise<void> {
     try {
+      // Ensure contentId is a string for Firestore operations
+      const contentIdStr = String(contentId);
+      
       // Get content to delete poster
-      const content = await this.getContentById(agentId, contentId);
+      const content = await this.getContentById(agentId, contentIdStr);
       
       if (content && content.poster) {
         try {
-          const posterRef = ref(storage, content.poster);
-          await deleteObject(posterRef);
+          // Only delete if it's a storage URL (contains 'firebasestorage')
+          if (content.poster.includes('firebasestorage')) {
+            const posterRef = ref(storage, content.poster);
+            await deleteObject(posterRef);
+          }
         } catch (error) {
           console.warn('Error deleting poster from storage:', error);
         }
       }
       
-      const contentRef = doc(db, 'agents', agentId, 'movies', contentId);
+      const contentRef = doc(db, 'agents', agentId, 'movies', contentIdStr);
       await deleteDoc(contentRef);
     } catch (error) {
       console.error('Error deleting content:', error);
@@ -399,7 +419,7 @@ class MoviesService {
   }
 
   /**
-   * Update request
+   * Update request status
    */
   async updateRequest(
     cyberId: string,
@@ -422,6 +442,25 @@ class MoviesService {
   }
 
   /**
+   * Bulk update request statuses
+   */
+  async bulkUpdateRequests(
+    cyberId: string,
+    requestIds: string[],
+    status: 'pending' | 'processing' | 'ready' | 'completed'
+  ): Promise<void> {
+    try {
+      const updatePromises = requestIds.map(requestId =>
+        this.updateRequest(cyberId, requestId, { status })
+      );
+      await Promise.all(updatePromises);
+    } catch (error) {
+      console.error('Error bulk updating requests:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Delete request
    */
   async deleteRequest(cyberId: string, requestId: string): Promise<void> {
@@ -430,6 +469,21 @@ class MoviesService {
       await deleteDoc(requestRef);
     } catch (error) {
       console.error('Error deleting request:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk delete requests
+   */
+  async bulkDeleteRequests(cyberId: string, requestIds: string[]): Promise<void> {
+    try {
+      const deletePromises = requestIds.map(requestId =>
+        this.deleteRequest(cyberId, requestId)
+      );
+      await Promise.all(deletePromises);
+    } catch (error) {
+      console.error('Error bulk deleting requests:', error);
       throw error;
     }
   }
@@ -446,13 +500,34 @@ class MoviesService {
       
       const activeRequests = requests.filter(r => r.status !== 'completed');
       
+      // Calculate today's revenue (if plan prices are defined)
+      const planPrices: Record<string, number> = {
+        hustler: 50,
+        jeshi: 100,
+        legend: 150,
+        bazuu: 200,
+        lipa: 0,
+        'lipa-cash': 0
+      };
+      
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const todayRevenue = requests
+        .filter(r => {
+          const requestDate = r.createdAt.toDate();
+          requestDate.setHours(0, 0, 0, 0);
+          return requestDate.getTime() === today.getTime();
+        })
+        .reduce((sum, r) => sum + (planPrices[r.plan] || 0), 0);
+      
       return {
         totalContent: content.length,
         pendingRequests: requests.filter(r => r.status === 'pending').length,
         readyRequests: requests.filter(r => r.status === 'ready').length,
         completedRequests: requests.filter(r => r.status === 'completed').length,
         activeUsers: new Set(activeRequests.map(r => r.userId)).size,
-        todayRevenue: 0 // Calculate from revenue data if available
+        todayRevenue
       };
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -464,6 +539,74 @@ class MoviesService {
         activeUsers: 0,
         todayRevenue: 0
       };
+    }
+  }
+
+  /**
+   * Search content by title
+   */
+  async searchContent(agentId: string, searchTerm: string): Promise<MovieContent[]> {
+    try {
+      const content = await this.getContentLibrary(agentId);
+      const lowerSearch = searchTerm.toLowerCase();
+      
+      return content.filter(item =>
+        item.title.toLowerCase().includes(lowerSearch) ||
+        item.category.toLowerCase().includes(lowerSearch) ||
+        item.description?.toLowerCase().includes(lowerSearch)
+      );
+    } catch (error) {
+      console.error('Error searching content:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Filter content by type
+   */
+  async getContentByType(
+    agentId: string,
+    type: 'movie' | 'series' | 'music'
+  ): Promise<MovieContent[]> {
+    try {
+      const moviesRef = collection(db, 'agents', agentId, 'movies');
+      const q = query(
+        moviesRef,
+        where('type', '==', type),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as MovieContent));
+    } catch (error) {
+      console.error('Error fetching content by type:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Filter content by category
+   */
+  async getContentByCategory(agentId: string, category: string): Promise<MovieContent[]> {
+    try {
+      const moviesRef = collection(db, 'agents', agentId, 'movies');
+      const q = query(
+        moviesRef,
+        where('category', '==', category),
+        orderBy('createdAt', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as MovieContent));
+    } catch (error) {
+      console.error('Error fetching content by category:', error);
+      return [];
     }
   }
 
@@ -483,6 +626,59 @@ class MoviesService {
     }
 
     return null;
+  }
+
+  /**
+   * Validate YouTube URL
+   */
+  validateYouTubeUrl(url: string): boolean {
+    if (!url) return true; // Empty is valid (optional field)
+    
+    const patterns = [
+      /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[a-zA-Z0-9_-]{11}/,
+      /^https?:\/\/youtu\.be\/[a-zA-Z0-9_-]{11}/,
+      /^https?:\/\/(www\.)?youtube\.com\/embed\/[a-zA-Z0-9_-]{11}/,
+      /^[a-zA-Z0-9_-]{11}$/ // Just the video ID
+    ];
+    
+    return patterns.some(pattern => pattern.test(url));
+  }
+
+  /**
+   * Get content statistics
+   */
+  async getContentStatistics(agentId: string): Promise<{
+    totalMovies: number;
+    totalSeries: number;
+    totalMusic: number;
+    categoriesCount: Record<string, number>;
+    recentContent: MovieContent[];
+  }> {
+    try {
+      const content = await this.getContentLibrary(agentId);
+      
+      const categoriesCount: Record<string, number> = {};
+      content.forEach(item => {
+        categoriesCount[item.category] = (categoriesCount[item.category] || 0) + 1;
+      });
+      
+      return {
+        totalMovies: content.filter(c => c.type === 'movie').length,
+        totalSeries: content.filter(c => c.type === 'series').length,
+        totalMusic: content.filter(c => c.type === 'music').length,
+        categoriesCount,
+        recentContent: content.slice(0, 5)
+      };
+    } catch (error) {
+      console.error('Error fetching content statistics:', error);
+      return {
+        totalMovies: 0,
+        totalSeries: 0,
+        totalMusic: 0,
+        categoriesCount: {},
+        recentContent: []
+      };
+    }
   }
 }
 

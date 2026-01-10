@@ -18,7 +18,7 @@ const UserRequests = () => {
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [planFilter, setPlanFilter] = useState<'all' | 'hustler' | 'jeshi' | 'legend' | 'bazuu' | 'lipa'>('all');
+  const [planFilter, setPlanFilter] = useState<'all' | 'hustler' | 'jeshi' | 'legend' | 'bazuu' | 'lipa-cash'>('all');
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<UserRequest | null>(null);
@@ -134,7 +134,7 @@ const UserRequests = () => {
     jeshi: activeRequests.filter(r => r.plan === 'jeshi').length,
     legend: activeRequests.filter(r => r.plan === 'legend').length,
     bazuu: activeRequests.filter(r => r.plan === 'bazuu').length,
-    lipa: activeRequests.filter(r => r.plan === 'lipa').length
+    'lipa-cash': activeRequests.filter(r => r.plan === 'lipa-cash').length
   };
 
   if (loading) {
@@ -155,7 +155,7 @@ const UserRequests = () => {
 
       {/* Tabs */}
       <div className="flex overflow-x-auto gap-2 pb-2 border-b-2 border-gray-700">
-        {(['all', 'hustler', 'jeshi', 'legend', 'bazuu', 'lipa'] as const).map((plan) => (
+        {(['all', 'hustler', 'jeshi', 'legend', 'bazuu', 'lipa-cash'] as const).map((plan) => (
           <button
             key={plan}
             onClick={() => setPlanFilter(plan)}
@@ -222,7 +222,7 @@ const UserRequests = () => {
                     </td>
                     <td className="py-4 px-4">
                       <div className="text-sm text-white">
-                        Content ID: {request.contentId}
+                        {request.contentTitle}
                         {request.season && (
                           <span className="text-gray-400 ml-1">- S{request.season}</span>
                         )}
@@ -311,7 +311,7 @@ const UserRequests = () => {
               <div>
                 <div className="text-xs text-gray-400 mb-1">Content ID</div>
                 <div className="text-lg font-semibold text-white">
-                  {selectedRequest.contentId}
+                  {selectedRequest.contentTitle}
                   {selectedRequest.season && ` - Season ${selectedRequest.season}`}
                 </div>
               </div>

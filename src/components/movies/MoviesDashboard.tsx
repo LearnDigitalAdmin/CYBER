@@ -17,7 +17,7 @@ const MoviesDashboard = () => {
   const [recentRequests, setRecentRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'pending' | 'ready' | 'completed'>('pending');
-  const [contentTitles, setContentTitles] = useState<Record<string, string>>({});
+  //const [contentTitles, setContentTitles] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadDashboardData();
@@ -47,7 +47,7 @@ const MoviesDashboard = () => {
         })
       );
       
-      setContentTitles(titles);
+      //setContentTitles(titles);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -64,9 +64,9 @@ const MoviesDashboard = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  const getContentTitle = (contentId: string) => {
-    return contentTitles[contentId] || 'Loading...';
-  };
+  // const getContentTitle = (contentId: string) => {
+  //   return contentTitles[contentTitle] || 'Loading...';
+  // };
 
   if (loading) {
     return (
@@ -192,7 +192,7 @@ const MoviesDashboard = () => {
                     </td>
                     <td className="py-4 px-4">
                       <div className="text-sm text-white">
-                        {getContentTitle(request.contentId)}
+                        {request.contentTitle}
                         {request.season && (
                           <span className="text-gray-400 ml-1">- S{request.season}</span>
                         )}

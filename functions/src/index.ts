@@ -743,23 +743,24 @@ export const generateMovieData = onCall<MovieDataRequest, Promise<MovieDataRespo
     region: 'africa-south1',
     maxInstances: 10,
     timeoutSeconds: 60,
-    memory: '256MiB'
+    memory: '256MiB',
+    secrets: [GEMINI_API_KEY],
   },
   async (request) => {
     try {
       // Validate input
-      const { title, year, type } = request.data;
+      const { title, type } = request.data;
       
-      if (!title || !year || !type) {
+      if (!title || !type) {
         throw new HttpsError(
           'invalid-argument',
           'Missing required fields: title, year, and type are required'
         );
       }
 
-      if (year < 1900 || year > new Date().getFullYear() + 5) {
-        throw new HttpsError('invalid-argument', 'Invalid year provided');
-      }
+      // if (year < 1900 || year > new Date().getFullYear() + 5) {
+      //   throw new HttpsError('invalid-argument', 'Invalid year provided');
+      // }
 
       if (!['movie', 'series'].includes(type)) {
         throw new HttpsError('invalid-argument', 'Type must be either "movie" or "series"');
@@ -767,26 +768,26 @@ export const generateMovieData = onCall<MovieDataRequest, Promise<MovieDataRespo
 
       // Prepare prompt for Gemini
       const prompt = type === 'movie'
-        ? `You are a movie database API. Provide detailed information about the movie "${title}" released in ${year}.
+        ? `You are a movie database API. Provide detailed information about the movie "${title}" released in .... year (find the correct release year).
 
 Return a JSON object with the following structure (no markdown, just raw JSON):
 {
   "title": "Official movie title",
-  "year": ${year},
+  "year": the correct year for the movie release,
   "type": "movie",
   "description": "A comprehensive 2-3 sentence plot summary",
   "category": "Main genre (e.g., Action, Drama, Sci-Fi, Comedy, Horror)",
   "rating": "IMDb or Rotten Tomatoes rating if available (e.g., 8.5/10 or 95%)",
-  "trailer": "YouTube video ID if available (11 characters)"
+  "trailer": "find the actual YouTube trailer video ID if available (11 characters), not random videos, the actual trailers"
 }
 
 If you cannot find exact information, provide best estimates based on similar titles, but ensure the description is relevant to the title and year provided.`
-        : `You are a TV series database API. Provide detailed information about the series "${title}" that premiered in ${year}.
+        : `You are a TV series database API. Provide detailed information about the series "${title}" that premiered in .... year (find the correct release year).
 
 Return a JSON object with the following structure (no markdown, just raw JSON):
 {
   "title": "Official series title",
-  "year": ${year},
+  "year": the correct year for the show release,
   "type": "series",
   "description": "A comprehensive 2-3 sentence series overview",
   "category": "Main genre (e.g., Drama, Thriller, Comedy, Fantasy)",
@@ -795,7 +796,7 @@ Return a JSON object with the following structure (no markdown, just raw JSON):
     {"season": 1, "episodes": 10},
     {"season": 2, "episodes": 13}
   ],
-  "trailer": "YouTube video ID if available"
+  "trailer": "find the actual YouTube trailer video ID if available (11 characters), not random videos, the actual trailers"
 }
 
 Include all available seasons with their episode counts. If you cannot find exact information, provide reasonable estimates based on the title and year.`;
@@ -835,7 +836,7 @@ Include all available seasons with their episode counts. If you cannot find exac
 
       // Ensure correct type
       movieData.type = type;
-      movieData.year = year;
+      //movieData.year = year;
 
       // Validate seasons for series
       if (type === 'series') {
