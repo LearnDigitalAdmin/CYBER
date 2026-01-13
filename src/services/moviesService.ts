@@ -158,12 +158,12 @@ class MoviesService {
   async fetchAIContent(
     title: string,
     type: 'movie' | 'series',
-    user: any
+    _user: any
   ): Promise<AIContentData> {
     try {
-      if (!user?.paid !== true) {
-        throw new Error('User does not have an active paid plan');
-      }
+      // if (!user?.paid !== true) {
+      //   throw new Error('User does not have an active paid plan');
+      // }
       
       const generateMovieData = httpsCallable(functions, 'generateMovieData');
       const result: any = await generateMovieData({ title, type });
