@@ -1,0 +1,29 @@
+{
+  "name": "image-to-pdf-cloud-run",
+  "version": "1.0.0",
+  "description": "Cloud Run service for image to PDF conversion",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts",
+    "deploy": "gcloud run deploy image-to-pdf-converter --source . --region us-central1 --allow-unauthenticated"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "@google-cloud/storage": "^7.7.0",
+    "sharp": "^0.34.5",
+    "axios": "^1.6.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.5",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.7.3",
+    "ts-node": "^10.9.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
