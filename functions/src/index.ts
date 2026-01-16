@@ -1,14 +1,772 @@
 import { onCall, HttpsError, onRequest } from 'firebase-functions/v2/https';
 import { Storage } from '@google-cloud/storage';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { defineSecret } from 'firebase-functions/params';
-// import { onSchedule } from 'firebase-functions/v2/scheduler';
+import * as logger from 'firebase-functions/logger';
+import sharp from 'sharp';
+import axios from 'axios';
+import * as path from 'path';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
+
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
-// import axios from 'axios';
-// import FormData from 'form-data';
+
+
+if (getApps().length === 0) {
+  initializeApp();
+}
+
+const storage = new Storage();
+const db = getFirestore();
+
+
+const bucket = storage.bucket('plot-9fd6e.firebasestorage.app');
+
+interface GeneratePassportRequest {
+  imageUrl: string;
+  count: 1 | 2 | 4 | 6 | 8;
+  paperSize?: '10x15';
+  marginMm?: number;
+  userId: string;
+}
+
+interface PassportLayout {
+  cols: number;
+  rows: number;
+  photoWidth: number;
+  photoHeight: number;
+  paperWidth: number;
+  paperHeight: number;
+}
+
+// Constants for paper at 300 DPI
+const DPI = 300;
+const PAPER_WIDTH_CM = 10;
+const PAPER_HEIGHT_CM = 15;
+
+// Standard passport photo size: 35mm x 45mm
+const PASSPORT_WIDTH_MM = 35;
+const PASSPORT_HEIGHT_MM = 45;
+const PASSPORT_ASPECT_RATIO = PASSPORT_WIDTH_MM / PASSPORT_HEIGHT_MM;
+
+
+const CLOUD_RUN_SERVICE_URL = process.env.CLOUD_RUN_SERVICE_URL || '';
+
+interface CropData {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface ImageMetadata {
+  id: string;
+  fileName: string;
+  storageUrl: string;
+  downloadUrl: string;
+  cropData?: CropData;
+  order: number;
+}
+
+interface ConversionConfig {
+  mode: 'id' | 'document';
+  pageSize: 'A4' | 'A3' | 'Letter' | 'Legal';
+  imagesPerPage: number;
+  enableEnhancements: boolean;
+}
+
+interface ConversionRequest {
+  jobId: string;
+  userId: string;
+  images: ImageMetadata[];
+  config: ConversionConfig;
+}
+
+interface ConversionResponse {
+  pdfUrl: string;
+  pdfStorageUrl: string;
+}
+
+/**
+ * Cloud Function v2 to orchestrate image to PDF conversion
+ * Delegates heavy processing to Cloud Run service
+ */
+export const convertImagesToPdf = onCall(
+  {
+    region: 'us-central1',
+    timeoutSeconds: 540, // 9 minutes
+    memory: '1GiB',
+    maxInstances: 100,
+    cors: true,
+  },
+  async (request): Promise<ConversionResponse> => {
+    const startTime = Date.now();
+    
+    // Validate authentication
+    if (!request.auth) {
+      console.error('[Function] Unauthenticated request');
+      throw new HttpsError(
+        'unauthenticated',
+        'User must be authenticated'
+      );
+    }
+
+    const data = request.data as ConversionRequest;
+
+    // Validate user matches request
+    if (request.auth.uid !== data.userId) {
+      console.error('[Function] User ID mismatch', {
+        authUid: request.auth.uid,
+        requestUid: data.userId,
+      });
+      throw new HttpsError(
+        'permission-denied',
+        'User ID does not match authenticated user'
+      );
+    }
+
+    const { jobId, userId, images, config } = data;
+
+    console.log('[Function] Starting conversion', {
+      jobId,
+      userId,
+      imageCount: images.length,
+      config,
+    });
+
+    // Validate input
+    if (!images || images.length === 0) {
+      throw new HttpsError(
+        'invalid-argument',
+        'At least one image is required'
+      );
+    }
+
+    if (images.length > 50) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Maximum 50 images per conversion'
+      );
+    }
+
+    // Validate config
+    const validModes = ['id', 'document'];
+    const validPageSizes = ['A4', 'A3', 'Letter', 'Legal'];
+    const validImagesPerPage = [1, 2, 4, 6, 9];
+
+    if (!validModes.includes(config.mode)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid mode: ${config.mode}`
+      );
+    }
+
+    if (!validPageSizes.includes(config.pageSize)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid page size: ${config.pageSize}`
+      );
+    }
+
+    if (!validImagesPerPage.includes(config.imagesPerPage)) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Invalid images per page: ${config.imagesPerPage}`
+      );
+    }
+
+    try {
+      // Call Cloud Run service for processing
+      console.log('[Function] Calling Cloud Run service', { url: CLOUD_RUN_SERVICE_URL });
+      
+      const response = await axios.post<{ pdfPath: string }>(
+        `${CLOUD_RUN_SERVICE_URL}/convert`,
+        {
+          jobId,
+          userId,
+          images,
+          config,
+        },
+        {
+          timeout: 500000, // 8+ minutes timeout
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const { pdfPath } = response.data;
+      console.log('[Function] Cloud Run processing complete', { pdfPath });
+
+      // Generate public URL for the PDF
+      const pdfStorageUrl = `users/${userId}/conversions/${jobId}/converted/${path.basename(pdfPath)}`;
+      const file = bucket.file(pdfStorageUrl);
+      
+      // Make the file publicly accessible
+      await file.makePublic();
+      
+      const pdfUrl = `https://storage.googleapis.com/${bucket.name}/${pdfStorageUrl}`;
+
+      const duration = Date.now() - startTime;
+      console.log('[Function] Conversion complete', {
+        jobId,
+        duration: `${duration}ms`,
+        pdfUrl,
+      });
+
+      return {
+        pdfUrl,
+        pdfStorageUrl,
+      };
+
+    } catch (error) {
+      console.error('[Function] Conversion error', {
+        jobId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const message = error.response?.data?.error || error.message;
+        
+        console.error('[Function] Cloud Run error', {
+          status,
+          message,
+          data: error.response?.data,
+        });
+
+        throw new HttpsError(
+          'internal',
+          `Cloud Run processing failed: ${message}`
+        );
+      }
+
+      throw new HttpsError(
+        'internal',
+        error instanceof Error ? error.message : 'Conversion failed'
+      );
+    }
+  }
+);
+
+/**
+ * Cloud Function v2 to clean up old conversion jobs
+ * Runs daily at 2 AM UTC to delete jobs older than 7 days
+ */
+export const cleanupOldConversions = onSchedule(
+  {
+    schedule: '0 5 * * *', // 
+    timeZone: 'UTC',
+    region: 'us-central1',
+    memory: '512MiB',
+    timeoutSeconds: 540,
+  },
+  async (event) => {
+    console.log('[Cleanup] Starting cleanup of old conversions');
+    
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    try {
+      
+      const conversionsRef = db.collection('conversions');
+      
+      const oldJobs = await conversionsRef
+        .where('createdAt', '<', Timestamp.fromDate(sevenDaysAgo))
+        .get();
+
+      console.log(`[Cleanup] Found ${oldJobs.size} old jobs to clean up`);
+
+      //const deletePromises: Promise<void>[] = [];
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const doc of oldJobs.docs) {
+        const job = doc.data();
+        
+        try {
+          // Delete PDF from storage
+          if (job.pdfStorageUrl) {
+            const file = bucket.file(job.pdfStorageUrl);
+            await file.delete().catch(err => {
+              console.error(`[Cleanup] Error deleting file ${job.pdfStorageUrl}:`, err);
+            });
+          }
+
+          // Delete conversion folder
+          const folderPath = `users/${job.userId}/conversions/${job.id}/`;
+          await bucket.deleteFiles({ prefix: folderPath }).catch(err => {
+            console.error(`[Cleanup] Error deleting folder ${folderPath}:`, err);
+          });
+
+          // Delete Firestore document
+          await doc.ref.delete();
+          
+          successCount++;
+        } catch (error) {
+          console.error(`[Cleanup] Error cleaning up job ${doc.id}:`, error);
+          errorCount++;
+        }
+      }
+
+      console.log(`[Cleanup] Cleanup complete. Success: ${successCount}, Errors: ${errorCount}`);
+    } catch (error) {
+      console.error('[Cleanup] Error during cleanup:', error);
+      throw error;
+    }
+  }
+);
+
+/**
+ * Convert cm to pixels at 300 DPI
+ */
+const cmToPx = (cm: number): number => {
+  return Math.round((cm / 2.54) * DPI);
+};
+
+/**
+ * Convert mm to pixels at 300 DPI
+ */
+const mmToPx = (mm: number): number => {
+  return Math.round((mm / 25.4) * DPI);
+};
+
+/**
+ * Calculate layout for passport photos
+ */
+const calculateLayout = (count: number, marginMm: number): PassportLayout => {
+  const marginPx = mmToPx(marginMm);
+  
+  // For single photo: portrait orientation (10x15 cm)
+  // For multiple photos: landscape orientation (15x10 cm)
+  const isPortrait = count === 1;
+  const paperWidthPx = isPortrait ? cmToPx(PAPER_WIDTH_CM) : cmToPx(PAPER_HEIGHT_CM);
+  const paperHeightPx = isPortrait ? cmToPx(PAPER_HEIGHT_CM) : cmToPx(PAPER_WIDTH_CM);
+  
+  let cols: number, rows: number;
+  
+  if (count === 1) {
+    cols = 1;
+    rows = 1;
+  } else if (count === 2) {
+    cols = 1;  // 2 columns (side by side)
+    rows = 2;  // 1 row
+  } else if (count === 4) {
+    cols = 2;
+    rows = 2;
+  } else if (count === 6) {
+    cols = 3;
+    rows = 2;
+  } else if (count === 8) {
+    cols = 4;
+    rows = 2;
+  } else {
+    cols = 1;
+    rows = 1;
+  }
+  
+  let photoWidth: number, photoHeight: number;
+  
+  if (count === 1) {
+    // For single photo: fill entire page minus margins
+    const availableWidth = paperWidthPx - (2 * marginPx);
+    const availableHeight = paperHeightPx - (2 * marginPx);
+    
+    photoWidth = availableWidth;
+    photoHeight = Math.floor(photoWidth / PASSPORT_ASPECT_RATIO);
+    
+    // If height exceeds available space, scale down based on height
+    if (photoHeight > availableHeight) {
+      photoHeight = availableHeight;
+      photoWidth = Math.floor(photoHeight * PASSPORT_ASPECT_RATIO);
+    }
+  } else if (count === 2) {
+    // For 2 photos: use standard passport size (35mm x 45mm) at 300 DPI
+    // This makes them take up ~25% of landscape page
+    photoWidth = mmToPx(PASSPORT_WIDTH_MM);
+    photoHeight = mmToPx(PASSPORT_HEIGHT_MM);
+  } else {
+    // For 4, 6, 8 photos: calculate to fit in grid with margins
+    const availableWidth = paperWidthPx - (marginPx * (cols + 1));
+    const availableHeight = paperHeightPx - (marginPx * (rows + 1));
+    
+    photoWidth = Math.floor(availableWidth / cols);
+    photoHeight = Math.floor(availableHeight / rows);
+    
+    // Maintain passport aspect ratio (35:45)
+    const calculatedHeight = Math.floor(photoWidth / PASSPORT_ASPECT_RATIO);
+    
+    if (calculatedHeight <= photoHeight) {
+      photoHeight = calculatedHeight;
+    } else {
+      photoWidth = Math.floor(photoHeight * PASSPORT_ASPECT_RATIO);
+    }
+  }
+  
+  return {
+    cols,
+    rows,
+    photoWidth,
+    photoHeight,
+    paperWidth: paperWidthPx,
+    paperHeight: paperHeightPx,
+  };
+};
+
+/**
+ * Download image from URL
+ */
+const downloadImage = async (url: string): Promise<Buffer> => {
+  logger.info('[Download] Fetching image from URL', { url });
+  
+  try {
+    const response = await axios.get(url, { 
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      maxContentLength: 10 * 1024 * 1024, // 10MB max
+    });
+    
+    logger.info('[Download] Image fetched successfully', { 
+      size: response.data.length 
+    });
+    
+    return Buffer.from(response.data);
+  } catch (error) {
+    logger.error('[Download] Failed to fetch image', { error, url });
+    throw new Error('Failed to download image from URL');
+  }
+};
+
+/**
+ * Generate passport photo tiles
+ */
+const generatePassportTiles = async (
+  imageBuffer: Buffer,
+  count: number,
+  marginMm: number
+): Promise<Buffer> => {
+  logger.info('[Generate] Creating passport tiles', { count, marginMm });
+  
+  const layout = calculateLayout(count, marginMm);
+  const marginPx = mmToPx(marginMm);
+  
+  logger.info('[Generate] Layout calculated', {
+    cols: layout.cols,
+    rows: layout.rows,
+    photoWidth: layout.photoWidth,
+    photoHeight: layout.photoHeight,
+    paperWidth: layout.paperWidth,
+    paperHeight: layout.paperHeight,
+    marginPx,
+    orientation: count === 1 ? 'portrait' : 'landscape',
+  });
+  
+  try {
+    // Resize input image to passport photo size
+    const resizedPhoto = await sharp(imageBuffer)
+      .resize(layout.photoWidth, layout.photoHeight, {
+        fit: 'cover',
+        position: 'center',
+      })
+      .toBuffer();
+    
+    // Create composites for each photo position
+    const composites = [];
+    
+    if (count === 1) {
+      // Center single photo on page
+      const left = Math.floor((layout.paperWidth - layout.photoWidth) / 2);
+      const top = Math.floor((layout.paperHeight - layout.photoHeight) / 2);
+      
+      composites.push({
+        input: resizedPhoto,
+        left,
+        top,
+      });
+    } else {
+      // Align multiple photos to left with margins
+      for (let row = 0; row < layout.rows; row++) {
+        for (let col = 0; col < layout.cols; col++) {
+          const left = marginPx + col * (layout.photoWidth + marginPx);
+          const top = marginPx + row * (layout.photoHeight + marginPx);
+          
+          composites.push({
+            input: resizedPhoto,
+            left,
+            top,
+          });
+        }
+      }
+    }
+    
+    // Create white background and composite all photos
+    const finalImage = await sharp({
+      create: {
+        width: layout.paperWidth,
+        height: layout.paperHeight,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 },
+      },
+    })
+      .composite(composites)
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    
+    logger.info('[Generate] Tiles created successfully', {
+      outputSize: finalImage.length,
+    });
+    
+    return finalImage;
+  } catch (error) {
+    logger.error('[Generate] Failed to create tiles', { error });
+    throw new Error('Failed to generate passport tiles');
+  }
+};
+
+/**
+ * Upload to Google Cloud Storage
+ */
+const uploadToStorage = async (
+  buffer: Buffer,
+  userId: string,
+  filename: string
+): Promise<string> => {
+  const timestamp = Date.now();
+  const filepath = `passport-results/${userId}/${timestamp}-${filename}`;
+  const file = bucket.file(filepath);
+  
+  logger.info('[Upload] Uploading to storage', { filepath, size: buffer.length });
+  
+  try {
+    await file.save(buffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+        metadata: {
+          uploadedBy: userId,
+          uploadedAt: new Date().toISOString(),
+        },
+      },
+    });
+    
+    // Make the file publicly accessible
+    await file.makePublic();
+    
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filepath}`;
+    
+    logger.info('[Upload] File uploaded successfully', { publicUrl });
+    
+    return publicUrl;
+  } catch (error) {
+    logger.error('[Upload] Failed to upload to storage', { error, filepath });
+    throw new Error('Failed to upload result to storage');
+  }
+};
+
+/**
+ * Delete from Google Cloud Storage
+ */
+const deleteFromStorage = async (url: string): Promise<void> => {
+  try {
+    const urlObj = new URL(url);
+    const filepath = urlObj.pathname.split(`/${bucket.name}/`)[1];
+    
+    if (!filepath) {
+      throw new Error('Invalid storage URL');
+    }
+    
+    logger.info('[Delete] Deleting file from storage', { filepath });
+    
+    const file = bucket.file(filepath);
+    await file.delete();
+    
+    logger.info('[Delete] File deleted successfully', { filepath });
+  } catch (error) {
+    logger.error('[Delete] Failed to delete file', { error, url });
+    throw new Error('Failed to delete file from storage');
+  }
+};
+
+/**
+ * Main passport generation handler
+ */
+const handleGeneratePassport = async (req: any, res: any) => {
+  const startTime = Date.now();
+  
+  try {
+    const {
+      imageUrl,
+      count,
+      paperSize = '10x15',
+      marginMm = 2,
+      userId,
+    }: GeneratePassportRequest = req.body;
+    
+    logger.info('[Request] Generate passport request received', {
+      imageUrl,
+      count,
+      paperSize,
+      marginMm,
+      userId,
+    });
+    
+    // Validate input
+    if (!imageUrl || !count || !userId) {
+      logger.warn('[Validation] Missing required parameters');
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Missing required parameters: imageUrl, count, userId',
+      });
+      return;
+    }
+    
+    if (![1, 2, 4, 6, 8].includes(count)) {
+      logger.warn('[Validation] Invalid count value', { count });
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Invalid count. Must be one of: 1, 2, 4, 6, 8',
+      });
+      return;
+    }
+    
+    // Download original image
+    const imageBuffer = await downloadImage(imageUrl);
+    
+    // Generate passport tiles
+    const resultBuffer = await generatePassportTiles(imageBuffer, count, marginMm);
+    
+    // Upload result to storage
+    const downloadUrl = await uploadToStorage(
+      resultBuffer,
+      userId,
+      `passport-${count}-photos.jpg`
+    );
+    
+    // Delete original image
+    let originalImageDeleted = false;
+    try {
+      await deleteFromStorage(imageUrl);
+      originalImageDeleted = true;
+      logger.info('[Cleanup] Original image deleted successfully');
+    } catch (error) {
+      logger.error('[Cleanup] Failed to delete original image', { error });
+    }
+    
+    const processingTimeMs = Date.now() - startTime;
+    
+    logger.info('[Success] Passport generation complete', {
+      downloadUrl,
+      processingTimeMs,
+    });
+    
+    res.status(200).json({
+      success: true,
+      downloadUrl,
+      originalImageDeleted,
+      metadata: {
+        count,
+        paperSize,
+        marginMm,
+        orientation: count === 1 ? 'portrait' : 'landscape',
+        generatedAt: new Date().toISOString(),
+        processingTimeMs,
+      },
+    });
+  } catch (error) {
+    const processingTimeMs = Date.now() - startTime;
+    
+    logger.error('[Error] Passport generation failed', { 
+      error,
+      processingTimeMs,
+    });
+    
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+    });
+  }
+};
+
+/**
+ * Health check handler
+ */
+const handleHealthCheck = async (req: any, res: any) => {
+  logger.info('[Health] Health check requested');
+  
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    service: 'passport-generator',
+    version: '1.0.0',
+  });
+};
+
+// Export Cloud Functions
+export const generatePassport = onRequest(
+  {
+    memory: '2GiB',
+    timeoutSeconds: 300,
+    cors: true,
+    maxInstances: 10,
+    region: 'africa-south1',
+  },
+  async (req, res) => {
+    try {
+      // Set CORS headers explicitly
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+      }
+
+      // Only allow POST requests
+      if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method Not Allowed' });
+        return;
+      }
+
+      await handleGeneratePassport(req, res);
+    } catch (error) {
+      logger.error('[Function] Unhandled error in generatePassport', { error });
+      res.status(500).json({ error: 'Failed to generate passport photos' });
+    }
+  }
+);
+
+export const healthCheck = onRequest(
+  {
+    memory: '256MiB',
+    timeoutSeconds: 10,
+    cors: true,
+    region: 'africa-south1',
+  },
+  async (req, res) => {
+    try {
+      // Set CORS headers explicitly
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+      }
+
+      await handleHealthCheck(req, res);
+    } catch (error) {
+      logger.error('[Function] Unhandled error in healthCheck', { error });
+      res.status(500).json({ error: 'Health check failed' });
+    }
+  }
+);
 
 
 interface MovieDataRequest {
@@ -31,17 +789,6 @@ interface MovieDataResponse {
   };
   message?: string;
 }
-
-// Initialize Gemini AI
-// const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-
-
-//initializeApp();
-if (getApps().length === 0) {
-  initializeApp();
-}
-const storage = new Storage();
-const db = getFirestore();
 
 // Generate complete HTML template
 function generateHTML(numberOfTenants: number): string {
@@ -882,1372 +1629,16 @@ Include all available seasons with their episode counts. If you cannot find exac
     }
   }
 );
-//const META_ACCESS_TOKEN = defineSecret('META_ACCESS_TOKEN');//
-// const COGVANA_PAGE_ID = defineSecret('COGVANA_PAGE_ID');//
-// const SMB_PAGE_ID = defineSecret('SMB_PAGE_ID');//
-// const COGVANA_PAGE_TOKEN = defineSecret('COGVANA_PAGE_TOKEN');
-// const SMB_PAGE_TOKEN = defineSecret('SMB_PAGE_TOKEN');
-// const LINKEDIN_ACCESS_TOKEN = defineSecret('LINKEDIN_ACCESS_TOKEN');//
-// const SMB_LINKEDIN_ORG_URN = defineSecret('SMB_LINKEDIN_ORG_URN');
-// const COGVANA_LINKEDIN_ORG_URN = defineSecret('COGVANA_LINKEDIN_ORG_URN');
-//const FIREBASE_FUNCTION_URL = "https://us-central1-learn-000111.cloudfunctions.net/getVertexAIToken";
 
-
-// // Brand context for AI
-// const BRAND_CONTEXT = {
-//   cogvana: {
-//     name: "Cogvana",
-//     owner: "Cogvana Technologies (subsidiary of Cogvana Corporation)",
-//     description: "AI-powered e-learning platform transforming education in Africa",
-//     apps: {
-//       cogvana: {
-//         name: "Cogvana App",
-//         description: "Free Android app for students with subscriptions for premium content",
-//         features: "Offline-capable, gamified learning experience, social network for interactive learning, groups, virtual classrooms",
-//         availability: "Android (with web/PWA in development)"
-//       },
-//       cognitutor: {
-//         name: "Cogni Tutor",
-//         description: "Platform for teachers to create and sell digital certified courses",
-//         features: "Course creation tools, monetization platform, virtual classrooms with video/audio, content management for schools",
-//         availability: "Web, PWA, Android",
-//         preRegistration: "cogvana.co.ke/platforms/cogni"
-//       }
-//     },
-//     features: "AI-powered personalized learning, offline-first design for limited connectivity, virtual classrooms with video and audio support, dedicated social network for students, gamified engagement, tiered affordable subscriptions, courses on any category from K-12 to professional and tertiary education",
-//     target: "Students (K-12 to tertiary), teachers, educators creating courses, school administrators, educational institutions",
-//     demographics: "Kenyan youth, students with limited internet access, educators seeking monetization, schools needing digital content delivery",
-//     tone: "Casual and informal with touch of professionalism - use English, Swahili, Sheng, and slang to connect with Kenyan youth",
-//     languages: "English, Swahili, Sheng, and slang",
-//     mainLink: "https://cogvana.co.ke",
-//     links: {
-//       main: "https://cogvana.co.ke",
-//       cogniPreReg: "https://cogvana.co.ke/platforms/cogni",
-//       platforms: "https://cogvana.co.ke/platforms"
-//     },
-//     objectives: "Create awareness for apps and platform, drive installations, engage users with fun interactive posts, brand exposure and visibility, increase page following and likes, joke and engage in trivial ways, have informative fun, collect user views and feedback"
-//   },
-//   smb: {
-//     name: "SMB KENYA LTD",
-//     owner: "Cogvana Corporation",
-//     description: "Property management company offering digital solutions for landlords, agents, caretakers, and property managers in Kenya",
-//     product: {
-//       name: "Plot Yangu",
-//       fullName: "Plot Yangu Property Management System (PMS)",
-//       developer: "Developed by Cogvana Technologies and SMB KENYA LTD",
-//       description: "Simple offline-capable tool for managing properties digitally"
-//     },
-//     features: {
-//       core: "Tenant management, invoice generation and management, payments and rent collection, property accounting, financial statements, tenant assessment, data-driven screening, transcription and management record sheets",
-//       access: "Web portal (admin.cogvana.co.ke), PWA, full Android app, accessible via agents at any cyber cafe",
-//       offline: "Fully functional offline - no internet required for daily operations"
-//     },
-//     services: "Property management, tenant screening, property marketing, consultations, digital property management tools",
-//     cyberPlatform: {
-//       description: "Platform for cyber cafes and freelancers to become Plot Yangu agents",
-//       commission: "Up to 45% commission on Plot Yangu services",
-//       features: "File sharing with clients, products and services catalog page, payment gateway with M-Pesa support, financial insights and trends, tools to run and manage cyber operations",
-//       access: "cyber.cogvana.co.ke",
-//       explore: "cyber.cogvana.co.ke/explore"
-//     },
-//     target: "Landlords, property managers, real estate agents, caretakers, cyber cafe owners, freelancers seeking agency opportunities",
-//     demographics: "Property owners with 5-200 units, professional property managers, cyber cafes in residential areas, entrepreneurs",
-//     tone: "Professional with engaging elements - authoritative but accessible",
-//     mainLink: "https://cogvana.co.ke",
-//     links: {
-//       main: "https://cogvana.co.ke",
-//       admin: "https://admin.cogvana.co.ke",
-//       payments: "https://payments.cogvana.co.ke",
-//       cyber: "https://cyber.cogvana.co.ke",
-//       cyberExplore: "https://cyber.cogvana.co.ke/explore"
-//     },
-//     objectives: "Campaign for Plot Yangu PMS, educate users and public on product, drive adoption, engage users professionally, increase page following and likes, brand exposure, drive calls and messages, recruit cyber agents"
-//   }
-// };
-
-// const FORMATTING = {
-//   bullet: '•',
-//   arrow: '→',
-//   checkmark: '✓',
-//   star: '★',
-//   line: '━━━━━━━━━━',
-//   doubleArrow: '»',
-//   dot: '·',
-//   diamond: '◆',
-//   circle: '○'
-// };
-
-// const COMMON_HASHTAGS = "#Cogvana #CogniTutor #cogvana #sammuhia #plot #plotyangu #smbkenya #samuhia";
-
-// // const LINKEDIN_CONTEXT = {
-// //   smb: {
-// //     ...BRAND_CONTEXT.smb,
-// //     tone: "Professional, authoritative, data-driven, solution-focused B2B communication",
-// //     postTypes: ['thought-leadership', 'case-study', 'industry-insight', 'product-feature', 'partner-opportunity', 'best-practices', 'market-trends'],
-// //     hashtags: "#PropertyManagement #RealEstate #PropTech #KenyaBusiness #DigitalTransformation #RealEstateKenya #PropertyTech"
-// //   },
-// //   cogvana: {
-// //     ...BRAND_CONTEXT.cogvana,
-// //     tone: "Professional yet innovative, education-focused, impact-driven, thought leadership in EdTech",
-// //     postTypes: ['edtech-trends', 'learning-innovation', 'educator-spotlight', 'platform-update', 'education-insights', 'impact-story'],
-// //     hashtags: "#EdTech #Education #ELearning #DigitalLearning #EducationTechnology #AfricaEducation #LearningInnovation"
-// //   }
-// // };
-
-// interface Post {
-//   content: string;
-//   postType: string;
-//   sent: boolean;
-//   scheduledTime: string | null;
-//   sentAt: Timestamp | null;
-//   index: number;
-//   error?: string;
-// }
-
-// ============================================================================
-// SOCIAL MEDIA (FACEBOOK/INSTAGRAM) FUNCTIONS
-// // ============================================================================
-// async function getAccessToken(): Promise<string> {
-//   try {
-    
-//     if (!FIREBASE_FUNCTION_URL) {
-//       console.warn('FIREBASE_FUNCTION_URL not set');
-//       return '';
-//     }
-//     const response = await axios.get<{ accessToken: string }>(FIREBASE_FUNCTION_URL);
-//     return response.data?.accessToken || '';
-//   } catch (error) {
-//     console.error('Error fetching AI token:', error);
-//     return '';
-//   }
-// }
-
-// Generate social media posts daily at 2 AM EAT
-// export const generateDailyPosts = onSchedule(
-//   {
-//     schedule: '0 2 * * *',
-//     timeZone: 'Africa/Nairobi',
-//     secrets: [GEMINI_API_KEY],
-//     region: 'us-central1',
-//     memory: '512MiB',
-//     timeoutSeconds: 540
-//   },
-//   async (event) => {
-//     try {
-//       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-//       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-//       const today = getTodayDateString();
-
-//       console.log(`Generating social media posts for ${today}`);
-
-//       // Generate for Cogvana
-//       const cogvanaPosts = await generatePostsForPage('cogvana', model, 10);
-//       await db.collection('social_cogvana').doc(today).set({
-//         date: today,
-//         posts: cogvanaPosts,
-//         createdAt: Timestamp.now(),
-//         platform: 'facebook_instagram'
-//       });
-
-//       // Generate for SMB
-//       const smbPosts = await generatePostsForPage('smb', model, 10);
-//       await db.collection('social_smb').doc(today).set({
-//         date: today,
-//         posts: smbPosts,
-//         createdAt: Timestamp.now(),
-//         platform: 'facebook_instagram'
-//       });
-
-//       console.log(`✅ Generated ${cogvanaPosts.length} posts for Cogvana and ${smbPosts.length} for SMB`);
-//     } catch (error) {
-//       console.error('❌ Error generating daily posts:', error);
-//       throw error;
-//     }
-//   }
-// );
-
-// Schedule social media posts at 3 AM EAT
-// export const scheduleSocialPosts = onSchedule(
-//   {
-//     schedule: '0 3 * * *',
-//     timeZone: 'Africa/Nairobi',
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 60
-//   },
-//   async (event) => {
-//     try {
-//       const today = getTodayDateString();
-      
-//       const cogvanaDoc = await db.collection('social_cogvana').doc(today).get();
-//       const smbDoc = await db.collection('social_smb').doc(today).get();
-
-//       if (!cogvanaDoc.exists || !smbDoc.exists) {
-//         throw new Error('Social posts not found for today');
-//       }
-
-//       // Generate staggered time slots (7 AM - 9 PM)
-//       const timeSlots = generateTimeSlots(20, 7, 21);
-      
-//       const cogvanaPosts: Post[] = cogvanaDoc.data()!.posts;
-//       const smbPosts: Post[] = smbDoc.data()!.posts;
-
-//       // Alternate between pages
-//       const cogvanaSlots: string[] = [];
-//       const smbSlots: string[] = [];
-      
-//       timeSlots.forEach((slot, idx) => {
-//         if (idx % 2 === 0) cogvanaSlots.push(slot);
-//         else smbSlots.push(slot);
-//       });
-
-//       // Assign times
-//       cogvanaPosts.forEach((post, idx) => { post.scheduledTime = cogvanaSlots[idx]; });
-//       smbPosts.forEach((post, idx) => { post.scheduledTime = smbSlots[idx]; });
-
-//       await db.collection('social_cogvana').doc(today).update({ posts: cogvanaPosts });
-//       await db.collection('social_smb').doc(today).update({ posts: smbPosts });
-
-//       console.log('✅ Social posts scheduled successfully');
-//     } catch (error) {
-//       console.error('❌ Error scheduling social posts:', error);
-//       throw error;
-//     }
-//   }
-// );
-
-// Publish scheduled social media posts every 5 minutes490706184128700
-
-// ============================================================================
-// LINKEDIN FUNCTIONS
-// ============================================================================
-
-// Generate LinkedIn posts daily at 2 AM EAT
-// export const generateLinkedInPosts = onSchedule(
-//   {
-//     schedule: '0 2 * * *',
-//     timeZone: 'Africa/Nairobi',
-//     secrets: [GEMINI_API_KEY],
-//     region: 'us-central1',
-//     memory: '512MiB',
-//     timeoutSeconds: 540
-//   },
-//   async (event) => {
-//     try {
-//       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-//       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-//       const today = getTodayDateString();
-
-//       console.log(`Generating LinkedIn posts for ${today}`);
-
-//       // Generate 7 posts for SMB (primary focus on LinkedIn)
-//       const smbPosts = await generateLinkedInPostsForPage('smb', model, 7);
-//       await db.collection('linkedin_smb').doc(today).set({
-//         date: today,
-//         posts: smbPosts,
-//         createdAt: Timestamp.now(),
-//         platform: 'linkedin'
-//       });
-
-//       // Generate 5 posts for Cogvana (secondary on LinkedIn)
-//       const cogvanaPosts = await generateLinkedInPostsForPage('cogvana', model, 5);
-//       await db.collection('linkedin_cogvana').doc(today).set({
-//         date: today,
-//         posts: cogvanaPosts,
-//         createdAt: Timestamp.now(),
-//         platform: 'linkedin'
-//       });
-
-//       console.log(`✅ Generated ${smbPosts.length} LinkedIn posts for SMB and ${cogvanaPosts.length} for Cogvana`);
-//     } catch (error) {
-//       console.error('❌ Error generating LinkedIn posts:', error);
-//       throw error;
-//     }
-//   }
-// );
-
-// // Schedule LinkedIn posts at 3 AM EAT
-// export const scheduleLinkedInPosts = onSchedule(
-//   {
-//     schedule: '0 3 * * *',
-//     timeZone: 'Africa/Nairobi',
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 60
-//   },
-//   async (event) => {
-//     try {
-//       const today = getTodayDateString();
-      
-//       const smbDoc = await db.collection('linkedin_smb').doc(today).get();
-//       const cogvanaDoc = await db.collection('linkedin_cogvana').doc(today).get();
-
-//       if (!smbDoc.exists || !cogvanaDoc.exists) {
-//         throw new Error('LinkedIn posts not found for today');
-//       }
-
-//       // Business hours: 8 AM - 6 PM for LinkedIn
-//       const optimalTimes = ['08:00', '09:30', '11:00', '12:30', '14:00', '15:00', '16:00', '17:00', '09:00', '10:30', '13:00', '15:30'];
-      
-//       const smbPosts: Post[] = smbDoc.data()!.posts;
-//       const cogvanaPosts: Post[] = cogvanaDoc.data()!.posts;
-
-//       smbPosts.forEach((post, idx) => { post.scheduledTime = optimalTimes[idx]; });
-//       cogvanaPosts.forEach((post, idx) => { post.scheduledTime = optimalTimes[idx + 7]; });
-
-//       await db.collection('linkedin_smb').doc(today).update({ posts: smbPosts });
-//       await db.collection('linkedin_cogvana').doc(today).update({ posts: cogvanaPosts });
-
-//       console.log('✅ LinkedIn posts scheduled successfully');
-//     } catch (error) {
-//       console.error('❌ Error scheduling LinkedIn posts:', error);
-//       throw error;
-//     }
-//   }
-// );
-
-// // Publish scheduled LinkedIn posts every 10 minutes
-// export const publishLinkedInPosts = onSchedule(
-//   {
-//     schedule: '*/10 * * * *',
-//     timeZone: 'Africa/Nairobi',
-//     secrets: [LINKEDIN_ACCESS_TOKEN, SMB_LINKEDIN_ORG_URN, COGVANA_LINKEDIN_ORG_URN],
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 60
-//   },
-//   async (event) => {
-//     try {
-//       const now = new Date();
-//       const today = getTodayDateString();
-//       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-//       await processLinkedInPagePosts('linkedin_smb', today, currentTime, SMB_LINKEDIN_ORG_URN.value(), LINKEDIN_ACCESS_TOKEN.value());
-//       await processLinkedInPagePosts('linkedin_cogvana', today, currentTime, COGVANA_LINKEDIN_ORG_URN.value(), LINKEDIN_ACCESS_TOKEN.value());
-
-//     } catch (error) {
-//       console.error('❌ Error publishing LinkedIn posts:', error);
-//     }
-//   }
-// );
-
-// ============================================================================
-// MANUAL TRIGGER FOR TESTING
-// ============================================================================
-
-// export const manualGenerateAllPosts = onRequest(
-//   {
-//     secrets: [GEMINI_API_KEY],
-//     region: 'us-central1',
-//     memory: '1GiB',
-//     timeoutSeconds: 540
-//   },
-//   async (req, res) => {
-//     try {
-//       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-//       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-//       const today = getTodayDateString();
-
-//       console.log(`🔧 MANUAL: Generating all posts for ${today}`);
-
-//       // Social Media Posts
-//       const cogvanaSocial = await generatePostsForPage('cogvana', model, 10);
-//       const smbSocial = await generatePostsForPage('smb', model, 10);
-
-//       // LinkedIn Posts
-//     //   const smbLinkedIn = await generateLinkedInPostsForPage('smb', model, 7);
-//     //   const cogvanaLinkedIn = await generateLinkedInPostsForPage('cogvana', model, 5);
-
-//       // Save to Firestore
-//       await Promise.all([
-//         db.collection('social_cogvana').doc(today).set({
-//           date: today,
-//           posts: cogvanaSocial,
-//           createdAt: Timestamp.now(),
-//           platform: 'facebook_instagram',
-//           generatedManually: true
-//         }),
-//         db.collection('social_smb').doc(today).set({
-//           date: today,
-//           posts: smbSocial,
-//           createdAt: Timestamp.now(),
-//           platform: 'facebook_instagram',
-//           generatedManually: true
-//         }),
-//         // db.collection('linkedin_smb').doc(today).set({
-//         //   date: today,
-//         //   posts: smbLinkedIn,
-//         //   createdAt: Timestamp.now(),
-//         //   platform: 'linkedin',
-//         //   generatedManually: true
-//         // }),
-//         // db.collection('linkedin_cogvana').doc(today).set({
-//         //   date: today,
-//         //   posts: cogvanaLinkedIn,
-//         //   createdAt: Timestamp.now(),
-//         //   platform: 'linkedin',
-//         //   generatedManually: true
-//         // })
-//       ]);
-
-//       // Schedule all posts
-//       const socialTimeSlots = generateTimeSlots(20, 7, 21);
-//       //const linkedInTimes = ['08:00', '09:30', '11:00', '12:30', '14:00', '15:00', '16:00', '17:00', '09:00', '10:30', '13:00', '15:30'];
-
-//       const cogvanaSocialSlots: string[] = [];
-//       const smbSocialSlots: string[] = [];
-      
-//       socialTimeSlots.forEach((slot, idx) => {
-//         if (idx % 2 === 0) cogvanaSocialSlots.push(slot);
-//         else smbSocialSlots.push(slot);
-//       });
-
-//       cogvanaSocial.forEach((post, idx) => { post.scheduledTime = cogvanaSocialSlots[idx]; });
-//       smbSocial.forEach((post, idx) => { post.scheduledTime = smbSocialSlots[idx]; });
-//     //   smbLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx]; });
-//     //   cogvanaLinkedIn.forEach((post, idx) => { post.scheduledTime = linkedInTimes[idx + 7]; });
-
-//       await Promise.all([
-//         db.collection('social_cogvana').doc(today).update({ posts: cogvanaSocial }),
-//         db.collection('social_smb').doc(today).update({ posts: smbSocial }),
-//         // db.collection('linkedin_smb').doc(today).update({ posts: smbLinkedIn }),
-//         // db.collection('linkedin_cogvana').doc(today).update({ posts: cogvanaLinkedIn })
-//       ]);
-
-//       res.status(200).json({
-//         success: true,
-//         message: 'All posts generated and scheduled',
-//         date: today,
-//         counts: {
-//           cogvanaSocial: cogvanaSocial.length,
-//           smbSocial: smbSocial.length,
-//         //   smbLinkedIn: smbLinkedIn.length,
-//         //   cogvanaLinkedIn: cogvanaLinkedIn.length
-//         }
-//       });
-
-//     } catch (error) {
-//       console.error('❌ Manual generation error:', error);
-//       res.status(500).json({
-//         success: false,
-//         error: error instanceof Error ? error.message : 'Unknown error'
-//       });
-//     }
-//   }
-// );
-
-// async function processSocialPagePosts(collection: string, today: string, currentTime: string, pageId: string, token: string) {
-//   console.log(`🔍 [${collection}] Starting processing for ${today} at ${currentTime}`);
-//   console.log(`🔍 [${collection}] PageId: ${pageId ? pageId.substring(0, 10) + '...' : 'MISSING'}`);
-//   console.log(`🔍 [${collection}] Token: ${token ? 'Present (length: ' + token.length + ')' : 'MISSING'}`);
-  
-//   const docRef = db.collection(collection).doc(today);
-  
-//   let doc;
-//   try {
-//     doc = await docRef.get();
-//     console.log(`✓ [${collection}] Firestore doc.get() completed`);
-//   } catch (error) {
-//     console.error(`❌ [${collection}] Firestore doc.get() failed:`, error);
-//     throw error;
-//   }
-
-//   if (!doc.exists) {
-//     console.log(`⚠️ [${collection}] No document exists for ${today}`);
-//     return;
-//   }
-
-//   const data = doc.data();
-//   console.log(`✓ [${collection}] Document data retrieved:`, data ? 'YES' : 'NO');
-  
-//   const posts: Post[] = data?.posts || [];
-//   console.log(`📊 [${collection}] Total posts found: ${posts.length}`);
-
-//   if (posts.length === 0) {
-//     console.log(`⚠️ [${collection}] No posts array or empty array`);
-//     return;
-//   }
-
-//   for (let i = 0; i < posts.length; i++) {
-//     const post = posts[i];
-//     console.log(`\n📝 [${collection}] Post ${i}:`, {
-//       sent: post.sent,
-//       scheduledTime: post.scheduledTime,
-//       hasContent: !!post.content,
-//       contentLength: post.content?.length || 0
-//     });
-    
-//     if (!post.scheduledTime) {
-//       console.log(`⚠️ [${collection}] Post ${i}: No scheduledTime`);
-//       continue;
-//     }
-
-//     if (post.sent) {
-//       console.log(`⏭️ [${collection}] Post ${i}: Already sent, skipping`);
-//       continue;
-//     }
-
-//     console.log(`⏰ [${collection}] Post ${i}: Comparing times - scheduled: ${post.scheduledTime}, current: ${currentTime}`);
-    
-//     if (post.scheduledTime <= currentTime) {
-//       console.log(`🚀 [${collection}] Post ${i}: Ready to post!`);
-      
-//       try {
-//         console.log(`📤 [${collection}] Post ${i}: Calling postToFacebook...`);
-//         const result = await postToFacebook(pageId, post.content, token);
-//         console.log(`✅ [${collection}] Post ${i}: Facebook API response:`, result);
-        
-//         post.sent = true;
-//         post.sentAt = Timestamp.now();
-        
-//         console.log(`💾 [${collection}] Post ${i}: Updating Firestore...`);
-//         await docRef.update({ posts });
-//         console.log(`✅ [${collection}] Post ${i}: Successfully posted and marked as sent at ${currentTime}`);
-        
-//       } catch (error) {
-//         console.error(`❌ [${collection}] Post ${i}: Error during posting:`, error);
-//         console.error(`❌ [${collection}] Post ${i}: Error details:`, {
-//           message: error instanceof Error ? error.message : 'Unknown error',
-//           stack: error instanceof Error ? error.stack : undefined,
-//           response: (error as any).response?.data
-//         });
-        
-//         post.error = error instanceof Error ? error.message : 'Unknown error';
-        
-//         try {
-//           await docRef.update({ posts });
-//           console.log(`💾 [${collection}] Post ${i}: Error logged to Firestore`);
-//         } catch (updateError) {
-//           console.error(`❌ [${collection}] Post ${i}: Failed to update error in Firestore:`, updateError);
-//         }
-        
-//         try {
-//           await logError('social', collection, today, i, error instanceof Error ? error.message : 'Unknown error');
-//           console.log(`📋 [${collection}] Post ${i}: Error logged via logError()`);
-//         } catch (logError) {
-//           console.error(`❌ [${collection}] Post ${i}: Failed to call logError():`, logError);
-//         }
-//       }
-//     } else {
-//       console.log(`⏸️ [${collection}] Post ${i}: Not yet time (scheduled: ${post.scheduledTime}, current: ${currentTime})`);
-//     }
-//   }
-  
-//   console.log(`✓ [${collection}] Processing complete for ${today}\n`);
-// }
-
-// export const publishSocialPosts = onSchedule(
-//   {
-//     schedule: '*/5 * * * *',
-//     timeZone: 'Africa/Nairobi',
-//     secrets: [COGVANA_PAGE_TOKEN, SMB_PAGE_TOKEN, COGVANA_PAGE_ID, SMB_PAGE_ID],
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 60
-//   },
-//   async (event) => {
-//     console.log('\n========================================');
-//     console.log('🕐 SCHEDULED FUNCTION TRIGGERED');
-//     console.log('========================================');
-    
-//     try {
-//       const now = new Date();
-//       const today = getTodayDateString();
-//       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-
-//       console.log(`📅 Date: ${today}`);
-//       console.log(`⏰ Current time: ${currentTime}`);
-//       console.log(`🌍 Timezone: Africa/Nairobi`);
-//       console.log(`📍 Actual UTC time: ${now.toISOString()}`);
-
-//       console.log('\n--- Processing Cogvana ---');
-//       await processSocialPagePosts('social_cogvana', today, currentTime, COGVANA_PAGE_ID.value(), COGVANA_PAGE_TOKEN.value());
-      
-//       console.log('\n--- Processing SMB ---');
-//       await processSocialPagePosts('social_smb', today, currentTime, SMB_PAGE_ID.value(), SMB_PAGE_TOKEN.value());
-
-//       console.log('\n========================================');
-//       console.log('✅ SCHEDULED FUNCTION COMPLETED');
-//       console.log('========================================\n');
-
-//     } catch (error) {
-//       console.error('\n========================================');
-//       console.error('❌ CRITICAL ERROR IN SCHEDULED FUNCTION');
-//       console.error('========================================');
-//       console.error('Error details:', error);
-//       console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-//       console.error('========================================\n');
-//       throw error; // Re-throw to mark function as failed
-//     }
-//   }
-// );
-// export const publishSocialPosts = onSchedule(
-//   {
-//     schedule: '*/5 * * * *',
-//     timeZone: 'Africa/Nairobi',
-//     secrets: [COGVANA_PAGE_TOKEN, SMB_PAGE_TOKEN, COGVANA_PAGE_ID, SMB_PAGE_ID],
-//     region: 'us-central1',
-//     memory: '256MiB',
-//     timeoutSeconds: 60
-//   },
-//   async (event) => {
-//     try {
-//       // Convert UTC to EAT (UTC+3)
-//       const nowUTC = new Date();
-//       const nowEAT = new Date(nowUTC.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
-      
-//       const today = getTodayDateString(); // Make sure this also uses EAT!
-//       const currentTime = `${nowEAT.getHours().toString().padStart(2, '0')}:${nowEAT.getMinutes().toString().padStart(2, '0')}`;
-
-//       console.log(`🕐 UTC Time: ${nowUTC.toISOString()}`);
-//       console.log(`🕐 EAT Time: ${currentTime} on ${today}`);
-
-//       await processSocialPagePosts('social_cogvana', today, currentTime, COGVANA_PAGE_ID.value(), COGVANA_PAGE_TOKEN.value());
-//       await processSocialPagePosts('social_smb', today, currentTime, SMB_PAGE_ID.value(), SMB_PAGE_TOKEN.value());
-
-//     } catch (error) {
-//       console.error('❌ Error publishing social posts:', error);
-//     }
-//   }
-// );
-
-// Update your generatePostsForPage function
-// async function generatePostsForPage(pageType: 'cogvana' | 'smb', model: any, count: number): Promise<Post[]> {
-//   const brand = BRAND_CONTEXT[pageType];
-//   const posts: Post[] = [];
-  
-//   const postTypes = [
-//     'promotional', 'promotional',
-//     'educational', 'educational',
-//     'engagement', 'engagement',
-//     'user-story-testimonial',
-//     'tips-and-tricks',
-//     'fun-fact-trivia',
-//     'strong-cta-conversion'
-//   ];
-
-//   for (let i = 0; i < count; i++) {
-//     const postType = postTypes[i];
-//     const prompt = buildSocialPrompt(brand, postType, pageType);
-    
-//     try {
-//       const result = await model.generateContent(prompt);
-//       const response = await result.response;
-//       let text = response.text().trim();
-      
-//       // 🔥 Clean and convert the text
-//       text = cleanPostContent(text);
-      
-//       posts.push({
-//         content: text,
-//         postType,
-//         sent: false,
-//         scheduledTime: null,
-//         sentAt: null,
-//         index: i
-//       });
-      
-//       if (i < count - 1) {
-//         await new Promise(resolve => setTimeout(resolve, 2000));
-//       }
-//     } catch (error) {
-//       console.error(`Error generating post ${i} for ${pageType}:`, error);
-//       posts.push({
-//         content: `Error generating post. Please check logs.`,
-//         postType,
-//         sent: false,
-//         scheduledTime: null,
-//         sentAt: null,
-//         index: i,
-//         error: error instanceof Error ? error.message : 'Unknown error'
-//       });
-//     }
-//   }
-
-//   return posts;
-// }
-
-// Also update your Facebook posting function
-// async function postToFacebook(pageId: string, message: string, accessToken: string): Promise<any> {
-//   console.log(`🌐 [Facebook API] Starting post request`);
-//   console.log(`🌐 [Facebook API] PageId: ${pageId}`);
-//   console.log(`🌐 [Facebook API] Message length: ${message?.length || 0}`);
-//   console.log(`🌐 [Facebook API] Token present: ${!!accessToken}`);
-  
-//   // Clean the message one more time before posting
-//   const cleanedMessage = cleanPostContent(message);
-  
-//   const url = `https://graph.facebook.com/v21.0/${pageId}/feed`;
-//   console.log(`🌐 [Facebook API] URL: ${url}`);
-  
-//   try {
-//     const form = new FormData();
-//     form.append('message', cleanedMessage); // Use cleaned message
-//     form.append('access_token', accessToken);
-    
-//     console.log(`🌐 [Facebook API] FormData created, making POST request...`);
-    
-//     const response = await axios.post(url, form, {
-//       headers: {
-//         ...form.getHeaders(),
-//         'Content-Type': 'multipart/form-data; charset=UTF-8' // Ensure UTF-8
-//       }
-//     });
-
-//     console.log(`🌐 [Facebook API] Response status: ${response.status}`);
-//     console.log(`🌐 [Facebook API] Response data:`, response.data);
-    
-//     return response.data;
-    
-//   } catch (error) {
-//     console.error(`🌐 [Facebook API] Request failed`);
-//     console.error(`🌐 [Facebook API] Error:`, error);
-    
-//     if (axios.isAxiosError(error)) {
-//       console.error(`🌐 [Facebook API] Status: ${error.response?.status}`);
-//       console.error(`🌐 [Facebook API] Response data:`, error.response?.data);
-//       console.error(`🌐 [Facebook API] Headers:`, error.response?.headers);
-//     }
-    
-//     throw error;
-//   }
-// }
-
-// function convertMarkdownBoldToUnicode(text: string): string {
-//   return text.replace(/\*\*(.*?)\*\*/g, (match, content) => {
-//     return content.split('').map((char: string) => {
-//       const code = char.charCodeAt(0);
-      
-//       // Uppercase A-Z → Mathematical Bold Capital A-Z
-//       if (code >= 0x41 && code <= 0x5A) {
-//         return String.fromCodePoint(code - 0x41 + 0x1D400);
-//       }
-//       // Lowercase a-z → Mathematical Bold Small A-Z
-//       else if (code >= 0x61 && code <= 0x7A) {
-//         return String.fromCodePoint(code - 0x61 + 0x1D41A);
-//       }
-//       // Digits 0-9 → Mathematical Bold Digit 0-9
-//       else if (code >= 0x30 && code <= 0x39) {
-//         return String.fromCodePoint(code - 0x30 + 0x1D7CE);
-//       }
-      
-//       // Keep everything else (spaces, punctuation, emojis)
-//       return char;
-//     }).join('');
-//   });
-// }
-
-// // Clean up function
-// function cleanPostContent(text: string): string {
-//   // Remove [object Object] artifacts
-//   let cleaned = text.replace(/\[object Object\]/g, '');
-  
-//   // Convert markdown bold to Unicode bold
-//   cleaned = convertMarkdownBoldToUnicode(cleaned);
-  
-//   // Normalize Unicode to prevent encoding issues
-//   cleaned = cleaned.normalize('NFC');
-  
-//   return cleaned;
-// }
-
-// function buildSocialPrompt(brand: any, postType: string, pageType: string): string {
-//   return `You are an expert social media content creator for ${brand.name}.
-
-// CRITICAL INSTRUCTIONS - READ CAREFULLY:
-// 1. You MUST use ONLY the context provided below
-// 2. NEVER invent features, services, or information not explicitly mentioned
-// 3. NEVER make assumptions about the brand
-// 4. If a detail isn't in the context, DON'T mention it
-// 5. Stay 100% faithful to the brand voice and tone described
-
-// COMPLETE BRAND CONTEXT:
-// Company: ${brand.name}
-// Owner: ${brand.owner}
-// Description: ${brand.description}
-
-// ${pageType === 'cogvana' ? `
-// APPS AND PLATFORMS:
-// Cogvana App: ${brand.apps.cogvana.description}
-// - Features: ${brand.apps.cogvana.features}
-// - Availability: ${brand.apps.cogvana.availability}
-
-// Cogni Tutor: ${brand.apps.cognitutor.description}
-// - Features: ${brand.apps.cognitutor.features}
-// - Availability: ${brand.apps.cognitutor.availability}
-// - Pre-registration: ${brand.apps.cognitutor.preRegistration}
-// ` : ''}
-
-// ${pageType === 'smb' ? `
-// PRODUCT: ${brand.product.fullName}
-// - ${brand.product.description}
-// - Developed by: ${brand.product.developer}
-
-// CORE FEATURES:
-// ${brand.features.core}
-
-// ACCESS METHODS:
-// ${brand.features.access}
-
-// OFFLINE CAPABILITY:
-// ${brand.features.offline}
-
-// SERVICES OFFERED:
-// ${brand.services}
-
-// CYBER AGENT PLATFORM:
-// ${brand.cyberPlatform.description}
-// - Commission: ${brand.cyberPlatform.commission}
-// - Features: ${brand.cyberPlatform.features}
-// - Access: ${brand.cyberPlatform.access}
-// - Details: ${brand.cyberPlatform.explore}
-// ` : ''}
-
-// COMPLETE FEATURE LIST:
-// ${brand.features}
-
-// TARGET AUDIENCE:
-// ${brand.target}
-
-// DEMOGRAPHICS:
-// ${brand.demographics}
-
-// BRAND TONE & VOICE:
-// ${brand.tone}
-
-// ${pageType === 'cogvana' ? `LANGUAGES TO USE: ${brand.languages}` : ''}
-
-// AVAILABLE LINKS (use contextually appropriate link):
-// ${Object.entries(brand.links).map(([key, url]) => `- ${key}: ${url}`).join('\n')}
-
-// OBJECTIVES:
-// ${brand.objectives}
-
-// POST TYPE: ${postType.toUpperCase()}
-
-// POST TYPE SPECIFIC GUIDELINES:
-// ${getPostTypeGuidance(postType, pageType)}
-
-// MANDATORY POST REQUIREMENTS:
-// 1. Length: 100-200 words
-// 2. Use proper spacing (double line breaks between sections)
-// 3. Include relevant emojis (moderate use - 3-5 per post)
-// 4. Use headings with ** for bold where appropriate
-// 5. Use emojis strategically:
-//    - 1 emoji in opening line (hook)
-//    - Emojis as bullet points (✅, →, •)
-//    - 1 emoji before CTA
-//    - Total: 5-8 emojis per post
-// 6. Use **bold** for key phrases (1-2 per post max)
-// 7. Use Unicode symbols for structure:
-//    • Bullet points: ${FORMATTING.bullet}
-//    → Arrows: ${FORMATTING.arrow} or ${FORMATTING.doubleArrow}
-//    ✓ Checkmarks: ${FORMATTING.checkmark}
-//    ★ Stars: ${FORMATTING.star}
-//    ◆ Diamonds: ${FORMATTING.diamond}
-//    ━ Lines for separators: ${FORMATTING.line}
-
-// 9. Make it conversational and engaging
-
-// 10. MUST INCLUDE A CLEAR CTA (Call-to-Action):
-//    ${pageType === 'cogvana' ? `
-//    - "Download now and start learning! 📱"
-//    - "Comment below with your learning goals 💬"
-//    - "Share with a student who needs this! ❤️"
-//    - "Follow us for daily learning tips! 🎓"
-//    - "Click the link to explore our platform 👇"
-//    ` : `
-//    - "Send us a message to schedule a demo 📩"
-//    - "Visit the link to learn more 👇"
-//    - "Comment 'INTERESTED' for more details 💬"
-//    - "Call us today to get started! 📞"
-//    - "Follow for property management tips! ❤️"
-//    `}
-
-// 11. MUST INCLUDE relevant link from links above
-
-// 12. MUST END WITH: ${COMMON_HASHTAGS}
-
-// STRICT CONTENT RULES:
-// - Write in ${brand.tone}
-// - Base EVERYTHING on the context provided above
-// - Do NOT mention features not explicitly listed
-// - Do NOT invent statistics or data
-// - Do NOT reference competitors
-// - Keep it authentic, not salesy
-// - Focus on value and benefits
-// - Make it shareable
-
-// OUTPUT FORMAT:
-// Generate ONLY the post content. No explanations, no meta-commentary, just the post itself.
-
-// Generate the post now:`;
-// }
-
-// function getPostTypeGuidance(postType: string, pageType: string): string {
-//   const guidance: Record<string, string> = {
-//     'promotional': 'Highlight specific product features and benefits. Include a strong reason to act now. Make the value proposition crystal clear.',
-//     'educational': 'Teach something valuable related to your product. Provide actionable insights. Position your brand as a helpful expert.',
-//     'engagement': 'Ask questions, create polls (mention "what do you think?"), share relatable scenarios. Encourage comments and discussion.',
-//     'user-story-testimonial': 'Share a realistic success story (can be hypothetical but believable). Focus on transformation and results.',
-//     'tips-and-tricks': pageType === 'cogvana' ? 'Quick study tips, learning hacks, or productivity advice' : 'Property management best practices, rental tips, or business advice',
-//     'fun-fact-trivia': pageType === 'cogvana' ? 'Interesting education statistics or learning science facts' : 'Property market insights or real estate trivia',
-//     'strong-cta-conversion': 'Direct action-driving post. Clear benefit + urgent CTA + easy next step. Conversion-focused.'
-//   };
-  
-//   return guidance[postType] || 'Create engaging, valuable content that resonates with the target audience.';
-// }
-
-// ============================================================================
-// HELPER FUNCTIONS - LINKEDIN
-// ============================================================================
-
-// async function generateLinkedInPostsForPage(pageType: 'cogvana' | 'smb', model: any, count: number): Promise<Post[]> {
-//   const brand = LINKEDIN_CONTEXT[pageType];
-//   const posts: Post[] = [];
-
-//   for (let i = 0; i < count; i++) {
-//     const postType = brand.postTypes[i % brand.postTypes.length];
-//     const prompt = buildLinkedInPrompt(brand, postType, pageType);
-    
-//     try {
-//       const result = await model.generateContent(prompt);
-//       const response = await result.response;
-//       const text = response.text().trim();
-      
-//       posts.push({
-//         content: text,
-//         postType,
-//         sent: false,
-//         scheduledTime: null,
-//         sentAt: null,
-//         index: i
-//       });
-      
-//       // Rate limit: 1 request per 2 seconds
-//       if (i < count - 1) {
-//         await new Promise(resolve => setTimeout(resolve, 2000));
-//       }
-//     } catch (error) {
-//       console.error(`Error generating LinkedIn post ${i} for ${pageType}:`, error);
-//       posts.push({
-//         content: `Error generating LinkedIn post. Please check logs.`,
-//         postType,
-//         sent: false,
-//         scheduledTime: null,
-//         sentAt: null,
-//         index: i,
-//         error: error instanceof Error ? error.message : 'Unknown error'
-//       });
-//     }
-//   }
-
-//   return posts;
-// }
-
-// function buildLinkedInPrompt(brand: any, postType: string, pageType: string): string {
-//   const postTypeExamples: Record<string, string> = {
-//     'thought-leadership': 'Share industry insights, trends, or forward-thinking perspectives about the future of your industry in Kenya/Africa',
-//     'case-study': 'Tell a detailed success story showing how your solution solved a specific business problem with measurable results',
-//     'industry-insight': 'Share data, research, or observations about the property management/education sector with business implications',
-//     'product-feature': 'Deep-dive into a specific feature explaining its business value and ROI for professionals',
-//     'partner-opportunity': 'Highlight partnership or agency opportunities with clear value proposition and earning potential',
-//     'best-practices': 'Share actionable professional tips and proven strategies for success in your industry',
-//     'market-trends': 'Analyze current market conditions, economic factors, or regulatory changes affecting your industry',
-//     'edtech-trends': 'Discuss innovations, research, and trends in educational technology with global and local context',
-//     'learning-innovation': 'Showcase innovative approaches to learning, teaching methodologies, or educational breakthroughs',
-//     'educator-spotlight': 'Highlight educator success stories, innovative teaching methods, or professional development insights',
-//     'platform-update': 'Share meaningful product updates with business context, value proposition, and strategic reasoning',
-//     'education-insights': 'Share research, data, or analysis about education effectiveness, learning outcomes, or EdTech adoption',
-//     'impact-story': 'Show measurable impact of technology on learning outcomes, student success, or institutional performance'
-//   };
-
-//   return `You are a professional LinkedIn content strategist for ${brand.name}.
-
-// CRITICAL INSTRUCTIONS - ABSOLUTE REQUIREMENTS:
-// 1. You MUST use ONLY the context provided below
-// 2. NEVER invent features, services, statistics, or information not explicitly stated
-// 3. NEVER make assumptions about the brand beyond what's written
-// 4. If a detail isn't in the context, DON'T mention it at all
-// 5. Stay 100% faithful to the brand voice, tone, and positioning described
-// 6. This is LinkedIn B2B content - maintain high professional standards
-
-// COMPLETE BRAND CONTEXT:
-// Company: ${brand.name}
-// Owner: ${brand.owner}
-// Description: ${brand.description}
-
-// ${pageType === 'smb' ? `
-// PRODUCT DETAILS:
-// Name: ${brand.product.fullName}
-// Developer: ${brand.product.developer}
-// Description: ${brand.product.description}
-
-// CORE FEATURES:
-// ${brand.features.core}
-
-// ACCESS METHODS:
-// ${brand.features.access}
-
-// SERVICES:
-// ${brand.services}
-
-// CYBER AGENT PROGRAM:
-// ${brand.cyberPlatform.description}
-// Commission: ${brand.cyberPlatform.commission}
-// Platform Features: ${brand.cyberPlatform.features}
-// Access: ${brand.cyberPlatform.access}
-// More Info: ${brand.cyberPlatform.explore}
-// ` : `
-// PLATFORM COMPONENTS:
-
-// Cogvana App:
-// - ${brand.apps.cogvana.description}
-// - Features: ${brand.apps.cogvana.features}
-// - Availability: ${brand.apps.cogvana.availability}
-
-// Cogni Tutor Platform:
-// - ${brand.apps.cognitutor.description}
-// - Features: ${brand.apps.cognitutor.features}
-// - Availability: ${brand.apps.cognitutor.availability}
-// - Pre-registration: ${brand.apps.cognitutor.preRegistration}
-
-// KEY FEATURES:
-// ${brand.features}
-// `}
-
-// TARGET PROFESSIONAL AUDIENCE:
-// ${brand.target}
-
-// PROFESSIONAL DEMOGRAPHICS:
-// ${brand.demographics}
-
-// LINKEDIN TONE & VOICE:
-// ${brand.tone}
-
-// AVAILABLE LINKS (choose most contextually relevant):
-// ${Object.entries(brand.links).map(([key, url]) => `- ${key}: ${url}`).join('\n')}
-
-// BUSINESS OBJECTIVES:
-// ${brand.objectives}
-
-// POST TYPE: ${postType.toUpperCase()}
-
-// POST TYPE GUIDANCE:
-// ${postTypeExamples[postType]}
-
-// LINKEDIN BEST PRACTICES (MANDATORY):
-// 1. **Hook in First 2 Lines**: First 2 lines appear before "...see more" - MUST grab attention immediately
-// 2. **Professional Tone**: Maximum 3 emojis in entire post, authoritative and credible voice
-// 3. **Value-First Approach**: Lead with insights or value, NOT with sales pitch
-// 4. **Data-Driven**: Include relevant business metrics, percentages, or concrete examples when appropriate (but ONLY from provided context)
-// 5. **Proper Structure**: Use line breaks for readability, short paragraphs (2-3 sentences max)
-// 6. **Optimal Length**: 150-300 words (LinkedIn favors substantive, valuable content)
-// 7. **Story-Driven**: Frame even data/features as compelling business narratives
-// 8. **Actionable**: Provide takeaways or next steps for professionals
-
-// POST STRUCTURE (FOLLOW EXACTLY):
-
-// [HOOK - 1-2 sentences that make professionals stop scrolling]
-
-// [MAIN CONTENT - 2-3 paragraphs]
-// - Lead with the problem or opportunity
-// - Provide context, insights, or valuable information
-// - Use bullet points ONLY if listing specific benefits/features
-// - Include concrete examples from the context provided
-// - Tie back to business value and ROI
-
-// [CALL-TO-ACTION - Professional and specific]
-// Choose the most appropriate:
-// - "What's your experience with [topic]? Share in the comments."
-// - "Learn more about how we're solving this: [link]"
-// - "Interested in this for your organization? Let's connect."
-// - "Explore the full platform: [link]"
-// - "Are you facing this challenge? DM us to discuss solutions."
-
-// [RELEVANT LINK]
-
-// [HASHTAGS - End with: ${brand.hashtags}]
-
-// STRICT LINKEDIN CONTENT RULES:
-// - First 2 lines are CRITICAL - they determine if people click "see more"
-// - Use double line breaks (\\n\\n) between sections for readability
-// - Maximum 3 emojis total - use sparingly and professionally
-// - Avoid casual language, slang, or overly promotional tone
-// - Focus on business problems and solutions
-// - Make it valuable enough that professionals want to share it
-// - Base EVERYTHING on the provided context
-// - DO NOT invent case studies, statistics, or features
-// - DO NOT reference competitors or make comparisons
-// - Realistic scenarios are OK, but must align with provided features
-
-// BAD LINKEDIN POST EXAMPLE (Don't do this):
-// "🎉 Exciting news everyone! We just launched something AMAZING! 😍 Our platform is the BEST and you'll absolutely LOVE it! Check it out now! 🔥🔥🔥 #awesome #best"
-
-// GOOD LINKEDIN POST EXAMPLE (Do this):
-// "Property managers in Nairobi waste an average of 8 hours weekly on manual rent tracking.
-
-// After analyzing operations at over 100 properties, we identified three critical inefficiencies:
-// • Payment reconciliation takes 2-3 hours per property monthly
-// • Tenant communication is fragmented across multiple channels  
-// • Financial reporting requires manual Excel consolidation
-
-// Digital transformation isn't just about technology—it's about reclaiming strategic time. Plot Yangu automates these operational tasks while maintaining the personal touch property managers value.
-
-// The result? Managers focus on growth instead of administrative work.
-
-// What's your biggest operational bottleneck in property management?
-
-// Learn more: https://cyber.cogvana.co.ke/explore
-
-// #PropertyManagement #RealEstate #PropTech #KenyaBusiness"
-
-// OUTPUT REQUIREMENT:
-// Generate ONLY the LinkedIn post content. No meta-commentary, no explanations, no notes to me. Just the final post text that's ready to publish.
-
-// Generate the post now:`;
-// }
-
-// async function processLinkedInPagePosts(collection: string, today: string, currentTime: string, orgUrn: string, token: string) {
-//   const docRef = db.collection(collection).doc(today);
-//   const doc = await docRef.get();
-
-//   if (!doc.exists) {
-//     console.log(`No LinkedIn posts found in ${collection} for ${today}`);
-//     return;
-//   }
-
-//   const data = doc.data();
-//   const posts: Post[] = data?.posts || [];
-
-//   for (let i = 0; i < posts.length; i++) {
-//     const post = posts[i];
-    
-//     if (!post.sent && post.scheduledTime && post.scheduledTime <= currentTime) {
-//       try {
-//         await postToLinkedIn(orgUrn, post.content, token);
-        
-//         post.sent = true;
-//         post.sentAt = Timestamp.now();
-        
-//         await docRef.update({ posts });
-        
-//         console.log(`✅ Posted LinkedIn ${collection} post ${i} at ${currentTime}`);
-//       } catch (error) {
-//         console.error(`❌ Error posting LinkedIn ${collection} post ${i}:`, error);
-//         post.error = error instanceof Error ? error.message : 'Unknown error';
-//         await docRef.update({ posts });
-//         await logError('linkedin', collection, today, i, error instanceof Error ? error.message : 'Unknown error');
-//       }
-//     }
-//   }
-// }
-
-// async function postToLinkedIn(organizationUrn: string, text: string, accessToken: string): Promise<any> {
-//   const url = 'https://api.linkedin.com/v2/ugcPosts';
-  
-//   const postData = {
-//     author: organizationUrn,
-//     lifecycleState: 'PUBLISHED',
-//     specificContent: {
-//       'com.linkedin.ugc.ShareContent': {
-//         shareCommentary: {
-//           text: text
-//         },
-//         shareMediaCategory: 'NONE'
-//       }
-//     },
-//     visibility: {
-//       'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC'
-//     }
-//   };
-
-//   const response = await axios.post(url, postData, {
-//     headers: {
-//       'Authorization': `Bearer ${accessToken}`,
-//       'Content-Type': 'application/json',
-//       'X-Restli-Protocol-Version': '2.0.0'
-//     }
-//   });
-
-//   return response.data;
-// }
-
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-// function getTodayDateString(): string {
-//   const now = new Date();
-//   const day = now.getDate().toString().padStart(2, '0');
-//   const month = (now.getMonth() + 1).toString().padStart(2, '0');
-//   const year = now.getFullYear();
-//   return `${day}${month}${year}`;
-// }
-
-// function getTodayDateString(): string {
-//   const formatter = new Intl.DateTimeFormat('en-GB', {
-//     timeZone: 'Africa/Nairobi',
-//     day: '2-digit',
-//     month: '2-digit',
-//     year: 'numeric'
-//   });
-  
-//   const parts = formatter.formatToParts(new Date());
-//   const day = parts.find(p => p.type === 'day')!.value;
-//   const month = parts.find(p => p.type === 'month')!.value;
-//   const year = parts.find(p => p.type === 'year')!.value;
-  
-//   return `${day}${month}${year}`;
-// }
-
-// function generateTimeSlots(count: number, startHour: number, endHour: number): string[] {
-//   const slots: string[] = [];
-//   const totalMinutes = (endHour - startHour) * 60;
-//   const baseInterval = Math.floor(totalMinutes / count);
-
-//   for (let i = 0; i < count; i++) {
-//     const randomOffset = Math.floor(Math.random() * 15);
-//     const minutesFromStart = (i * baseInterval) + randomOffset;
-//     const hour = startHour + Math.floor(minutesFromStart / 60);
-//     const minute = minutesFromStart % 60;
-    
-//     if (hour < endHour) {
-//       slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
-//     }
-//   }
-
-//   return slots.sort();
-// }
-
-// async function logError(platform: string, collection: string, date: string, postIndex: number, errorMessage: string) {
-//   try {
-//     await db.collection('post_errors').add({
-//       platform,
-//       collection,
-//       date,
-//       postIndex,
-//       error: errorMessage,
-//       timestamp: Timestamp.now()
-//     });
-//   } catch (error) {
-//     console.error('Failed to log error to Firestore:', error);
-//   }
-// }
-
-// // ============================================================================
-// // ADMIN/UTILITY ENDPOINTS
-// // ============================================================================
-
-// // Get LinkedIn Organization Info (run once during setup)
-// // export const getLinkedInOrgInfo = onRequest(
-// //   {
-// //     secrets: [LINKEDIN_ACCESS_TOKEN],
-// //     region: 'us-central1',
-// //     memory: '256MiB',
-// //     timeoutSeconds: 30
-// //   },
-// //   async (req, res) => {
-// //     try {
-// //       const response = await axios.get(
-// //         'https://api.linkedin.com/v2/organizationalEntityAcls?q=roleAssignee',
-// //         {
-// //           headers: {
-// //             'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
-// //             'X-Restli-Protocol-Version': '2.0.0'
-// //           }
-// //         }
-// //       );
-
-// //       const orgs = response.data.elements.map((element: any) => ({
-// //         organizationUrn: element.organizationTarget,
-// //         role: element.role,
-// //         state: element.state
-// //       }));
-
-// //       // Get details for each org
-// //       const orgDetails = await Promise.all(
-// //         orgs.map(async (org: any) => {
-// //           try {
-// //             const orgId = org.organizationUrn.split(':').pop();
-// //             const detailResponse = await axios.get(
-// //               `https://api.linkedin.com/v2/organizations/${orgId}`,
-// //               {
-// //                 headers: {
-// //                   'Authorization': `Bearer ${LINKEDIN_ACCESS_TOKEN.value()}`,
-// //                   'X-Restli-Protocol-Version': '2.0.0'
-// //                 }
-// //               }
-// //             );
-            
-// //             return {
-// //               ...org,
-// //               name: detailResponse.data.localizedName,
-// //               vanityName: detailResponse.data.vanityName
-// //             };
-// //           } catch (error) {
-// //             return org;
-// //           }
-// //         })
-// //       );
-
-// //       res.status(200).json({
-// //         success: true,
-// //         organizations: orgDetails
-// //       });
-
-// //     } catch (error) {
-// //       console.error('Error fetching LinkedIn org info:', error);
-// //       res.status(500).json({
-// //         success: false,
-// //         error: error instanceof Error ? error.message : 'Unknown error'
-// //       });
-// //     }
-// //   }
-// // );
-
-// // Health check endpoint
-// export const healthCheck = onRequest(
-//   {
-//     region: 'us-central1',
-//     memory: '128MiB',
-//     timeoutSeconds: 10
-//   },
-//   async (req, res) => {
-//     res.status(200).json({
-//       status: 'healthy',
-//       timestamp: new Date().toISOString(),
-//       service: 'social-media-automation',
-//       functions: [
-//         'generateDailyPosts',
-//         'scheduleSocialPosts', 
-//         'publishSocialPosts',
-//         'generateLinkedInPosts',
-//         'scheduleLinkedInPosts',
-//         'publishLinkedInPosts',
-//         'manualGenerateAllPosts'
-//       ]
-//     });
-//   }
-// );
-
-/**
- * ========================================
- * SHOP FORMS GENERATOR EXPORTS
- * ========================================
- */
 
 import { generateShopForm } from './handlers/shop.forms.handler';
 
-// Shop Forms - Generate PDF forms for shop operations
-// URL: /api/forms/sales?shopId=<id>
-//      /api/forms/expenses?shopId=<id>
-//      /api/forms/stock?shopId=<id>
+
 exports.shopFormGenerator = onRequest(
   {
     memory: "1GiB",
     timeoutSeconds: 120,
-    cors: true, // Enable CORS for browser requests
+    cors: true, 
   },
   async (req, res) => {
     try {
@@ -2270,20 +1661,13 @@ exports.shopFormGenerator = onRequest(
   }
 );
 
-/**
- * ========================================
- * WHATSAPP WEBHOOK EXPORTS
- * ========================================
- */
 
 import { handleIncomingMessage } from './webhooks/whatsapp-webhook';
 import { handleWebhookVerification } from './webhooks/verify-webhook';
 import { WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN } from './config/whatsapp.config';
 import { PAYSTACK_SECRET_KEY } from './config/paystack.config';
 
-// WhatsApp Webhook - handles both GET (verification) and POST (incoming messages)
-// Uses Firebase Secrets set via: firebase functions:secrets:set WHATSAPP_* PAYSTACK_SECRET_KEY
-// Increased memory to 1GB and timeout to 120s for PDF generation and upload
+
 exports.whatsappWebhook = onRequest(
   {
     memory: "1GiB",

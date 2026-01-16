@@ -14,7 +14,8 @@ import {
   Briefcase,
   FileText,
   Settings,
-  Film} from 'lucide-react';
+  Film,
+  ImagePlay} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -30,6 +31,8 @@ import IncomeTab from '../components/income/IncomeTab';
 import ShopTab from '../components/shop/ShopTab';
 import { useNavigate } from 'react-router-dom';
 import MoviesTab from '../components/movies/MoviesTab';
+import { PassportPhotoModal } from '../components/PassportPhotoModal';
+import { downloadFile } from '../services/firebaseStorage';
 
 
 const getInitials = (name: string): string => {
@@ -75,6 +78,7 @@ const Dashboard = () => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [showPaymentSettings, setShowPaymentSettings] = useState(false);
+  const [showPassport, setShowPassport] = useState(false);
 
   const { currentUser, firestoreUser, loading } = useAuth(); 
   const navigate = useNavigate();
@@ -301,6 +305,13 @@ const Dashboard = () => {
                 title="Form"
               >
                 <FileText className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowPassport(!showPassport)}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="Passports"
+              >
+                <ImagePlay className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setShowPaymentSettings(!showPaymentSettings)}
@@ -840,6 +851,22 @@ const Dashboard = () => {
           onSuccess={handlePaymentSuccess}
         />
       )}
+
+      {
+        showPassport && (
+          <PassportPhotoModal
+            isOpen={showPassport}
+            onClose={() => setShowPassport(false)}
+            user={firestoreUser}
+            onComplete={(url) => {
+            console.log('Passport ready:', url);
+            downloadFile(url);
+            //setShowPassport(false);
+            toast.success('Passport photo downloaded successfully!');
+          }}
+          />
+        )
+      }
 
       {showPricingModal && selectedAsset && (
         <PricingModal
