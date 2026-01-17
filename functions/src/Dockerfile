@@ -3,6 +3,8 @@ FROM node:18-slim
 
 # Install dependencies for Sharp
 RUN apt-get update && apt-get install -y \
+    imagemagick \
+    ghostscript \
     libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 

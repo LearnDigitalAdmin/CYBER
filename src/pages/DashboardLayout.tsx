@@ -15,7 +15,8 @@ import {
   FileText,
   Settings,
   Film,
-  ImagePlay} from 'lucide-react';
+  ImagePlay,
+  FileArchive} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -33,6 +34,7 @@ import { useNavigate } from 'react-router-dom';
 import MoviesTab from '../components/movies/MoviesTab';
 import { PassportPhotoModal } from '../components/PassportPhotoModal';
 import { downloadFile } from '../services/firebaseStorage';
+import ImageToPdfModal from '../components/ImageToPdfModal';
 
 
 const getInitials = (name: string): string => {
@@ -79,6 +81,8 @@ const Dashboard = () => {
   const [phone, setPhone] = useState('');
   const [showPaymentSettings, setShowPaymentSettings] = useState(false);
   const [showPassport, setShowPassport] = useState(false);
+
+  const [showI2P, setShowI2P] = useState(false);
 
   const { currentUser, firestoreUser, loading } = useAuth(); 
   const navigate = useNavigate();
@@ -312,6 +316,13 @@ const Dashboard = () => {
                 title="Passports"
               >
                 <ImagePlay className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setShowI2P(!showI2P)}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="IMG-PDF"
+              >
+                <FileArchive className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setShowPaymentSettings(!showPaymentSettings)}
@@ -864,6 +875,16 @@ const Dashboard = () => {
             //setShowPassport(false);
             toast.success('Passport photo downloaded successfully!');
           }}
+          />
+        )
+      }
+
+      {
+        showI2P && (
+          <ImageToPdfModal
+            user={firestoreUser}
+            isOpen={showI2P}
+            onClose={() => setShowI2P(false)}
           />
         )
       }

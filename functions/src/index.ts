@@ -1,7 +1,7 @@
 import { onCall, HttpsError, onRequest } from 'firebase-functions/v2/https';
 import { Storage } from '@google-cloud/storage';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore } from 'firebase-admin/firestore';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { defineSecret } from 'firebase-functions/params';
@@ -9,7 +9,12 @@ import * as logger from 'firebase-functions/logger';
 import sharp from 'sharp';
 import axios from 'axios';
 import * as path from 'path';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
+
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -53,7 +58,9 @@ const PASSPORT_HEIGHT_MM = 45;
 const PASSPORT_ASPECT_RATIO = PASSPORT_WIDTH_MM / PASSPORT_HEIGHT_MM;
 
 
-const CLOUD_RUN_SERVICE_URL = process.env.CLOUD_RUN_SERVICE_URL || '';
+
+
+const execFileAsync = promisify(execFile);
 
 interface CropData {
   x: number;
@@ -62,14 +69,6 @@ interface CropData {
   height: number;
 }
 
-interface ImageMetadata {
-  id: string;
-  fileName: string;
-  storageUrl: string;
-  downloadUrl: string;
-  cropData?: CropData;
-  order: number;
-}
 
 interface ConversionConfig {
   mode: 'id' | 'document';
@@ -78,245 +77,242 @@ interface ConversionConfig {
   enableEnhancements: boolean;
 }
 
-interface ConversionRequest {
-  jobId: string;
-  userId: string;
-  images: ImageMetadata[];
-  config: ConversionConfig;
+interface PageDimensions {
+  width: number;
+  height: number;
 }
 
-interface ConversionResponse {
-  pdfUrl: string;
-  pdfStorageUrl: string;
+const PAGE_SIZES: Record<string, PageDimensions> = {
+  A4: { width: 595, height: 842 },
+  A3: { width: 842, height: 1191 },
+  Letter: { width: 612, height: 792 },
+  Legal: { width: 612, height: 1008 },
+};
+
+const ID_SIZE = {
+  width: 1012,
+  height: 638,
+};
+
+async function downloadImage1(url: string, outputPath: string): Promise<void> {
+  const response = await axios({
+    url,
+    method: 'GET',
+    responseType: 'arraybuffer',
+  });
+  await fs.writeFile(outputPath, response.data);
 }
 
-/**
- * Cloud Function v2 to orchestrate image to PDF conversion
- * Delegates heavy processing to Cloud Run service
- */
+// LIBRARY 1: SHARP (Node.js npm package)
+// Used for: Image processing, cropping, resizing, enhancement
+async function processImage(
+  inputPath: string,
+  outputPath: string,
+  config: ConversionConfig,
+  cropData?: CropData
+): Promise<void> {
+  // Sharp is imported as a Node.js module and used directly
+  let image = sharp(inputPath); // Creates a Sharp pipeline
+
+  // Crop operation (if user cropped the image)
+  if (cropData) {
+    image = image.extract({
+      left: cropData.x,
+      top: cropData.y,
+      width: cropData.width,
+      height: cropData.height,
+    });
+  }
+
+  // Resize based on mode
+  if (config.mode === 'id') {
+    image = image.resize(ID_SIZE.width, ID_SIZE.height, {
+      fit: 'contain',
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    });
+  } else {
+    const pageDims = PAGE_SIZES[config.pageSize];
+    const maxWidth = Math.floor(pageDims.width * 3);
+    const maxHeight = Math.floor(pageDims.height * 3);
+    
+    image = image.resize(maxWidth, maxHeight, {
+      fit: 'inside',
+      withoutEnlargement: false,
+    });
+  }
+
+  // Image enhancements
+  if (config.enableEnhancements) {
+    image = image.rotate().normalize().sharpen();
+  }
+
+  // Save as JPEG (Sharp handles the actual file writing)
+  await image
+    .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+    .toFile(outputPath);
+}
+
+// LIBRARY 2: IMAGEMAGICK (System binary - convert/montage commands)
+// Used for: Creating PDF pages from processed images
+async function createPdfPage(
+  imagePaths: string[],
+  outputPath: string,
+  config: ConversionConfig
+): Promise<void> {
+  const pageDims = PAGE_SIZES[config.pageSize];
+  const geometry = `${pageDims.width}x${pageDims.height}`;
+
+  // Build command-line arguments for ImageMagick
+  const args: string[] = ['-density', '300', '-page', geometry];
+
+  let cols = 1, rows = 1;
+  if (config.imagesPerPage === 2) { cols = 1; rows = 2; }
+  else if (config.imagesPerPage === 4) { cols = 2; rows = 2; }
+  else if (config.imagesPerPage === 6) { cols = 2; rows = 3; }
+  else if (config.imagesPerPage === 9) { cols = 3; rows = 3; }
+
+  // Add image file paths as arguments
+  for (const imgPath of imagePaths) {
+    args.push(imgPath);
+  }
+
+  // For multiple images, use montage to create grid layout
+  if (config.imagesPerPage > 1) {
+    args.push('-tile', `${cols}x${rows}`);
+    args.push('-geometry', '+10+10');
+    args.push('-background', 'white');
+  }
+
+  args.push(outputPath);
+
+  // Execute ImageMagick command-line tool
+  // 'montage' for grids, 'convert' for single images
+  const command = config.imagesPerPage > 1 ? 'montage' : 'convert';
+  
+  // execFileAsync spawns the ImageMagick binary as a child process
+  // Example: `montage -density 300 -page 595x842 img1.jpg img2.jpg -tile 2x2 -geometry +10+10 -background white output.pdf`
+  await execFileAsync(command, args);
+}
+
+// LIBRARY 3: GHOSTSCRIPT (System binary - gs command)
+// Used for: Merging multiple PDF pages into a single PDF file
+async function combinePdfs(
+  pdfPaths: string[],
+  outputPath: string
+): Promise<void> {
+  // Build command-line arguments for Ghostscript
+  const args = [
+    '-dBATCH',                    // Exit after processing
+    '-dNOPAUSE',                  // Don't pause between pages
+    '-dSAFER',                    // Restrict file operations for security
+    '-sDEVICE=pdfwrite',          // Output device is PDF
+    '-dPDFSETTINGS=/prepress',   // Highest quality settings
+    '-dColorImageResolution=300', // 300 DPI for color images
+    '-dGrayImageResolution=300',  // 300 DPI for grayscale
+    '-dMonoImageResolution=300',  // 300 DPI for monochrome
+    '-dAutoRotatePages=/None',    // Don't auto-rotate pages
+    `-sOutputFile=${outputPath}`, // Output file path
+    ...pdfPaths,                  // Input PDF files to merge
+  ];
+
+  // Execute Ghostscript command-line tool
+  // Example: `gs -dBATCH -dNOPAUSE -dSAFER -sDEVICE=pdfwrite -sOutputFile=final.pdf page1.pdf page2.pdf page3.pdf`
+  await execFileAsync('gs', args);
+}
+
 export const convertImagesToPdf = onCall(
   {
     region: 'us-central1',
-    timeoutSeconds: 540, // 9 minutes
-    memory: '1GiB',
-    maxInstances: 100,
+    timeoutSeconds: 540,
+    memory: '8GiB', // More memory for processing
+    cpu: 2, // Multiple CPUs
+    maxInstances: 5,
     cors: true,
   },
-  async (request): Promise<ConversionResponse> => {
-    const startTime = Date.now();
-    
-    // Validate authentication
+  async (request) => {
     if (!request.auth) {
-      console.error('[Function] Unauthenticated request');
-      throw new HttpsError(
-        'unauthenticated',
-        'User must be authenticated'
-      );
+      throw new HttpsError('unauthenticated', 'User must be authenticated');
     }
 
-    const data = request.data as ConversionRequest;
+    const { jobId, userId, images, config } = request.data;
 
-    // Validate user matches request
-    if (request.auth.uid !== data.userId) {
-      console.error('[Function] User ID mismatch', {
-        authUid: request.auth.uid,
-        requestUid: data.userId,
-      });
-      throw new HttpsError(
-        'permission-denied',
-        'User ID does not match authenticated user'
-      );
+    if (request.auth.uid !== userId) {
+      throw new HttpsError('permission-denied', 'User ID mismatch');
     }
 
-    const { jobId, userId, images, config } = data;
-
-    console.log('[Function] Starting conversion', {
-      jobId,
-      userId,
-      imageCount: images.length,
-      config,
-    });
-
-    // Validate input
     if (!images || images.length === 0) {
-      throw new HttpsError(
-        'invalid-argument',
-        'At least one image is required'
-      );
+      throw new HttpsError('invalid-argument', 'At least one image required');
     }
 
     if (images.length > 50) {
-      throw new HttpsError(
-        'invalid-argument',
-        'Maximum 50 images per conversion'
-      );
+      throw new HttpsError('invalid-argument', 'Maximum 50 images');
     }
 
-    // Validate config
-    const validModes = ['id', 'document'];
-    const validPageSizes = ['A4', 'A3', 'Letter', 'Legal'];
-    const validImagesPerPage = [1, 2, 4, 6, 9];
-
-    if (!validModes.includes(config.mode)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid mode: ${config.mode}`
-      );
-    }
-
-    if (!validPageSizes.includes(config.pageSize)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid page size: ${config.pageSize}`
-      );
-    }
-
-    if (!validImagesPerPage.includes(config.imagesPerPage)) {
-      throw new HttpsError(
-        'invalid-argument',
-        `Invalid images per page: ${config.imagesPerPage}`
-      );
-    }
+    const workDir = path.join(os.tmpdir(), `conversion-${uuidv4()}`);
 
     try {
-      // Call Cloud Run service for processing
-      console.log('[Function] Calling Cloud Run service', { url: CLOUD_RUN_SERVICE_URL });
+      await fs.mkdir(workDir, { recursive: true });
+
+      // Download and process images
+      const processedImages: string[] = [];
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const downloadPath = path.join(workDir, `original-${i}.jpg`);
+        const processedPath = path.join(workDir, `processed-${i}.jpg`);
+
+        await downloadImage1(img.downloadUrl, downloadPath);
+        await processImage(downloadPath, processedPath, config, img.cropData);
+        processedImages.push(processedPath);
+      }
+
+      // Create PDF pages
+      const pdfPages: string[] = [];
+      const imagesPerPage = config.imagesPerPage;
       
-      const response = await axios.post<{ pdfPath: string }>(
-        `${CLOUD_RUN_SERVICE_URL}/convert`,
-        {
-          jobId,
-          userId,
-          images,
-          config,
+      for (let i = 0; i < processedImages.length; i += imagesPerPage) {
+        const pageImages = processedImages.slice(i, i + imagesPerPage);
+        const pagePath = path.join(workDir, `page-${Math.floor(i / imagesPerPage)}.pdf`);
+        await createPdfPage(pageImages, pagePath, config);
+        pdfPages.push(pagePath);
+      }
+
+      // Combine PDFs
+      const finalPdfPath = path.join(workDir, 'final.pdf');
+      if (pdfPages.length === 1) {
+        await fs.rename(pdfPages[0], finalPdfPath);
+      } else {
+        await combinePdfs(pdfPages, finalPdfPath);
+      }
+
+      // Upload to Storage
+      const pdfStoragePath = `users/${userId}/conversions/${jobId}/converted/output.pdf`;
+      await bucket.upload(finalPdfPath, {
+        destination: pdfStoragePath,
+        metadata: {
+          contentType: 'application/pdf',
+          metadata: { jobId, userId, createdAt: new Date().toISOString() },
         },
-        {
-          timeout: 500000, // 8+ minutes timeout
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      const { pdfPath } = response.data;
-      console.log('[Function] Cloud Run processing complete', { pdfPath });
-
-      // Generate public URL for the PDF
-      const pdfStorageUrl = `users/${userId}/conversions/${jobId}/converted/${path.basename(pdfPath)}`;
-      const file = bucket.file(pdfStorageUrl);
-      
-      // Make the file publicly accessible
-      await file.makePublic();
-      
-      const pdfUrl = `https://storage.googleapis.com/${bucket.name}/${pdfStorageUrl}`;
-
-      const duration = Date.now() - startTime;
-      console.log('[Function] Conversion complete', {
-        jobId,
-        duration: `${duration}ms`,
-        pdfUrl,
       });
 
-      return {
-        pdfUrl,
-        pdfStorageUrl,
-      };
+      const file = bucket.file(pdfStoragePath);
+      await file.makePublic();
+      const pdfUrl = `https://storage.googleapis.com/${bucket.name}/${pdfStoragePath}`;
+
+      // Cleanup
+      await fs.rm(workDir, { recursive: true, force: true });
+
+      return { pdfUrl, pdfStorageUrl: pdfStoragePath };
 
     } catch (error) {
-      console.error('[Function] Conversion error', {
-        jobId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const message = error.response?.data?.error || error.message;
-        
-        console.error('[Function] Cloud Run error', {
-          status,
-          message,
-          data: error.response?.data,
-        });
-
-        throw new HttpsError(
-          'internal',
-          `Cloud Run processing failed: ${message}`
-        );
-      }
+      // Cleanup on error
+      try {
+        await fs.rm(workDir, { recursive: true, force: true });
+      } catch {}
 
       throw new HttpsError(
         'internal',
         error instanceof Error ? error.message : 'Conversion failed'
       );
-    }
-  }
-);
-
-/**
- * Cloud Function v2 to clean up old conversion jobs
- * Runs daily at 2 AM UTC to delete jobs older than 7 days
- */
-export const cleanupOldConversions = onSchedule(
-  {
-    schedule: '0 5 * * *', // 
-    timeZone: 'UTC',
-    region: 'us-central1',
-    memory: '512MiB',
-    timeoutSeconds: 540,
-  },
-  async (event) => {
-    console.log('[Cleanup] Starting cleanup of old conversions');
-    
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    try {
-      
-      const conversionsRef = db.collection('conversions');
-      
-      const oldJobs = await conversionsRef
-        .where('createdAt', '<', Timestamp.fromDate(sevenDaysAgo))
-        .get();
-
-      console.log(`[Cleanup] Found ${oldJobs.size} old jobs to clean up`);
-
-      //const deletePromises: Promise<void>[] = [];
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const doc of oldJobs.docs) {
-        const job = doc.data();
-        
-        try {
-          // Delete PDF from storage
-          if (job.pdfStorageUrl) {
-            const file = bucket.file(job.pdfStorageUrl);
-            await file.delete().catch(err => {
-              console.error(`[Cleanup] Error deleting file ${job.pdfStorageUrl}:`, err);
-            });
-          }
-
-          // Delete conversion folder
-          const folderPath = `users/${job.userId}/conversions/${job.id}/`;
-          await bucket.deleteFiles({ prefix: folderPath }).catch(err => {
-            console.error(`[Cleanup] Error deleting folder ${folderPath}:`, err);
-          });
-
-          // Delete Firestore document
-          await doc.ref.delete();
-          
-          successCount++;
-        } catch (error) {
-          console.error(`[Cleanup] Error cleaning up job ${doc.id}:`, error);
-          errorCount++;
-        }
-      }
-
-      console.log(`[Cleanup] Cleanup complete. Success: ${successCount}, Errors: ${errorCount}`);
-    } catch (error) {
-      console.error('[Cleanup] Error during cleanup:', error);
-      throw error;
     }
   }
 );

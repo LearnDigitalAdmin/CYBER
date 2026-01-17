@@ -60,6 +60,21 @@ export interface ConversionProgress {
 }
 
 /**
+ * Remove undefined fields from an object to prevent Firestore errors
+ */
+const cleanUndefinedFields = <T extends Record<string, any>>(obj: T): Partial<T> => {
+  const cleaned: Partial<T> = {};
+  
+  for (const key in obj) {
+    if (obj[key] !== undefined) {
+      cleaned[key] = obj[key];
+    }
+  }
+  
+  return cleaned;
+};
+
+/**
  * Create a new conversion job in Firestore
  */
 const createConversionJob = async (
@@ -80,7 +95,7 @@ const createConversionJob = async (
       updatedAt: serverTimestamp() as Timestamp,
     };
 
-    await setDoc(jobRef, job);
+    await setDoc(jobRef, cleanUndefinedFields(job));
     console.log(`[Conversion] Created job: ${jobRef.id}`);
     
     return jobRef.id;
@@ -111,7 +126,7 @@ const updateJobStatus = async (
       updateData.completedAt = serverTimestamp();
     }
 
-    await updateDoc(jobRef, updateData);
+    await updateDoc(jobRef, cleanUndefinedFields(updateData));
     console.log(`[Conversion] Updated job ${jobId} status to: ${status}`);
   } catch (error) {
     console.error(`[Conversion] Error updating job ${jobId}:`, error);
@@ -139,14 +154,22 @@ const uploadImages = async (
       onProgress
     );
 
-    const imageMetadata: ImageMetadata[] = uploadResults.map((result, index) => ({
-      id: `img-${index}`,
-      fileName: result.fileName,
-      storageUrl: result.storageUrl,
-      downloadUrl: result.downloadUrl,
-      cropData: files[index].cropData,
-      order: index,
-    }));
+    const imageMetadata: ImageMetadata[] = uploadResults.map((result, index) => {
+      const metadata: ImageMetadata = {
+        id: `img-${index}`,
+        fileName: result.fileName,
+        storageUrl: result.storageUrl,
+        downloadUrl: result.downloadUrl,
+        order: index,
+      };
+
+      // Only add cropData if it exists
+      if (files[index].cropData) {
+        metadata.cropData = files[index].cropData;
+      }
+
+      return metadata;
+    });
 
     console.log(`[Conversion] Uploaded ${imageMetadata.length} images`);
     return imageMetadata;
