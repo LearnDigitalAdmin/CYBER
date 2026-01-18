@@ -12,7 +12,8 @@ import * as path from 'path';
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import * as fs from 'fs/promises';
+import { PDFDocument } from 'pdf-lib';
+import fs from 'fs/promises';
 import * as os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -153,8 +154,8 @@ async function processImage(
 }
 
 // LIBRARY 2: IMAGEMAGICK (System binary - convert/montage commands)
-// Used for: Creating PDF pages from processed images
-async function createPdfPage(
+// Used for: Creating JPEG composites from processed images (NOT PDFs!)
+async function createJpegPage(
   imagePaths: string[],
   outputPath: string,
   config: ConversionConfig
@@ -183,49 +184,67 @@ async function createPdfPage(
     args.push('-background', 'white');
   }
 
-  args.push(outputPath);
+  // Output as JPEG (not PDF!)
+  args.push('-quality', '95');
+  args.push('-flatten');
+  args.push(`jpeg:${outputPath}`);
 
   // Execute ImageMagick command-line tool
   // 'montage' for grids, 'convert' for single images
   const command = config.imagesPerPage > 1 ? 'montage' : 'convert';
   
-  // execFileAsync spawns the ImageMagick binary as a child process
-  // Example: `montage -density 300 -page 595x842 img1.jpg img2.jpg -tile 2x2 -geometry +10+10 -background white output.pdf`
+  // Example: `montage -density 300 -page 595x842 img1.jpg img2.jpg -tile 2x2 -geometry +10+10 -background white -quality 95 -flatten jpeg:output.jpg`
   await execFileAsync(command, args);
 }
 
-// LIBRARY 3: GHOSTSCRIPT (System binary - gs command)
-// Used for: Merging multiple PDF pages into a single PDF file
-async function combinePdfs(
-  pdfPaths: string[],
-  outputPath: string
-): Promise<void> {
-  // Build command-line arguments for Ghostscript
-  const args = [
-    '-dBATCH',                    // Exit after processing
-    '-dNOPAUSE',                  // Don't pause between pages
-    '-dSAFER',                    // Restrict file operations for security
-    '-sDEVICE=pdfwrite',          // Output device is PDF
-    '-dPDFSETTINGS=/prepress',   // Highest quality settings
-    '-dColorImageResolution=300', // 300 DPI for color images
-    '-dGrayImageResolution=300',  // 300 DPI for grayscale
-    '-dMonoImageResolution=300',  // 300 DPI for monochrome
-    '-dAutoRotatePages=/None',    // Don't auto-rotate pages
-    `-sOutputFile=${outputPath}`, // Output file path
-    ...pdfPaths,                  // Input PDF files to merge
-  ];
+// LIBRARY 3: IMG2PDF - Simple JPEG to PDF conversion
+// Alternative: use img2pdf if available, or simple Ghostscript command
+async function convertJpegToPdf(
+  jpegPath: string,
+  outputPath: string,
+  pageSize: keyof typeof PAGE_SIZES
+) {
+  const pdf = await PDFDocument.create();
+  const imgBytes = await fs.readFile(jpegPath);
+  const img = await pdf.embedJpg(imgBytes);
 
-  // Execute Ghostscript command-line tool
-  // Example: `gs -dBATCH -dNOPAUSE -dSAFER -sDEVICE=pdfwrite -sOutputFile=final.pdf page1.pdf page2.pdf page3.pdf`
-  await execFileAsync('gs', args);
+  const { width, height } = PAGE_SIZES[pageSize];
+  const page = pdf.addPage([width, height]);
+
+  const scale = Math.min(width / img.width, height / img.height);
+
+  page.drawImage(img, {
+    x: (width - img.width * scale) / 2,
+    y: (height - img.height * scale) / 2,
+    width: img.width * scale,
+    height: img.height * scale,
+  });
+
+  const bytes = await pdf.save();
+  await fs.writeFile(outputPath, bytes);
 }
+
+async function combinePdfs(pdfPaths: string[], outputPath: string) {
+  const merged = await PDFDocument.create();
+
+  for (const path of pdfPaths) {
+    const bytes = await fs.readFile(path);
+    const doc = await PDFDocument.load(bytes);
+    const pages = await merged.copyPages(doc, doc.getPageIndices());
+    pages.forEach(p => merged.addPage(p));
+  }
+
+  const finalBytes = await merged.save();
+  await fs.writeFile(outputPath, finalBytes);
+}
+
 
 export const convertImagesToPdf = onCall(
   {
     region: 'us-central1',
     timeoutSeconds: 540,
-    memory: '8GiB', // More memory for processing
-    cpu: 2, // Multiple CPUs
+    memory: '8GiB',
+    cpu: 2,
     maxInstances: 5,
     cors: true,
   },
@@ -265,18 +284,26 @@ export const convertImagesToPdf = onCall(
         processedImages.push(processedPath);
       }
 
-      // Create PDF pages
-      const pdfPages: string[] = [];
+      // Create JPEG pages using ImageMagick
+      const jpegPages: string[] = [];
       const imagesPerPage = config.imagesPerPage;
       
       for (let i = 0; i < processedImages.length; i += imagesPerPage) {
         const pageImages = processedImages.slice(i, i + imagesPerPage);
-        const pagePath = path.join(workDir, `page-${Math.floor(i / imagesPerPage)}.pdf`);
-        await createPdfPage(pageImages, pagePath, config);
-        pdfPages.push(pagePath);
+        const jpegPath = path.join(workDir, `page-${Math.floor(i / imagesPerPage)}.jpg`);
+        await createJpegPage(pageImages, jpegPath, config);
+        jpegPages.push(jpegPath);
       }
 
-      // Combine PDFs
+      // Convert JPEG pages to PDF using Ghostscript
+      const pdfPages: string[] = [];
+      for (let i = 0; i < jpegPages.length; i++) {
+        const pdfPath = path.join(workDir, `page-${i}.pdf`);
+        await convertJpegToPdf(jpegPages[i], pdfPath, config.pageSize);
+        pdfPages.push(pdfPath);
+      }
+
+      // Combine PDFs using Ghostscript
       const finalPdfPath = path.join(workDir, 'final.pdf');
       if (pdfPages.length === 1) {
         await fs.rename(pdfPages[0], finalPdfPath);
@@ -316,6 +343,8 @@ export const convertImagesToPdf = onCall(
     }
   }
 );
+
+// ... (keep all your other exports below)
 
 /**
  * Convert cm to pixels at 300 DPI
