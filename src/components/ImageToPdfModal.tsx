@@ -18,19 +18,12 @@ interface UploadedImage {
   id: string;
   file: File;
   preview: string;
-  cropData?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    rotation: number;
-  };
+  croppedBlob?: Blob; // The actual cropped and enhanced image blob
   enhancements?: {
     brightness: number;
     contrast: number;
     saturation: number;
   };
-  editedBlob?: Blob;
   status: 'pending' | 'uploaded' | 'edited' | 'processing' | 'complete';
 }
 
@@ -145,16 +138,17 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
     setCurrentStep('config');
   }, []);
 
+  // FIXED: Now receives the actual cropped blob from ImageCropComponent
   const handleCropComplete = useCallback((
     index: number, 
-    cropData: { x: number; y: number; width: number; height: number; rotation: number },
+    croppedBlob: Blob,
     enhancements: { brightness: number; contrast: number; saturation: number }
   ) => {
     setImages(prev => {
       const updated = [...prev];
       updated[index] = {
         ...updated[index],
-        cropData,
+        croppedBlob, // Store the actual cropped blob
         enhancements,
         status: 'edited',
       };
@@ -176,121 +170,13 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
 
   const handleCropFinish = useCallback(async () => {
     setError(null);
-    setCurrentStep('processing');
-    setProcessingProgress(0);
-    setProcessingMessage('Processing edited images...');
-
-    try {
-      // Generate edited blobs for all images
-      const editedImagesWithBlobs = await Promise.all(
-        images.map(async (img, index) => {
-          setProcessingMessage(`Processing image ${index + 1} of ${images.length}...`);
-          setProcessingProgress((index / images.length) * 30);
-
-          if (!img.cropData || !img.enhancements) {
-            // If no edits, use original file
-            return { ...img, editedBlob: img.file };
-          }
-
-          // Apply crop and enhancements
-          const blob = await applyCropAndEnhancements(img);
-          return { ...img, editedBlob: blob };
-        })
-      );
-
-      setImages(editedImagesWithBlobs);
-      setProcessingProgress(40);
-      setCurrentStep('config');
-      
-    } catch (err) {
-      console.error('Error processing images:', err);
-      setError(err instanceof Error ? err.message : 'Failed to process images');
-      setCurrentStep('crop');
-    }
-  }, [images]);
+    setCurrentStep('config');
+  }, []);
 
   const handleCancelCrop = useCallback(() => {
     setCurrentCropIndex(0);
     setCurrentStep('upload');
   }, []);
-
-  const applyCropAndEnhancements = async (image: UploadedImage): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error('Failed to get canvas context'));
-        return;
-      }
-
-      const img = new Image();
-      img.onload = () => {
-        const { cropData, enhancements } = image;
-        if (!cropData || !enhancements) {
-          reject(new Error('Missing crop data or enhancements'));
-          return;
-        }
-
-        // First, create a canvas with the full rotated image
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d');
-        if (!tempCtx) {
-          reject(new Error('Failed to get temp canvas context'));
-          return;
-        }
-
-        // Calculate dimensions based on rotation
-        const rotated = cropData.rotation % 180 !== 0;
-        const fullWidth = rotated ? img.naturalHeight : img.naturalWidth;
-        const fullHeight = rotated ? img.naturalWidth : img.naturalHeight;
-
-        tempCanvas.width = fullWidth;
-        tempCanvas.height = fullHeight;
-
-        // Apply rotation and enhancements to full image
-        tempCtx.save();
-        tempCtx.translate(fullWidth / 2, fullHeight / 2);
-        tempCtx.rotate((cropData.rotation * Math.PI) / 180);
-        tempCtx.translate(-img.naturalWidth / 2, -img.naturalHeight / 2);
-        tempCtx.filter = `brightness(${enhancements.brightness}%) contrast(${enhancements.contrast}%) saturate(${enhancements.saturation}%)`;
-        tempCtx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
-        tempCtx.restore();
-
-        // Now crop from the rotated image
-        canvas.width = cropData.width;
-        canvas.height = cropData.height;
-
-        ctx.drawImage(
-          tempCanvas,
-          cropData.x,
-          cropData.y,
-          cropData.width,
-          cropData.height,
-          0,
-          0,
-          cropData.width,
-          cropData.height
-        );
-
-        // Convert to blob
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Failed to create blob'));
-            }
-          },
-          'image/jpeg',
-          0.95
-        );
-      };
-
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.crossOrigin = 'anonymous';
-      img.src = image.preview;
-    });
-  };
 
   const handleSubmit = useCallback(async () => {
     setError(null);
@@ -299,20 +185,21 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
     setProcessingMessage('Preparing images for upload...');
 
     try {
-      // Prepare files for conversion - use edited blobs or original files
+      // FIXED: Use cropped blobs if available, otherwise use original files
       const filesToConvert = images.map(img => {
-        const fileToUse = img.editedBlob instanceof Blob 
-          ? new File([img.editedBlob], img.file.name, { type: 'image/jpeg' })
-          : img.file;
+        let fileToUse: File;
+
+        if (img.croppedBlob) {
+          // Use the cropped blob (already has enhancements applied)
+          fileToUse = new File([img.croppedBlob], img.file.name, { type: 'image/jpeg' });
+        } else {
+          // No cropping was done, use original file
+          fileToUse = img.file;
+        }
 
         return {
           file: fileToUse,
-          cropData: img.cropData ? {
-            x: img.cropData.x,
-            y: img.cropData.y,
-            width: img.cropData.width,
-            height: img.cropData.height,
-          } : undefined,
+          // No need to send cropData anymore - the blob is already cropped
         };
       });
 
@@ -420,7 +307,7 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
                       <FileText className="w-8 h-8 mb-2 text-blue-600" />
                       <h4 className="font-semibold text-lg mb-1">ID Mode</h4>
                       <p className="text-sm text-gray-600">
-                        Optimized for ID cards, passports, and small documents. Images will be sized to standard ID dimensions (3.375" × 2.125").
+                        Optimized for ID cards, passports, and small documents. Images will be sized to standard ID dimensions.
                       </p>
                     </button>
                     <button
@@ -579,7 +466,7 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
                     </div>
                     <p className="mt-2 text-sm text-gray-600">{processingProgress}% complete</p>
                   </div>
-                  <p className="text-xs text-gray-500 mt-6">This may take a few moments depending on the number of images</p>
+                  <p className="text-xs text-gray-500 mt-6">This may take a few moments</p>
                 </div>
               )}
 

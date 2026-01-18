@@ -39,7 +39,7 @@ interface EditableImage {
 interface ImageCropComponentProps {
   images: Array<{ id: string; file: File; preview: string }>;
   currentIndex: number;
-  onCropComplete: (index: number, cropData: CropData, enhancements: ImageEnhancements) => void;
+  onCropComplete: (index: number, croppedBlob: Blob, enhancements: ImageEnhancements) => void;
   onNext: () => void;
   onPrevious: () => void;
   onFinish: () => void;
@@ -65,6 +65,7 @@ export const ImageCropComponent: React.FC<ImageCropComponentProps> = ({
   const [showEnhancements, setShowEnhancements] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -167,20 +168,6 @@ export const ImageCropComponent: React.FC<ImageCropComponentProps> = ({
   useEffect(() => {
     renderImage();
   }, [renderImage]);
-
-  // Get coordinates relative to canvas
-  // const getCanvasCoordinates = useCallback((clientX: number, clientY: number) => {
-  //   if (!overlayRef.current) return { x: 0, y: 0 };
-    
-  //   const rect = overlayRef.current.getBoundingClientRect();
-  //   const scaleX = canvasSize.width / rect.width;
-  //   const scaleY = canvasSize.height / rect.height;
-    
-  //   return {
-  //     x: (clientX - rect.left) * scaleX,
-  //     y: (clientY - rect.top) * scaleY,
-  //   };
-  // }, [canvasSize]);
 
   // Crop area interaction - unified for mouse and touch
   const handlePointerDown = useCallback(
@@ -338,19 +325,105 @@ export const ImageCropComponent: React.FC<ImageCropComponentProps> = ({
     });
   }, []);
 
-  // Apply current crop
-  const handleApplyCurrent = useCallback(() => {
-    if (!editableImage) return;
-
-    onCropComplete(currentIndex, editableImage.cropData, editableImage.enhancements);
-
-    // Move to next or finish
-    if (currentIndex < totalImages - 1) {
-      onNext();
-    } else {
-      onFinish();
+  // **CRITICAL FIX**: Actually apply the crop and create a real blob
+  const applyCropAndEnhancements = useCallback(async (): Promise<Blob> => {
+    if (!editableImage || !sourceImageRef.current) {
+      throw new Error('Image not loaded');
     }
-  }, [editableImage, currentIndex, totalImages, onCropComplete, onNext, onFinish]);
+
+    return new Promise((resolve, reject) => {
+      const img = sourceImageRef.current!;
+      const { cropData, enhancements } = editableImage;
+
+      // Create a temporary canvas for the full rotated image
+      const tempCanvas = document.createElement('canvas');
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) {
+        reject(new Error('Failed to get temp canvas context'));
+        return;
+      }
+
+      // Calculate dimensions based on rotation
+      const rotated = cropData.rotation % 180 !== 0;
+      const fullWidth = rotated ? img.naturalHeight : img.naturalWidth;
+      const fullHeight = rotated ? img.naturalWidth : img.naturalHeight;
+
+      tempCanvas.width = fullWidth;
+      tempCanvas.height = fullHeight;
+
+      // Apply rotation and enhancements to full image
+      tempCtx.save();
+      tempCtx.translate(fullWidth / 2, fullHeight / 2);
+      tempCtx.rotate((cropData.rotation * Math.PI) / 180);
+      tempCtx.translate(-img.naturalWidth / 2, -img.naturalHeight / 2);
+      tempCtx.filter = `brightness(${enhancements.brightness}%) contrast(${enhancements.contrast}%) saturate(${enhancements.saturation}%)`;
+      tempCtx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+      tempCtx.restore();
+
+      // Now create the FINAL cropped canvas
+      const finalCanvas = document.createElement('canvas');
+      const finalCtx = finalCanvas.getContext('2d');
+      if (!finalCtx) {
+        reject(new Error('Failed to get final canvas context'));
+        return;
+      }
+
+      finalCanvas.width = cropData.width;
+      finalCanvas.height = cropData.height;
+
+      // Draw the cropped portion from the rotated image
+      finalCtx.drawImage(
+        tempCanvas,
+        cropData.x,
+        cropData.y,
+        cropData.width,
+        cropData.height,
+        0,
+        0,
+        cropData.width,
+        cropData.height
+      );
+
+      // Convert to blob
+      finalCanvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to create blob'));
+          }
+        },
+        'image/jpeg',
+        0.95
+      );
+    });
+  }, [editableImage]);
+
+  // Apply current crop - **FIXED TO ACTUALLY CROP**
+  const handleApplyCurrent = useCallback(async () => {
+    if (!editableImage || isProcessing) return;
+
+    setIsProcessing(true);
+    try {
+      // **THIS IS THE FIX**: Actually create a cropped blob
+      const croppedBlob = await applyCropAndEnhancements();
+      
+      // Pass the REAL cropped blob to parent
+      onCropComplete(currentIndex, croppedBlob, editableImage.enhancements);
+
+      // Move to next or finish
+      if (currentIndex < totalImages - 1) {
+        onNext();
+      } else {
+        onFinish();
+      }
+    } catch (error) {
+      console.error('Error applying crop:', error);
+      alert('Failed to process image. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [editableImage, currentIndex, totalImages, onCropComplete, onNext, onFinish, applyCropAndEnhancements, isProcessing]);
 
   if (!editableImage) return null;
 
@@ -613,10 +686,17 @@ export const ImageCropComponent: React.FC<ImageCropComponentProps> = ({
             </button>
             <button
               onClick={handleApplyCurrent}
-              className="flex-1 sm:flex-none px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
+              disabled={isProcessing}
+              className="flex-1 sm:flex-none px-4 sm:px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              <Check className="w-4 h-4" />
-              {currentIndex === totalImages - 1 ? 'Finish' : 'Next'}
+              {isProcessing ? (
+                <>Processing...</>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  {currentIndex === totalImages - 1 ? 'Finish' : 'Next'}
+                </>
+              )}
             </button>
           </div>
         </div>
