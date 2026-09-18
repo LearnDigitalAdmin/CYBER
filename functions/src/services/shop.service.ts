@@ -44,7 +44,7 @@ export async function createShop(input: ShopCreateInput, password: string): Prom
 
     // Step 2: Create shop document with auth metadata
     const shop: Shop = {
-      id: shopRef.id,
+      id: shopId,
       ownerName: input.ownerName,
       shopName: input.shopName,
       location: input.location,

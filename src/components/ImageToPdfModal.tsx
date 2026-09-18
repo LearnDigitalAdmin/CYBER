@@ -2,6 +2,8 @@ import React, { useState, useCallback, useRef } from 'react';
 import { X, Upload, FileText, Download, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { ImageCropComponent } from './ImageCropComponent';
 import { convertImagesToPdf, type ConversionProgress } from '../services/conversionService';
+import { downloadFile } from '../services/firebaseStorage';
+
 
 interface User {
   uid: string;
@@ -29,7 +31,7 @@ interface UploadedImage {
 
 type ConversionMode = 'id' | 'document';
 type PageSize = 'A4' | 'A3' | 'Letter' | 'Legal';
-type ImagesPerPage = 1 | 2 | 4 | 6 | 9;
+type ImagesPerPage = 1 | 2 | 3 | 4 | 6 | 8 | 9 | 10 ;
 
 interface ConversionConfig {
   mode: ConversionMode;
@@ -425,9 +427,12 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
                     >
                       <option value={1}>1 image per page</option>
                       <option value={2}>2 images per page (vertical)</option>
+                      <option value={3}>2 images per page (horizontal)</option>
                       <option value={4}>4 images per page (2×2 grid)</option>
                       <option value={6}>6 images per page (2×3 grid)</option>
+                      <option value={8}>8 images per page (2×4 grid)</option>
                       <option value={9}>9 images per page (3×3 grid)</option>
+                      <option value={10}>10 images per page (2×5 grid)</option>
                     </select>
                   </div>
 
@@ -480,16 +485,13 @@ const ImageToPdfModal: React.FC<ImageToPdfModalProps> = ({ user, isOpen, onClose
                     <p className="text-xs text-gray-500 mb-6">Job ID: {jobId}</p>
                   )}
                   <div className="flex gap-4 justify-center">
-                    <a
-                      href={pdfUrl}
-                      download="converted.pdf"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() => downloadFile(pdfUrl)}
                       className="inline-flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
                     >
                       <Download className="w-5 h-5" />
                       Download PDF
-                    </a>
+                    </button>
                     <button
                       onClick={resetState}
                       className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"

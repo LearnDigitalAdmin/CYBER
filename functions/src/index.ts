@@ -10,8 +10,8 @@ import sharp from 'sharp';
 import axios from 'axios';
 import * as path from 'path';
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+// import { execFile } from 'child_process';
+// import { promisify } from 'util';
 import { PDFDocument } from 'pdf-lib';
 import fs from 'fs/promises';
 import * as os from 'os';
@@ -61,15 +61,9 @@ const PASSPORT_ASPECT_RATIO = PASSPORT_WIDTH_MM / PASSPORT_HEIGHT_MM;
 
 
 
-const execFileAsync = promisify(execFile);
+//const execFileAsync = promisify(execFile);
 
-interface CropData {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
+// Updated conversion functions for the Cloud Function
 
 interface ConversionConfig {
   mode: 'id' | 'document';
@@ -90,10 +84,53 @@ const PAGE_SIZES: Record<string, PageDimensions> = {
   Legal: { width: 612, height: 1008 },
 };
 
+// ID card dimensions at 72 DPI (PDF points)
 const ID_SIZE = {
-  width: 1012,
-  height: 638,
+  width: 243,  // 3.375 inches * 72 DPI
+  height: 153, // 2.125 inches * 72 DPI
 };
+
+// Margins in points
+const PAGE_MARGIN = 7; // 0.5 inch margin
+const IMAGE_SPACING = 4; // Space between images
+
+interface CropData {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface LayoutConfig {
+  cols: number;
+  rows: number;
+  imageWidth: number;
+  imageHeight: number;
+  startX: number;
+  startY: number;
+  spacingX: number;
+  spacingY: number;
+}
+
+/**
+ * Combine multiple PDF pages into one document
+ */
+async function combinePdfs(pdfPaths: string[], outputPath: string): Promise<void> {
+  const mergedPdf = await PDFDocument.create();
+
+  for (const pdfPath of pdfPaths) {
+    const pdfBytes = await fs.readFile(pdfPath);
+    const pdf = await PDFDocument.load(pdfBytes);
+    const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+    
+    for (const page of pages) {
+      mergedPdf.addPage(page);
+    }
+  }
+
+  const finalBytes = await mergedPdf.save();
+  await fs.writeFile(outputPath, finalBytes);
+}
 
 async function downloadImage1(url: string, outputPath: string): Promise<void> {
   const response = await axios({
@@ -104,141 +141,253 @@ async function downloadImage1(url: string, outputPath: string): Promise<void> {
   await fs.writeFile(outputPath, response.data);
 }
 
-// LIBRARY 1: SHARP (Node.js npm package)
-// Used for: Image processing, cropping, resizing, enhancement
+//////////////////////////////////////////////////////////////////////////
+/**
+ * Calculate grid layout for images on a page
+ */
+function calculateLayout1(
+  config: ConversionConfig,
+  imagesCount: number
+): LayoutConfig {
+  const pageDims = PAGE_SIZES[config.pageSize];
+  const availableWidth = pageDims.width - (2 * PAGE_MARGIN);
+  const availableHeight = pageDims.height - (2 * PAGE_MARGIN);
+
+  let cols = 1, rows = 1;
+  
+  // Determine grid dimensions
+  if (config.imagesPerPage === 2) {
+    // 2x1 horizontal layout (side by side)
+    cols = 2;
+    rows = 1;
+  } else if (config.imagesPerPage === 3) {
+    // 1x2 vertical layout (top and bottom) - using 3 as identifier
+    cols = 1;
+    rows = 2;
+  } else if (config.imagesPerPage === 4) {
+    cols = 2;
+    rows = 2;
+  } else if (config.imagesPerPage === 6) {
+    cols = 2;
+    rows = 3;
+  } else if (config.imagesPerPage === 8) {
+    cols = 2;
+    rows = 4;
+  } else if (config.imagesPerPage === 9) {
+    cols = 3;
+    rows = 3;
+  } else if (config.imagesPerPage === 10) {
+    cols = 2;
+    rows = 5;
+  }
+
+  // Adjust for actual number of images ONLY for cases other than explicit 2 or 3
+  // DON'T adjust layout for 2 or 3 (2x1 and 1x2 must stay distinct)
+  if (config.imagesPerPage !== 2 && config.imagesPerPage !== 3) {
+    const actualImages = Math.min(imagesCount, config.imagesPerPage);
+    if (actualImages < config.imagesPerPage) {
+      if (actualImages === 1) {
+        cols = 1;
+        rows = 1;
+      } else if (actualImages === 2 && config.imagesPerPage >= 4) {
+        // For 2 images when expecting 4+, use 2x1 layout
+        cols = 2;
+        rows = 1;
+      }
+    }
+  }
+
+  let imageWidth: number, imageHeight: number;
+
+  if (config.mode === 'id') {
+    // ID MODE: Use fixed ID dimensions
+    imageWidth = ID_SIZE.width;
+    imageHeight = ID_SIZE.height;
+  } else {
+    // DOCUMENT MODE: Calculate to fit available space with margins
+    const totalSpacingX = IMAGE_SPACING * (cols - 1);
+    const totalSpacingY = IMAGE_SPACING * (rows - 1);
+    
+    const widthPerImage = (availableWidth - totalSpacingX) / cols;
+    const heightPerImage = (availableHeight - totalSpacingY) / rows;
+    
+    imageWidth = widthPerImage;
+    imageHeight = heightPerImage;
+  }
+
+  // Calculate spacing between images
+  let spacingX: number, spacingY: number;
+  
+  if (config.mode === 'id') {
+    // ID MODE: Distribute remaining space evenly
+    const totalImageWidth = imageWidth * cols;
+    const remainingX = availableWidth - totalImageWidth;
+    spacingX = cols > 1 ? remainingX / (cols - 1) : 0;
+    
+    const totalImageHeight = imageHeight * rows;
+    const remainingY = availableHeight - totalImageHeight;
+    spacingY = rows > 1 ? remainingY / (rows - 1) : 0;
+  } else {
+    // DOCUMENT MODE: Use fixed spacing
+    spacingX = IMAGE_SPACING;
+    spacingY = IMAGE_SPACING;
+  }
+
+  // DEBUG: Log layout calculation
+  console.log('[Layout Debug]', {
+    imagesPerPage: config.imagesPerPage,
+    mode: config.mode,
+    cols,
+    rows,
+    imageWidth,
+    imageHeight,
+    spacingX,
+    spacingY,
+  });
+
+  return {
+    cols,
+    rows,
+    imageWidth,
+    imageHeight,
+    startX: PAGE_MARGIN,
+    startY: PAGE_MARGIN,
+    spacingX,
+    spacingY,
+  };
+}
+
+/**
+ * Process image with Sharp - resize based on mode
+ */
 async function processImage(
   inputPath: string,
   outputPath: string,
   config: ConversionConfig,
+  layout: LayoutConfig,
   cropData?: CropData
 ): Promise<void> {
-  // Sharp is imported as a Node.js module and used directly
-  let image = sharp(inputPath); // Creates a Sharp pipeline
+  let image = sharp(inputPath);
 
-  // Crop operation (if user cropped the image)
+  // Apply crop if provided
   if (cropData) {
     image = image.extract({
-      left: cropData.x,
-      top: cropData.y,
-      width: cropData.width,
-      height: cropData.height,
+      left: Math.round(cropData.x),
+      top: Math.round(cropData.y),
+      width: Math.round(cropData.width),
+      height: Math.round(cropData.height),
     });
   }
 
-  // Resize based on mode
   if (config.mode === 'id') {
-    image = image.resize(ID_SIZE.width, ID_SIZE.height, {
+    // ID MODE: Resize to exact ID dimensions (convert points to pixels at 300 DPI)
+    const widthPx = Math.round(ID_SIZE.width * 300 / 72);
+    const heightPx = Math.round(ID_SIZE.height * 300 / 72);
+    
+    image = image.resize(widthPx, heightPx, {
       fit: 'contain',
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     });
   } else {
-    const pageDims = PAGE_SIZES[config.pageSize];
-    const maxWidth = Math.floor(pageDims.width * 3);
-    const maxHeight = Math.floor(pageDims.height * 3);
+    // DOCUMENT MODE: Resize to fit layout cell (convert points to pixels at 300 DPI)
+    const widthPx = Math.round(layout.imageWidth * 300 / 72);
+    const heightPx = Math.round(layout.imageHeight * 300 / 72);
     
-    image = image.resize(maxWidth, maxHeight, {
+    image = image.resize(widthPx, heightPx, {
       fit: 'inside',
       withoutEnlargement: false,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
     });
   }
 
-  // Image enhancements
+  // Apply enhancements - KEEP COLOR!
   if (config.enableEnhancements) {
-    image = image.rotate().normalize().sharpen();
+    image = image.rotate().sharpen();
   }
 
-  // Save as JPEG (Sharp handles the actual file writing)
+  // Save as high-quality JPEG with proper color space
   await image
-    .jpeg({ quality: 95, chromaSubsampling: '4:4:4' })
+    .jpeg({ 
+      quality: 95, 
+      chromaSubsampling: '4:4:4',
+      force: true
+    })
     .toFile(outputPath);
 }
 
-// LIBRARY 2: IMAGEMAGICK (System binary - convert/montage commands)
-// Used for: Creating JPEG composites from processed images (NOT PDFs!)
-async function createJpegPage(
+/**
+ * Create a PDF page with images arranged in grid
+ */
+async function createPdfPage(
   imagePaths: string[],
   outputPath: string,
   config: ConversionConfig
 ): Promise<void> {
+  const layout = calculateLayout1(config, imagePaths.length);
   const pageDims = PAGE_SIZES[config.pageSize];
-  const geometry = `${pageDims.width}x${pageDims.height}`;
 
-  // Build command-line arguments for ImageMagick
-  const args: string[] = ['-density', '300', '-page', geometry];
+  // Create PDF document
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([pageDims.width, pageDims.height]);
 
-  let cols = 1, rows = 1;
-  if (config.imagesPerPage === 2) { cols = 1; rows = 2; }
-  else if (config.imagesPerPage === 4) { cols = 2; rows = 2; }
-  else if (config.imagesPerPage === 6) { cols = 2; rows = 3; }
-  else if (config.imagesPerPage === 9) { cols = 3; rows = 3; }
-
-  // Add image file paths as arguments
-  for (const imgPath of imagePaths) {
-    args.push(imgPath);
-  }
-
-  // For multiple images, use montage to create grid layout
-  if (config.imagesPerPage > 1) {
-    args.push('-tile', `${cols}x${rows}`);
-    args.push('-geometry', '+10+10');
-    args.push('-background', 'white');
-  }
-
-  // Output as JPEG (not PDF!)
-  args.push('-quality', '95');
-  args.push('-flatten');
-  args.push(`jpeg:${outputPath}`);
-
-  // Execute ImageMagick command-line tool
-  // 'montage' for grids, 'convert' for single images
-  const command = config.imagesPerPage > 1 ? 'montage' : 'convert';
+  // Add images to page in grid layout
+  let imageIndex = 0;
   
-  // Example: `montage -density 300 -page 595x842 img1.jpg img2.jpg -tile 2x2 -geometry +10+10 -background white -quality 95 -flatten jpeg:output.jpg`
-  await execFileAsync(command, args);
-}
-
-// LIBRARY 3: IMG2PDF - Simple JPEG to PDF conversion
-// Alternative: use img2pdf if available, or simple Ghostscript command
-async function convertJpegToPdf(
-  jpegPath: string,
-  outputPath: string,
-  pageSize: keyof typeof PAGE_SIZES
-) {
-  const pdf = await PDFDocument.create();
-  const imgBytes = await fs.readFile(jpegPath);
-  const img = await pdf.embedJpg(imgBytes);
-
-  const { width, height } = PAGE_SIZES[pageSize];
-  const page = pdf.addPage([width, height]);
-
-  const scale = Math.min(width / img.width, height / img.height);
-
-  page.drawImage(img, {
-    x: (width - img.width * scale) / 2,
-    y: (height - img.height * scale) / 2,
-    width: img.width * scale,
-    height: img.height * scale,
-  });
-
-  const bytes = await pdf.save();
-  await fs.writeFile(outputPath, bytes);
-}
-
-async function combinePdfs(pdfPaths: string[], outputPath: string) {
-  const merged = await PDFDocument.create();
-
-  for (const path of pdfPaths) {
-    const bytes = await fs.readFile(path);
-    const doc = await PDFDocument.load(bytes);
-    const pages = await merged.copyPages(doc, doc.getPageIndices());
-    pages.forEach(p => merged.addPage(p));
+  for (let row = 0; row < layout.rows && imageIndex < imagePaths.length; row++) {
+    for (let col = 0; col < layout.cols && imageIndex < imagePaths.length; col++) {
+      const imgPath = imagePaths[imageIndex];
+      
+      // Read image file
+      const imgBytes = await fs.readFile(imgPath);
+      const img = await pdfDoc.embedJpg(imgBytes);
+      
+      // Get actual image dimensions
+      const imgDims = img.scale(1);
+      
+      // Calculate base position for this cell
+      const cellX = layout.startX + col * (layout.imageWidth + layout.spacingX);
+      const cellY = pageDims.height - layout.startY - (row + 1) * layout.imageHeight - row * layout.spacingY;
+      
+      if (config.mode === 'id') {
+        // ID MODE: Center images within cells
+        const scaleX = layout.imageWidth / imgDims.width;
+        const scaleY = layout.imageHeight / imgDims.height;
+        const scale = Math.min(scaleX, scaleY);
+        
+        const finalWidth = imgDims.width * scale;
+        const finalHeight = imgDims.height * scale;
+        
+        const offsetX = (layout.imageWidth - finalWidth) / 2;
+        const offsetY = (layout.imageHeight - finalHeight) / 2;
+        
+        page.drawImage(img, {
+          x: cellX + offsetX,
+          y: cellY + offsetY,
+          width: finalWidth,
+          height: finalHeight,
+        });
+      } else {
+        // DOCUMENT MODE: Fill the entire cell
+        page.drawImage(img, {
+          x: cellX,
+          y: cellY,
+          width: layout.imageWidth,
+          height: layout.imageHeight,
+        });
+      }
+      
+      imageIndex++;
+    }
   }
 
-  const finalBytes = await merged.save();
-  await fs.writeFile(outputPath, finalBytes);
+  // Save PDF
+  const pdfBytes = await pdfDoc.save();
+  await fs.writeFile(outputPath, pdfBytes);
 }
 
-
+/**
+ * Main conversion function - UPDATED
+ */
 export const convertImagesToPdf = onCall(
   {
     region: 'us-central1',
@@ -272,38 +421,47 @@ export const convertImagesToPdf = onCall(
     try {
       await fs.mkdir(workDir, { recursive: true });
 
+      // DUPLICATION LOGIC: If document mode with 1 image, duplicate to fill grid
+      const imagesToProcess = 
+        config.mode === 'document' && images.length === 1 
+          ? Array(config.imagesPerPage === 3 ? 2 : config.imagesPerPage).fill(images[0])
+          : images;
+
+      // Calculate layout once for all pages
+      const layout = calculateLayout1(config, config.imagesPerPage === 3 ? 2 : config.imagesPerPage);
+
       // Download and process images
       const processedImages: string[] = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
+      for (let i = 0; i < imagesToProcess.length; i++) {
+        const img = imagesToProcess[i];
         const downloadPath = path.join(workDir, `original-${i}.jpg`);
         const processedPath = path.join(workDir, `processed-${i}.jpg`);
 
-        await downloadImage1(img.downloadUrl, downloadPath);
-        await processImage(downloadPath, processedPath, config, img.cropData);
+        // Only download once if duplicating the same image
+        if (i === 0 || config.mode !== 'document' || images.length > 1) {
+          await downloadImage1(img.downloadUrl, downloadPath);
+        } else {
+          // Copy the first downloaded image instead of re-downloading
+          await fs.copyFile(path.join(workDir, `original-0.jpg`), downloadPath);
+        }
+        
+        await processImage(downloadPath, processedPath, config, layout, img.cropData);
         processedImages.push(processedPath);
       }
 
-      // Create JPEG pages using ImageMagick
-      const jpegPages: string[] = [];
-      const imagesPerPage = config.imagesPerPage;
+      // Create PDF pages
+      const pdfPages: string[] = [];
+      const imagesPerPage = config.imagesPerPage === 3 ? 2 : config.imagesPerPage;
       
       for (let i = 0; i < processedImages.length; i += imagesPerPage) {
         const pageImages = processedImages.slice(i, i + imagesPerPage);
-        const jpegPath = path.join(workDir, `page-${Math.floor(i / imagesPerPage)}.jpg`);
-        await createJpegPage(pageImages, jpegPath, config);
-        jpegPages.push(jpegPath);
-      }
-
-      // Convert JPEG pages to PDF using Ghostscript
-      const pdfPages: string[] = [];
-      for (let i = 0; i < jpegPages.length; i++) {
-        const pdfPath = path.join(workDir, `page-${i}.pdf`);
-        await convertJpegToPdf(jpegPages[i], pdfPath, config.pageSize);
+        const pdfPath = path.join(workDir, `page-${Math.floor(i / imagesPerPage)}.pdf`);
+        
+        await createPdfPage(pageImages, pdfPath, config);
         pdfPages.push(pdfPath);
       }
 
-      // Combine PDFs using Ghostscript
+      // Combine PDF pages
       const finalPdfPath = path.join(workDir, 'final.pdf');
       if (pdfPages.length === 1) {
         await fs.rename(pdfPages[0], finalPdfPath);
@@ -312,12 +470,19 @@ export const convertImagesToPdf = onCall(
       }
 
       // Upload to Storage
-      const pdfStoragePath = `users/${userId}/conversions/${jobId}/converted/output.pdf`;
+      const dateStr = new Date().toISOString();
+      const pdfStoragePath = `users/${userId}/conversions/${jobId}/converted/${jobId} - COGVANA CYBER CONVERTER ${dateStr}.pdf`;
       await bucket.upload(finalPdfPath, {
         destination: pdfStoragePath,
         metadata: {
           contentType: 'application/pdf',
-          metadata: { jobId, userId, createdAt: new Date().toISOString() },
+          metadata: { 
+            jobId, 
+            userId, 
+            mode: config.mode,
+            imagesPerPage: config.imagesPerPage.toString(),
+            createdAt: new Date().toISOString() 
+          },
         },
       });
 
@@ -336,6 +501,7 @@ export const convertImagesToPdf = onCall(
         await fs.rm(workDir, { recursive: true, force: true });
       } catch {}
 
+      logger.error('[Conversion] Error:', error);
       throw new HttpsError(
         'internal',
         error instanceof Error ? error.message : 'Conversion failed'
@@ -343,8 +509,6 @@ export const convertImagesToPdf = onCall(
     }
   }
 );
-
-// ... (keep all your other exports below)
 
 /**
  * Convert cm to pixels at 300 DPI
