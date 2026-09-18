@@ -46,6 +46,30 @@ import {
   handleChargeCustomerProcessing,
 } from '../handlers/payment.charge.handler';
 import {
+  handleMyChamaAuthId,
+  handleMyChamaSelectChama,
+  handleMyChamaMenu,
+  handleContributionSelect,
+  handleContributionAmount,
+  handleLoanProduct,
+  handleLoanAmount,
+  handleLoanTerm,
+  handleLoanPurpose,
+  handleLoanConfirm,
+  handleLoanPaySelect,
+  handleLoanPayAmount,
+  handleLoanBalance,
+  handleMgrSelect,
+  handleMgrDetail,
+  handleMgrHistory,
+  handleStatementType,
+  handleStatementPeriod,
+  handleStatementView,
+  handlePayPhone,
+  handlePayProvider,
+  handlePayConfirm,
+} from '../handlers/mychama.handler';
+import {
   handlePayRentId,
   handlePayRentConfirm,
   handlePayRentMpesa,
@@ -405,6 +429,116 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
         }
         break;
 
+      // ── My Chama flow (cross-project: mychama1) ──
+      case STATE.MYCHAMA_AUTH_ID:
+        logger.info('Routing to My Chama identity verification');
+        response = await handleMyChamaAuthId(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_SELECT_CHAMA:
+        logger.info('Routing to My Chama selector');
+        response = await handleMyChamaSelectChama(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_MENU:
+        logger.info('Routing to My Chama menu');
+        response = await handleMyChamaMenu(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_CONTRIB_SELECT:
+        logger.info('Routing to My Chama contribution selector');
+        response = await handleContributionSelect(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_CONTRIB_AMOUNT:
+        logger.info('Routing to My Chama contribution amount');
+        response = await handleContributionAmount(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_PRODUCT:
+        logger.info('Routing to My Chama loan product');
+        response = await handleLoanProduct(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_AMOUNT:
+        logger.info('Routing to My Chama loan amount');
+        response = await handleLoanAmount(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_TERM:
+        logger.info('Routing to My Chama loan term');
+        response = await handleLoanTerm(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_PURPOSE:
+        logger.info('Routing to My Chama loan purpose');
+        response = await handleLoanPurpose(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_CONFIRM:
+        logger.info('Routing to My Chama loan confirmation');
+        response = await handleLoanConfirm(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_PAY_SELECT:
+        logger.info('Routing to My Chama loan repayment selector');
+        response = await handleLoanPaySelect(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_PAY_AMOUNT:
+        logger.info('Routing to My Chama loan repayment amount');
+        response = await handleLoanPayAmount(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_LOAN_BALANCE:
+        logger.info('Routing to My Chama loan balance');
+        response = await handleLoanBalance(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_MGR_SELECT:
+        logger.info('Routing to My Chama merry-go-round selector');
+        response = await handleMgrSelect(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_MGR_DETAIL:
+        logger.info('Routing to My Chama merry-go-round detail');
+        response = await handleMgrDetail(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_MGR_HISTORY:
+        logger.info('Routing to My Chama merry-go-round history');
+        response = await handleMgrHistory(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_STATEMENT_TYPE:
+        logger.info('Routing to My Chama statement type');
+        response = await handleStatementType(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_STATEMENT_PERIOD:
+        logger.info('Routing to My Chama statement period');
+        response = await handleStatementPeriod(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_STATEMENT_VIEW:
+        logger.info('Routing to My Chama statement view');
+        response = await handleStatementView(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_PAY_PHONE:
+        logger.info('Routing to My Chama payment phone');
+        response = await handlePayPhone(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_PAY_PROVIDER:
+        logger.info('Routing to My Chama payment provider');
+        response = await handlePayProvider(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_PAY_CONFIRM:
+        logger.info('Routing to My Chama payment confirmation');
+        response = await handlePayConfirm(phone, text, session);
+        break;
       default:
         logger.warn('Unknown state', { state: session.currentState });
         response = getMessage('SYSTEM_ERROR', session.language);

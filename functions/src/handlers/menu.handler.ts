@@ -1,6 +1,6 @@
 /**
  * Main Menu Handler
- * Routes user selections from the main menu
+ * Routes user selections from the SAMUHIA main menu
  */
 
 import { Session } from '../types/session.types';
@@ -10,15 +10,16 @@ import { getMessage } from '../constants/messages';
 import { getMenu } from '../constants/menus';
 import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
+import { beginMyChama } from './mychama.handler';
 
 /**
  * Handle main menu selection
- * User can select from 1-8
+ * User can select from 1-9
  */
 export async function handleMainMenu(phone: string, input: string, session: Session): Promise<string> {
   try {
-    // Validate input (1-8)
-    const validation = validateMenuSelection(input, 1, 8);
+    // Validate input (1-9)
+    const validation = validateMenuSelection(input, 1, 9);
 
     if (!validation.valid || validation.option === undefined) {
       return getMenu('MAIN_MENU', session.language);
@@ -53,7 +54,11 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
         logger.info('Navigating to Pay Bill');
         return getMenu('PAY_BILL_MENU', session.language);
 
-      case 6: // Manage My Plot
+      case 6: // My Chama (cross-project: mychama1)
+        logger.info('Navigating to My Chama');
+        return await beginMyChama(phone, session);
+
+      case 7: // Manage My Plot
         logger.info('Showing PMS links');
         const label = session.language === 'en' ? 'Manage Your Property' : 'Simamia Kipande Chako';
         const message = session.language === 'en'
@@ -61,12 +66,12 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
           : `${label}\n\n📱 Programu ya Simu (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Portali ya Web: https://pms.cogvana.co.ke\n\n💻 Portali ya Cyber: https://cyber.cogvana.co.ke`;
         return message + '\n\n' + (session.language === 'en' ? 'Reply 0 to return to Main Menu' : 'Jibu 0 kurudi kwenye Menuu Kuu');
 
-      case 7: // Exit
+      case 8: // Exit
         await updateSessionState(phone, STATE.IDLE, {});
         logger.info('User exiting');
         return getMessage('GOODBYE', session.language);
 
-      case 8: // Help
+      case 9: // Help
         await updateSessionState(phone, STATE.HELP_MENU, {});
         logger.info('Navigating to Help');
         return getMenu('HELP_MENU', session.language);

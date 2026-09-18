@@ -189,8 +189,8 @@ export const MESSAGES = {
 
   // Thank you / goodbye
   GOODBYE: {
-    en: 'Thank you for using Cogvana Biz! See you soon. 👋',
-    sw: 'Asante kwa kutumia Cogvana Biz! Tutaonana karibuni. 👋',
+    en: 'Thank you for using SAMUHIA! See you soon. 👋',
+    sw: 'Asante kwa kutumia SAMUHIA! Tutaonana karibuni. 👋',
   },
 };
 

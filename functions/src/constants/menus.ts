@@ -5,13 +5,13 @@
 
 export const MENUS = {
   WELCOME: {
-    en: 'Welcome to *Cogvana Biz* Property & Shop Manager! 🏠\n\nPlease select your language:\n1. English\n2. Kiswahili',
-    sw: 'Karibu kwenye *Cogvana Biz* Property & Shop Manager! 🏠\n\nTafadhali chagua lugha:\n1. Kiingereza\n2. Kiswahili',
+    en: 'Welcome to *SAMUHIA* — Property, Shop & Chama Manager 🏠\n\nPlease select your language:\n1. English\n2. Kiswahili',
+    sw: 'Karibu *SAMUHIA* — Msimamizi wa Mali, Duka na Chama 🏠\n\nTafadhali chagua lugha:\n1. Kiingereza\n2. Kiswahili',
   },
 
   MAIN_MENU: {
-    en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. Add Shop\n4. My Shop\n5. Pay Bill\n6. Manage My Plot\n7. Exit\n8. Help',
-    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. Simamia Kipande Changu\n7. Toka\n8. Msaada',
+    en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. Add Shop\n4. My Shop\n5. Pay Bill\n6. My Chama\n7. Manage My Plot\n8. Exit\n9. Help',
+    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. Chama Changu\n7. Simamia Kipande Changu\n8. Toka\n9. Msaada',
   },
 
   MY_SHOP_MENU: {
@@ -25,8 +25,8 @@ export const MENUS = {
   },
 
   HELP_MENU: {
-    en: '*Help & Support*\n\n📞 Phone: +254791286165\n📧 Email: info@cogvana.co.ke\n🌐 Web: www.cogvana.co.ke\n\nSupport Hours: 9 AM - 5 PM (Weekdays)\n\n*Reply 0 to return to Main Menu*',
-    sw: '*Msaada & Kukuza*\n\n📞 Simu: +254791286165\n📧 Barua pepe: info@cogvana.co.ke\n🌐 Wavuti: www.cogvana.co.ke\n\nSaa za Msaada: 9 AM - 5 PM (Siku za Kazi)\n\n*Jibu 0 kurudi kwenye Menuu Kuu*',
+    en: '*Help & Support*\n\n📞 Phone: +254791286165\n📧 Email: info@samuhia.co.ke\n🌐 Web: www.samuhia.co.ke\n\nSupport Hours: 9 AM - 5 PM (Weekdays)\n\n*Reply 0 to return to Main Menu*',
+    sw: '*Msaada & Kukuza*\n\n📞 Simu: +254791286165\n📧 Barua pepe: info@samuhia.co.ke\n🌐 Wavuti: www.samuhia.co.ke\n\nSaa za Msaada: 9 AM - 5 PM (Siku za Kazi)\n\n*Jibu 0 kurudi kwenye Menuu Kuu*',
   },
 
   BUSINESS_TYPES: {
