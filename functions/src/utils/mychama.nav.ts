@@ -13,6 +13,7 @@
  * plenty of users type rather than tap.
  */
 
+import { FieldValue } from 'firebase-admin/firestore';
 import { Session } from '../types/session.types';
 import { updateSessionContext, updateSessionState } from '../services/session.service';
 import { MyChamaSessionContext } from '../types/mychama.types';
@@ -36,11 +37,28 @@ export async function setMc(
   session: Session,
   patch: Partial<MyChamaSessionContext>
 ): Promise<MyChamaSessionContext> {
-  const next = { ...getMc(session), ...patch };
-  await updateSessionContext(phone, { mc: next });
+  const merged = { ...getMc(session), ...patch } as Record<string, unknown>;
+
+  // The session document is written with merge:true and the Admin SDK drops
+  // `undefined` values, so `{ loanId: undefined }` would silently leave the
+  // OLD loanId in Firestore. Turn every undefined into an explicit delete so
+  // "cleared" really means cleared — a stale payment target must never leak
+  // from one flow into the next.
+  const write: Record<string, unknown> = {};
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === undefined) {
+      write[key] = FieldValue.delete();
+    } else {
+      write[key] = value;
+      next[key] = value;
+    }
+  }
+
+  await updateSessionContext(phone, { mc: write } as never);
   // Keep the in-memory session aligned so later reads in the same turn are correct.
   session.context = { ...(session.context || {}), mc: next };
-  return next;
+  return next as MyChamaSessionContext;
 }
 
 /** Wipe every MyChama value from the session — used on exit and on sign-out. */

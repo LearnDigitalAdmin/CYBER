@@ -46,6 +46,7 @@ import {
   handleChargeCustomerProcessing,
 } from '../handlers/payment.charge.handler';
 import {
+  handleMyChamaAuthPhone,
   handleMyChamaAuthId,
   handleMyChamaSelectChama,
   handleMyChamaMenu,
@@ -61,6 +62,7 @@ import {
   handleLoanBalance,
   handleMgrSelect,
   handleMgrDetail,
+  handleMgrPayAmount,
   handleMgrHistory,
   handleStatementType,
   handleStatementPeriod,
@@ -430,6 +432,11 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
         break;
 
       // ── My Chama flow (cross-project: mychama1) ──
+      case STATE.MYCHAMA_AUTH_PHONE:
+        logger.info('Routing to My Chama registered-phone step');
+        response = await handleMyChamaAuthPhone(phone, text, session);
+        break;
+
       case STATE.MYCHAMA_AUTH_ID:
         logger.info('Routing to My Chama identity verification');
         response = await handleMyChamaAuthId(phone, text, session);
@@ -503,6 +510,11 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       case STATE.MYCHAMA_MGR_DETAIL:
         logger.info('Routing to My Chama merry-go-round detail');
         response = await handleMgrDetail(phone, text, session);
+        break;
+
+      case STATE.MYCHAMA_MGR_PAY_AMOUNT:
+        logger.info('Routing to My Chama MGR payment amount');
+        response = await handleMgrPayAmount(phone, text, session);
         break;
 
       case STATE.MYCHAMA_MGR_HISTORY:

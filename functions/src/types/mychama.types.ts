@@ -131,17 +131,33 @@ export interface MgrPot {
   drawDone: boolean;
   drawMethod: 'smart' | 'random' | null;
   autoDemoteLate: boolean;
-  status: 'draft' | 'active' | 'completed';
+  status: 'draft' | 'active' | 'completed' | 'closed';
   cycleNumber: number;
   period: number;
   createdOn: string;
+}
+
+/**
+ * chamas/{c}/mgrPots/{p}/arrears/{id} — one open running balance per member
+ * per pot, opened by the app when a period closes with a gap. The bot only
+ * ever READS this; money is applied by PAY (see the intent's `arrearId`).
+ */
+export interface MgrArrear {
+  id: string;
+  memberId: string;
+  periods: number[];
+  /** Outstanding balance. */
+  amount: number;
+  status: 'open' | 'settled' | 'written_off';
+  settledAmount?: number;
 }
 
 export interface MgrRecord {
   id: string;
   period: number;
   memberId: string;
-  status: 'paid' | 'missed' | 'pending';
+  /** 'partial' = part-paid this period (mirrors the app's MgrRecord). */
+  status: 'paid' | 'partial' | 'missed' | 'pending';
   amount: number;
   date: string | null;
   method: PayMethod;
@@ -225,6 +241,8 @@ export interface PaymentIntent {
   installmentNo?: number;
   potId?: string;
   potPeriod?: number;
+  /** MGR payment toward this open arrear (instead of the current period). */
+  arrearId?: string;
   splitCode?: string;
   paystackMessage?: string;
   createdAt: number;
@@ -244,6 +262,16 @@ export interface MyChamaSessionContext {
   authAt?: number;
   authAttempts?: number;
   lockedUntil?: number;
+  /**
+   * Phone-claim path: the member's number is not the WhatsApp number, so the
+   * sender typed the number registered in the chama. `claimedPhone` is what
+   * they typed (E.164); ID verification still follows.
+   */
+  claimedPhone?: string;
+  /** Wrong registered-number attempts in the current phone-claim prompt. */
+  phoneAttempts?: number;
+  /** The member's own registered number (E.164) — default STK target. */
+  memberPhone?: string;
   /** Navigation back-stack of STATE values. */
   stack?: string[];
   /** Options rendered on the last numbered list, in display order. */
@@ -254,6 +282,8 @@ export interface MyChamaSessionContext {
   installmentNo?: number;
   potId?: string;
   potPeriod?: number;
+  /** Set when the in-flight MGR payment is toward an open arrear. */
+  arrearId?: string;
   productId?: string;
   amount?: number;
   term?: number;

@@ -33,6 +33,7 @@ export const MC = {
   MGR_POTS: 'mgrPots',
   MGR_RECORDS: 'records',
   MGR_PAYOUTS: 'payouts',
+  MGR_ARREARS: 'arrears',
   PAYMENT_INTENTS: 'paymentIntents',
   USER_CHAMAS: 'userChamas',
   MEMBERSHIPS: 'memberships',
@@ -95,6 +96,8 @@ export const mcPath = {
   mgrPots: (chamaId: string) => `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}`,
   mgrRecords: (chamaId: string, potId: string) =>
     `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_RECORDS}`,
+  mgrArrears: (chamaId: string, potId: string) =>
+    `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_ARREARS}`,
   mgrPayouts: (chamaId: string, potId: string) =>
     `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_PAYOUTS}`,
   paymentIntents: (chamaId: string) => `${MC.CHAMAS}/${chamaId}/${MC.PAYMENT_INTENTS}`,

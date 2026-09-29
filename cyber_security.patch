@@ -1,0 +1,26 @@
+diff --git a/src/components/PricingPage.tsx b/src/components/PricingPage.tsx
+index 0b10701..583136e 100644
+--- a/src/components/PricingPage.tsx
++++ b/src/components/PricingPage.tsx
+@@ -74,7 +74,7 @@ interface WebPaymentModalProps {
+ }
+ 
+ const firebaseConfig = {
+-  apiKey: "AIzaSyD1hg7YLv08vyR2kSWi2ymxSu2pYCRwPq8",
++  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+   authDomain: "plot-9fd6e.firebaseapp.com",
+   projectId: "plot-9fd6e",
+   storageBucket: "plot-9fd6e.firebasestorage.app",
+diff --git a/src/services/firebaseService.ts b/src/services/firebaseService.ts
+index a787338..2ed2280 100644
+--- a/src/services/firebaseService.ts
++++ b/src/services/firebaseService.ts
+@@ -5,7 +5,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
+ import { getStorage } from "firebase/storage";
+ 
+ const firebaseConfig = {
+-  apiKey: "AIzaSyD1hg7YLv08vyR2kSWi2ymxSu2pYCRwPq8",
++  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+   authDomain: "plot-9fd6e.firebaseapp.com",
+   projectId: "plot-9fd6e",
+   storageBucket: "plot-9fd6e.firebasestorage.app",

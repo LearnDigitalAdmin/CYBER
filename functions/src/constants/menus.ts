@@ -11,7 +11,7 @@ export const MENUS = {
 
   MAIN_MENU: {
     en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. Add Shop\n4. My Shop\n5. Pay Bill\n6. My Chama\n7. Manage My Plot\n8. Exit\n9. Help',
-    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. Chama Changu\n7. Simamia Kipande Changu\n8. Toka\n9. Msaada',
+    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. My Chama\n7. Simamia Kipande Changu\n8. Toka\n9. Msaada',
   },
 
   MY_SHOP_MENU: {

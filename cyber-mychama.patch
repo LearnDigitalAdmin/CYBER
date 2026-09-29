@@ -1,0 +1,1761 @@
+diff --git a/functions/src/config/mychama.config.ts b/functions/src/config/mychama.config.ts
+index b92cc74..d5a66a2 100644
+--- a/functions/src/config/mychama.config.ts
++++ b/functions/src/config/mychama.config.ts
+@@ -33,6 +33,7 @@ export const MC = {
+   MGR_POTS: 'mgrPots',
+   MGR_RECORDS: 'records',
+   MGR_PAYOUTS: 'payouts',
++  MGR_ARREARS: 'arrears',
+   PAYMENT_INTENTS: 'paymentIntents',
+   USER_CHAMAS: 'userChamas',
+   MEMBERSHIPS: 'memberships',
+@@ -95,6 +96,8 @@ export const mcPath = {
+   mgrPots: (chamaId: string) => `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}`,
+   mgrRecords: (chamaId: string, potId: string) =>
+     `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_RECORDS}`,
++  mgrArrears: (chamaId: string, potId: string) =>
++    `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_ARREARS}`,
+   mgrPayouts: (chamaId: string, potId: string) =>
+     `${MC.CHAMAS}/${chamaId}/${MC.MGR_POTS}/${potId}/${MC.MGR_PAYOUTS}`,
+   paymentIntents: (chamaId: string) => `${MC.CHAMAS}/${chamaId}/${MC.PAYMENT_INTENTS}`,
+diff --git a/functions/src/constants/menus.ts b/functions/src/constants/menus.ts
+index 27071bf..e977d8a 100644
+--- a/functions/src/constants/menus.ts
++++ b/functions/src/constants/menus.ts
+@@ -11,7 +11,7 @@ export const MENUS = {
+ 
+   MAIN_MENU: {
+     en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. Add Shop\n4. My Shop\n5. Pay Bill\n6. My Chama\n7. Manage My Plot\n8. Exit\n9. Help',
+-    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. Chama Changu\n7. Simamia Kipande Changu\n8. Toka\n9. Msaada',
++    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. Ongeza Duka\n4. Duka Langu\n5. Lipa Bill\n6. My Chama\n7. Simamia Kipande Changu\n8. Toka\n9. Msaada',
+   },
+ 
+   MY_SHOP_MENU: {
+diff --git a/functions/src/constants/mychama.messages.ts b/functions/src/constants/mychama.messages.ts
+index 7ad08f6..0966979 100644
+--- a/functions/src/constants/mychama.messages.ts
++++ b/functions/src/constants/mychama.messages.ts
+@@ -22,7 +22,7 @@ export const MC_MENUS: Record<string, Record<Lang, string>> = {
+       '7. Switch Chama 🔁\n' +
+       '8. Back to Main Menu',
+     sw:
+-      '*Chama Changu* — {chamaName}\n' +
++      '*My Chama* — {chamaName}\n' +
+       'Umeingia kama {memberName}\n\n' +
+       '1. Lipa Mchango 💰\n' +
+       '2. Omba Mkopo 📝\n' +
+@@ -59,7 +59,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+   AUTH_INTRO: {
+     en:
+       '*My Chama* 🏦\n\nChecking your membership using this WhatsApp number…',
+-    sw: '*Chama Changu* 🏦\n\nTunakagua uanachama wako kwa namba hii ya WhatsApp…',
++    sw: '*My Chama* 🏦\n\nTunakagua uanachama wako kwa namba hii ya WhatsApp…',
+   },
+   AUTH_NOT_REGISTERED: {
+     en:
+@@ -69,6 +69,34 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+       'Hatujapata uanachama wa chama unaohusiana na namba hii ya WhatsApp.\n\n' +
+       'Muombe mweka hazina wa chama chako aongeze namba hii kwenye wasifu wako, kisha jaribu tena.',
+   },
++  AUTH_ASK_PHONE: {
++    en:
++      '*My Chama* 🏦\n\n' +
++      'We could not match this WhatsApp number to a chama membership.\n\n' +
++      'If your membership is registered under a *different phone number*, enter that number (07XXXXXXXX or 01XXXXXXXX) to continue:',
++    sw:
++      '*My Chama* 🏦\n\n' +
++      'Hatukuweza kuoanisha namba hii ya WhatsApp na uanachama wowote wa chama.\n\n' +
++      'Kama uanachama wako umesajiliwa kwa *namba nyingine ya simu*, ingiza namba hiyo (07XXXXXXXX au 01XXXXXXXX) kuendelea:',
++  },
++  AUTH_PHONE_FORMAT: {
++    en: 'That does not look like a valid Kenyan number. Enter it as 07XXXXXXXX or 01XXXXXXXX:',
++    sw: 'Hiyo haionekani kuwa namba sahihi ya Kenya. Iingize kama 07XXXXXXXX au 01XXXXXXXX:',
++  },
++  AUTH_PHONE_NOT_MATCHED: {
++    en:
++      'We could not match that number to an active membership. You have *{remaining}* attempt(s) left.\n\n' +
++      'Enter the phone number registered with your chama, or ask your treasurer to update your profile:',
++    sw:
++      'Hatukuweza kuoanisha namba hiyo na uanachama unaofanya kazi. Umebakiwa na majaribio *{remaining}*.\n\n' +
++      'Ingiza namba ya simu iliyosajiliwa kwenye chama chako, au muombe mweka hazina asasishe wasifu wako:',
++  },
++  AUTH_ASK_ID_CLAIM: {
++    en:
++      'Thanks. For your security, enter the *last 4 digits* of the National ID of the member registered on that number:',
++    sw:
++      'Asante. Kwa usalama wako, ingiza *tarakimu 4 za mwisho* za Kitambulisho cha mwanachama aliyesajiliwa kwa namba hiyo:',
++  },
+   AUTH_INACTIVE: {
+     en:
+       'Your membership in *{chamaName}* is currently *{status}*.\n\n' +
+@@ -98,7 +126,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+       '🔒 Too many incorrect attempts. My Chama is locked on this number for *{minutes}* minutes.\n\n' +
+       'If this was not you, contact your chama officials.',
+     sw:
+-      '🔒 Majaribio mengi yasiyo sahihi. Chama Changu kimefungwa kwenye namba hii kwa dakika *{minutes}*.\n\n' +
++      '🔒 Majaribio mengi yasiyo sahihi. My Chama imefungwa kwenye namba hii kwa dakika *{minutes}*.\n\n' +
+       'Kama huwa wewe, wasiliana na viongozi wa chama chako.',
+   },
+   AUTH_REAUTH: {
+@@ -130,12 +158,10 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+   CONTRIB_AMOUNT: {
+     en:
+       '*{period}*\nAmount due: *{due}*\n\n' +
+-      'How much do you want to pay? Enter an amount in KES, or reply *FULL* to pay {due}.\n\n' +
+-      'Any excess is applied to your next period automatically.',
++      'How much do you want to pay? Enter any amount in KES (a part payment is fine), or reply *FULL* to pay {due}.',
+     sw:
+       '*{period}*\nDeni: *{due}*\n\n' +
+-      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au jibu *ZOTE* kulipa {due}.\n\n' +
+-      'Ziada yoyote itatumika kwenye kipindi kijacho kiotomatiki.',
++      'Unataka kulipa kiasi gani? Ingiza kiasi chochote kwa KES (unaweza kulipa kidogo kidogo), au jibu *ZOTE* kulipa {due}.',
+   },
+   CONTRIB_AMOUNT_TOO_HIGH: {
+     en: 'That is more than this period needs. Maximum for *{period}* is *{due}*.\n\nEnter an amount up to {due}:',
+@@ -289,13 +315,23 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+       '📊 Umelipa vipindi {paidCount} na umekosa {missedCount}\n\n' +
+       '{actions}',
+   },
+-  MGR_ACTIONS_PAYABLE: {
+-    en: '1. Pay {amount} for this period\n2. View my payment history\n\n*0* Back  *00* My Chama menu',
+-    sw: '1. Lipa {amount} kwa kipindi hiki\n2. Angalia historia yangu ya malipo\n\n*0* Nyuma  *00* Menyu ya Chama',
++  MGR_PAY_AMOUNT: {
++    en:
++      '*{name}* — period {period}\n' +
++      'This period: *{amount}*\n' +
++      'Paid so far: *{paid}*\n' +
++      'Still due: *{remaining}*\n\n' +
++      'How much do you want to pay? Enter an amount in KES, or reply *FULL* for {remaining}.',
++    sw:
++      '*{name}* — kipindi {period}\n' +
++      'Kipindi hiki: *{amount}*\n' +
++      'Umelipa hadi sasa: *{paid}*\n' +
++      'Bado inadaiwa: *{remaining}*\n\n' +
++      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au jibu *ZOTE* kwa {remaining}.',
+   },
+-  MGR_ACTIONS_PAID: {
+-    en: '✅ Already paid for this period.\n\n1. View my payment history\n\n*0* Back  *00* My Chama menu',
+-    sw: '✅ Tayari umelipa kwa kipindi hiki.\n\n1. Angalia historia yangu ya malipo\n\n*0* Nyuma  *00* Menyu ya Chama',
++  MGR_PAY_TOO_HIGH: {
++    en: 'That is more than what is still due this period (*{remaining}*).\n\nEnter an amount up to {remaining}:',
++    sw: 'Hiyo ni zaidi ya kinachodaiwa kwa kipindi hiki (*{remaining}*).\n\nIngiza kiasi hadi {remaining}:',
+   },
+   MGR_DRAFT: {
+     en: 'This pot is still a draft — the queue draw has not been done, so contributions are not open yet.',
+@@ -367,6 +403,22 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+       '⚠️ Chama chako hakijakamilisha kuweka akaunti ya malipo, hivyo malipo mtandaoni hayapatikani bado.\n\n' +
+       'Tafadhali mlipe mweka hazina moja kwa moja.',
+   },
++  PAY_DUPLICATE: {
++    en:
++      '⏳ You already have a payment of *{net}* waiting for your PIN (ref *{ref}*).\n\n' +
++      'Complete it on your phone, or wait a few minutes before trying again — this stops you being charged twice.',
++    sw:
++      '⏳ Tayari una malipo ya *{net}* yanayosubiri PIN yako (kumbukumbu *{ref}*).\n\n' +
++      'Yakamilishe kwenye simu yako, au subiri dakika chache kabla ya kujaribu tena — hii inakuzuia kutozwa mara mbili.',
++  },
++  PAY_STALE_TARGET: {
++    en: '⚠️ What you owe changed while you were setting this up, so nothing was charged. Please start again to see the latest amount.',
++    sw: '⚠️ Kiasi unachodaiwa kimebadilika ulipokuwa unaandaa malipo, kwa hiyo hakuna kilichotozwa. Tafadhali anza tena uone kiasi cha sasa.',
++  },
++  PENDING_PAYMENTS: {
++    en: '\n⏳ *Awaiting confirmation:* {list}\nThese update your balance automatically once confirmed.',
++    sw: '\n⏳ *Yanasubiri uthibitisho:* {list}\nHaya yatasasisha salio lako kiotomatiki yakithibitishwa.',
++  },
+   PAY_RATE_LIMITED: {
+     en: '⏳ You have started several payments in the last hour. Please complete or cancel those first, then try again.',
+     sw: '⏳ Umeanzisha malipo kadhaa katika saa iliyopita. Tafadhali kamilisha au ghairi hayo kwanza, kisha jaribu tena.',
+@@ -383,11 +435,11 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+   },
+   UNAVAILABLE: {
+     en: '⚠️ My Chama is temporarily unreachable. Please try again in a few minutes.',
+-    sw: '⚠️ Chama Changu hakipatikani kwa muda. Tafadhali jaribu tena baada ya dakika chache.',
++    sw: '⚠️ My Chama haipatikani kwa muda. Tafadhali jaribu tena baada ya dakika chache.',
+   },
+   NAV_HINT: {
+     en: '\n\n*0* Back  •  *00* My Chama menu  •  *000* Exit',
+-    sw: '\n\n*0* Nyuma  •  *00* Menyu ya Chama  •  *000* Toka',
++    sw: '\n\n*0* Nyuma  •  *00* Menyu ya My Chama  •  *000* Toka',
+   },
+   NAV_HINT_TOP: {
+     en: '\n\n*0* Main menu  •  *000* Exit',
+@@ -395,7 +447,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+   },
+   BACK_TO_MYCHAMA: {
+     en: '↩️ Back to My Chama.',
+-    sw: '↩️ Rudi kwa Chama Changu.',
++    sw: '↩️ Rudi kwa My Chama.',
+   },
+ };
+ 
+diff --git a/functions/src/constants/states.ts b/functions/src/constants/states.ts
+index 6b2fc72..24a1932 100644
+--- a/functions/src/constants/states.ts
++++ b/functions/src/constants/states.ts
+@@ -79,6 +79,7 @@ export enum STATE {
+   HELP_MENU = 'HELP_MENU',
+ 
+   // ── My Chama flow (cross-project: mychama1) ──
++  MYCHAMA_AUTH_PHONE = 'MYCHAMA_AUTH_PHONE',
+   MYCHAMA_AUTH_ID = 'MYCHAMA_AUTH_ID',
+   MYCHAMA_SELECT_CHAMA = 'MYCHAMA_SELECT_CHAMA',
+   MYCHAMA_MENU = 'MYCHAMA_MENU',
+@@ -104,6 +105,7 @@ export enum STATE {
+   // Merry-go-round
+   MYCHAMA_MGR_SELECT = 'MYCHAMA_MGR_SELECT',
+   MYCHAMA_MGR_DETAIL = 'MYCHAMA_MGR_DETAIL',
++  MYCHAMA_MGR_PAY_AMOUNT = 'MYCHAMA_MGR_PAY_AMOUNT',
+   MYCHAMA_MGR_HISTORY = 'MYCHAMA_MGR_HISTORY',
+ 
+   // Statements
+diff --git a/functions/src/handlers/mychama.handler.ts b/functions/src/handlers/mychama.handler.ts
+index 5aeb682..78f8fca 100644
+--- a/functions/src/handlers/mychama.handler.ts
++++ b/functions/src/handlers/mychama.handler.ts
+@@ -54,8 +54,7 @@ import {
+   potPoolEstimate,
+   queuePosition,
+   getMemberTransactions,
+-  contributionFees,
+-  loanRepaymentFees,
++  feesFor,
+   canCollectOnline,
+   productRateLabel,
+   normalizePhone,
+@@ -64,10 +63,18 @@ import {
+   kes,
+   fmtDate,
+   auditWhatsApp,
++  getOpenArrearForMember,
++  getArrear,
++  getAuthLock,
++  recordAuthFailure,
++  clearAuthFailures,
++  isClaimBlocked,
++  recordClaimFailure,
+ } from '../services/mychama.service';
+ import {
+   initiateMyChamaPayment,
+   withinIntentRateLimit,
++  getPendingIntents,
+   IntentTarget,
+ } from '../services/mychama.payment.service';
+ import {
+@@ -81,7 +88,15 @@ import {
+   StatementPeriod,
+   StatementType,
+ } from '../services/mychama.statement.service';
+-import { Chama, ChamaMember, LoanProduct, IntentPurpose } from '../types/mychama.types';
++import {
++  Chama,
++  ChamaMember,
++  LoanProduct,
++  IntentPurpose,
++  MgrPot,
++  MgrRecord,
++  MgrArrear,
++} from '../types/mychama.types';
+ 
+ const MIN_PAYMENT = 10;
+ 
+@@ -97,6 +112,93 @@ function now(): number {
+   return Math.floor(Date.now() / 1000);
+ }
+ 
++/**
++ * Where a member stands on the CURRENT period of a pot. Mirrors the app's
++ * recordCashMgrPayment: only a 'partial' record's amount counts as already
++ * paid toward the period, 'paid' means done, anything else means nothing yet.
++ */
++function mgrProgress(
++  pot: MgrPot,
++  records: MgrRecord[]
++): { mine: MgrRecord | undefined; paid: number; remaining: number; done: boolean } {
++  const mine = records.find((r) => r.period === pot.period);
++  const paid = mine && (mine.status === 'paid' || mine.status === 'partial') ? mine.amount || 0 : 0;
++  const remaining = Math.max(0, Math.round((pot.amount - paid) * 100) / 100);
++  return { mine, paid, remaining, done: mine?.status === 'paid' || remaining <= 0.009 };
++}
++
++/**
++ * One-line note about payments still waiting on the member's PIN or on
++ * Paystack, so a payment that has been charged but not yet applied is visible
++ * instead of looking like it vanished. Never throws — this is decoration.
++ */
++async function pendingNote(
++  ctx: { chama: Chama; member: ChamaMember },
++  lang: Lang,
++  purposes: IntentPurpose[]
++): Promise<string> {
++  try {
++    const pending = (await getPendingIntents(ctx.chama.id, ctx.member.memberId, 5)).filter((i) =>
++      purposes.includes(i.purpose)
++    );
++    if (pending.length === 0) return '';
++    const list = pending.map((i) => `${kes(i.amount)} (${i.reference.slice(-6)})`).join(', ');
++    return mcMsg('PENDING_PAYMENTS', lang, { list });
++  } catch (error) {
++    logger.warn('MyChama pending-intent lookup failed', error);
++    return '';
++  }
++}
++
++/**
++ * Re-check, at the moment money is about to be requested, that the thing being
++ * paid still exists, still belongs to this member and still owes at least
++ * this much. The session can be minutes old and the treasurer may have
++ * recorded a cash payment in the meantime; charging against stale numbers is
++ * how a payment ends up over the balance.
++ */
++async function paymentTargetStillValid(
++  ctx: { chama: Chama; member: ChamaMember },
++  mc: ReturnType<typeof getMc>
++): Promise<boolean> {
++  const net = mc.payNet || 0;
++  const memberId = ctx.member.memberId;
++
++  switch (mc.payPurpose) {
++    case 'loan_repayment': {
++      if (!mc.loanId) return false;
++      const loan = await getLoan(ctx.chama.id, mc.loanId);
++      return (
++        !!loan &&
++        loan.memberId === memberId &&
++        (loan.status === 'active' || loan.status === 'overdue') &&
++        net <= loanOutstanding(loan) + 0.01
++      );
++    }
++    case 'contribution': {
++      if (!mc.contributionId) return false;
++      const c = await getContribution(ctx.chama.id, mc.contributionId);
++      return !!c && c.memberId === memberId && net <= contributionDue(c) + 0.01;
++    }
++    case 'mgr_contribution': {
++      if (!mc.potId) return false;
++      const pot = await getPot(ctx.chama.id, mc.potId);
++      if (!pot || !(pot.memberIds || []).includes(memberId)) return false;
++
++      if (mc.arrearId) {
++        const arrear = await getArrear(ctx.chama.id, mc.potId, mc.arrearId);
++        return !!arrear && arrear.memberId === memberId && arrear.status === 'open' && net <= arrear.amount + 0.01;
++      }
++
++      if (typeof mc.potPeriod !== 'number' || pot.status !== 'active' || pot.period !== mc.potPeriod) return false;
++      const records = await getPotRecordsForMember(ctx.chama.id, pot.id, memberId);
++      return net <= mgrProgress(pot, records).remaining + 0.01;
++    }
++    default:
++      return false;
++  }
++}
++
+ /** Error exit that always leaves the member somewhere they can act. */
+ async function failSoft(phone: string, session: Session, where: string, error: unknown): Promise<string> {
+   logger.error(`MyChama error in ${where}`, error);
+@@ -104,6 +206,26 @@ async function failSoft(phone: string, session: Session, where: string, error: u
+   return mcMsg('UNAVAILABLE', session.language) + nav(session.language);
+ }
+ 
++/** Minutes left on a durable lock, rounded up, never below 1. */
++function lockMinutes(lockedUntilMs: number): number {
++  return Math.max(1, Math.ceil((lockedUntilMs - Date.now()) / 60000));
++}
++
++/**
++ * Sends a locked-out sender back to the main menu with the remaining time.
++ * The lock itself lives in Firestore (see getAuthLock), so clearing the
++ * session or re-entering My Chama cannot reset it.
++ */
++async function lockedResponse(
++  phone: string,
++  session: Session,
++  lockedUntilMs: number
++): Promise<string> {
++  await clearMc(phone, session);
++  await updateSessionState(phone, STATE.MAIN_MENU, {});
++  return mcMsg('AUTH_LOCKED', session.language, { minutes: lockMinutes(lockedUntilMs) });
++}
++
+ type GuardResult =
+   | { done: true; response: string }
+   | { done: false };
+@@ -148,7 +270,11 @@ async function guard(
+   // straight into a resumed or cached state. That would let anyone holding an
+   // unlocked phone skip the ID check entirely. Only a full cancel (mainmenu /
+   // exit, handled above) is allowed until the ID is verified.
+-  if (session.currentState === STATE.MYCHAMA_AUTH_ID && (command === 'back' || command === 'mychama')) {
++  if (
++    (session.currentState === STATE.MYCHAMA_AUTH_ID ||
++      session.currentState === STATE.MYCHAMA_AUTH_PHONE) &&
++    (command === 'back' || command === 'mychama')
++  ) {
+     await clearMc(phone, session);
+     await updateSessionState(phone, STATE.MAIN_MENU, {});
+     return { done: true, response: getMenu('MAIN_MENU', lang) };
+@@ -214,6 +340,8 @@ async function renderState(phone: string, session: Session, state: string): Prom
+       return await renderPotPicker(phone, session);
+     case STATE.MYCHAMA_MGR_DETAIL:
+       return await renderPotDetail(phone, session);
++    case STATE.MYCHAMA_MGR_PAY_AMOUNT:
++      return await renderMgrPayAmount(phone, session);
+     case STATE.MYCHAMA_STATEMENT_TYPE:
+       return mcMenu('STATEMENT_TYPE', session.language) + nav(session.language);
+     case STATE.MYCHAMA_STATEMENT_PERIOD:
+@@ -256,23 +384,55 @@ async function loadContext(
+ 
+ /* ================================================================== *
+  * Entry & authentication
++ *
++ * Two factors, always:
++ *   1. Something that FINDS the member — the WhatsApp number, or (when that
++ *      number is not on file) the number registered in the chama, typed by
++ *      the sender.
++ *   2. Something that CONFIRMS them — the last 4 digits of the National ID,
++ *      checked against every membership that number resolves to.
++ *
++ * Neither factor is enough alone, failures are throttled durably per sender
++ * (see getAuthLock), and the bot is MEMBER-CENTRIC on purpose: an officer
++ * who signs in here is treated exactly like any other member. Officer
++ * powers live in the app, where roles are enforced server-side.
+  * ================================================================== */
+ 
++/** Candidate memberships → session, ready for the ID prompt. */
++function candidatesFrom(
++  memberships: Array<{ chamaId: string; chamaName: string; member: ChamaMember }>
++): NonNullable<ReturnType<typeof getMc>['candidates']> {
++  return memberships.map((m) => ({
++    chamaId: m.chamaId,
++    chamaName: m.chamaName,
++    memberId: m.member.memberId,
++  }));
++}
++
+ /**
+- * Called from the main menu. Resolves membership from the verified WhatsApp
+- * number, then asks for the last 4 ID digits as a second factor — the number
+- * alone is not treated as proof of identity.
++ * Called from the main menu. Resolves membership from the WhatsApp number;
++ * if that number is unknown, asks for the number registered in the chama
++ * before continuing to the ID check.
+  */
+ export async function beginMyChama(phone: string, session: Session): Promise<string> {
+   const lang = session.language;
+ 
+   try {
++    const lockedUntil = await getAuthLock(phone);
++    if (lockedUntil) {
++      return await lockedResponse(phone, session, lockedUntil);
++    }
++
+     const memberships = await findMembershipsByPhone(phone);
+ 
+     if (memberships.length === 0) {
++      // Not on file under this WhatsApp number → ask for the registered one.
+       await auditWhatsApp({ phone, action: 'auth.lookup', outcome: 'denied' });
+-      await updateSessionState(phone, STATE.MAIN_MENU, {});
+-      return mcMsg('AUTH_NOT_REGISTERED', lang) + '\n\n' + getMenu('MAIN_MENU', lang);
++      await clearMc(phone, session);
++      await setMc(phone, session, { phoneAttempts: 0, stack: [], options: [] });
++      await updateSessionState(phone, STATE.MYCHAMA_AUTH_PHONE, {});
++      session.currentState = STATE.MYCHAMA_AUTH_PHONE;
++      return mcMsg('AUTH_ASK_PHONE', lang) + mcMsg('NAV_HINT_TOP', lang);
+     }
+ 
+     const active = memberships.filter((m) => m.member.status === 'active');
+@@ -293,16 +453,15 @@ export async function beginMyChama(phone: string, session: Session): Promise<str
+     const primary = active[0];
+ 
+     await setMc(phone, session, {
+-      candidates: active.map((m) => ({
+-        chamaId: m.chamaId,
+-        chamaName: m.chamaName,
+-        memberId: m.member.memberId,
+-      })),
++      candidates: candidatesFrom(active),
+       memberId: primary.member.memberId,
+       memberName: primary.member.name,
+       chamaId: primary.chamaId,
+       chamaName: primary.chamaName,
+       role: primary.member.role,
++      memberPhone: primary.member.phoneNormalized || normalizePhone(phone),
++      claimedPhone: '',
++      phoneAttempts: 0,
+       authAt: 0,
+       authAttempts: 0,
+       stack: [],
+@@ -320,6 +479,98 @@ export async function beginMyChama(phone: string, session: Session): Promise<str
+   }
+ }
+ 
++/**
++ * Extra layer for senders whose WhatsApp number is not the one registered in
++ * the chama. They type the registered number; if it resolves to an active
++ * membership we proceed to the normal ID check — WITHOUT revealing the
++ * member's name, because at this point the sender has proven nothing.
++ *
++ * Every failure looks identical (unknown number, inactive member, claim route
++ * closed) so the prompt cannot be used to discover who belongs to a chama.
++ */
++export async function handleMyChamaAuthPhone(
++  phone: string,
++  input: string,
++  session: Session
++): Promise<string> {
++  const lang = session.language;
++
++  const g = await guard(phone, input, session, { skipReauth: true });
++  if (g.done) return g.response;
++
++  try {
++    const lockedUntil = await getAuthLock(phone);
++    if (lockedUntil) {
++      return await lockedResponse(phone, session, lockedUntil);
++    }
++
++    const claimed = normalizePhone(input.trim());
++    if (!/^\+254[17]\d{8}$/.test(claimed)) {
++      return mcMsg('AUTH_PHONE_FORMAT', lang);
++    }
++
++    // The WhatsApp number itself already came back empty; retyping it can only fail.
++    const memberships =
++      claimed === normalizePhone(phone) ? [] : await findMembershipsByPhone(claimed);
++
++    const usable: typeof memberships = [];
++    for (const m of memberships) {
++      if (m.member.status !== 'active') continue;
++      if (await isClaimBlocked(m.chamaId, m.member.memberId)) continue;
++      usable.push(m);
++    }
++
++    if (usable.length === 0) {
++      const failure = await recordAuthFailure(phone);
++      await auditWhatsApp({
++        phone,
++        action: 'auth.phone_claim',
++        outcome: 'failure',
++        detail: { attempts: failure.attempts },
++      });
++
++      if (failure.lockedUntil) {
++        return await lockedResponse(phone, session, failure.lockedUntil);
++      }
++      return mcMsg('AUTH_PHONE_NOT_MATCHED', lang, { remaining: failure.remaining });
++    }
++
++    const primary = usable[0];
++
++    await auditWhatsApp({
++      phone,
++      chamaId: primary.chamaId,
++      memberId: primary.member.memberId,
++      action: 'auth.phone_claim',
++      outcome: 'success',
++      detail: { claimedLast3: claimed.slice(-3) },
++    });
++
++    await setMc(phone, session, {
++      candidates: candidatesFrom(usable),
++      memberId: primary.member.memberId,
++      memberName: primary.member.name,
++      chamaId: primary.chamaId,
++      chamaName: primary.chamaName,
++      role: primary.member.role,
++      memberPhone: primary.member.phoneNormalized || claimed,
++      claimedPhone: claimed,
++      phoneAttempts: 0,
++      authAt: 0,
++      authAttempts: 0,
++      stack: [],
++      options: [],
++    });
++
++    await updateSessionState(phone, STATE.MYCHAMA_AUTH_ID, {});
++    session.currentState = STATE.MYCHAMA_AUTH_ID;
++
++    return mcMsg('AUTH_ASK_ID_CLAIM', lang);
++  } catch (error) {
++    return await failSoft(phone, session, 'handleMyChamaAuthPhone', error);
++  }
++}
++
+ export async function handleMyChamaAuthId(
+   phone: string,
+   input: string,
+@@ -331,6 +582,11 @@ export async function handleMyChamaAuthId(
+   if (g.done) return g.response;
+ 
+   try {
++    const lockedUntil = await getAuthLock(phone);
++    if (lockedUntil) {
++      return await lockedResponse(phone, session, lockedUntil);
++    }
++
+     const mc = getMc(session);
+     const cleaned = input.trim();
+ 
+@@ -342,14 +598,38 @@ export async function handleMyChamaAuthId(
+       return await beginMyChama(phone, session);
+     }
+ 
+-    const member = await getMember(mc.chamaId, mc.memberId);
+-    if (!member) {
+-      return await beginMyChama(phone, session);
++    // Verify the ID against EVERY membership this number resolved to and keep
++    // only those that match. Verifying just the first one would let a correct
++    // ID for chama A unlock chama B's (different) member record.
++    const candidates = mc.candidates || [];
++    const matched: typeof candidates = [];
++    const matchedMembers = new Map<string, ChamaMember>();
++
++    for (const c of candidates) {
++      const m = await getMember(c.chamaId, c.memberId);
++      if (m && m.status === 'active' && verifyIdLast4(m, cleaned)) {
++        matched.push(c);
++        matchedMembers.set(c.chamaId + '/' + c.memberId, m);
++      }
+     }
+ 
+-    if (!verifyIdLast4(member, cleaned)) {
+-      const attempts = (mc.authAttempts || 0) + 1;
+-      const remaining = MC_SECURITY.MAX_AUTH_ATTEMPTS - attempts;
++    // On a mid-session re-check the member we were already acting as must be
++    // among the matches, otherwise someone else's ID would resume this session.
++    const currentStillValid = matched.some(
++      (c) => c.chamaId === mc.chamaId && c.memberId === mc.memberId
++    );
++    const isReauth = (mc.stack || []).length > 0;
++
++    if (matched.length === 0 || (isReauth && !currentStillValid)) {
++      const failure = await recordAuthFailure(phone);
++
++      // Reached through a number that isn't the member's own: also count
++      // against the member, so the claim route can close for them.
++      if (mc.claimedPhone) {
++        for (const c of candidates) {
++          await recordClaimFailure(c.chamaId, c.memberId);
++        }
++      }
+ 
+       await auditWhatsApp({
+         phone,
+@@ -357,43 +637,58 @@ export async function handleMyChamaAuthId(
+         memberId: mc.memberId,
+         action: 'auth.verify',
+         outcome: 'failure',
+-        detail: { attempts },
++        detail: { attempts: failure.attempts, viaClaimedPhone: !!mc.claimedPhone },
+       });
+ 
+-      if (remaining <= 0) {
+-        await setMc(phone, session, {
+-          authAttempts: attempts,
+-          lockedUntil: now() + MC_SECURITY.AUTH_LOCKOUT_SECONDS,
+-        });
+-        await updateSessionState(phone, STATE.MAIN_MENU, {});
+-        return mcMsg('AUTH_LOCKED', lang, {
+-          minutes: Math.round(MC_SECURITY.AUTH_LOCKOUT_SECONDS / 60),
+-        });
++      if (failure.lockedUntil) {
++        return await lockedResponse(phone, session, failure.lockedUntil);
+       }
+ 
+-      await setMc(phone, session, { authAttempts: attempts });
+-      return mcMsg('AUTH_ID_INVALID', lang, { remaining });
++      await setMc(phone, session, { authAttempts: failure.attempts });
++      return mcMsg('AUTH_ID_INVALID', lang, { remaining: failure.remaining });
+     }
+ 
+-    await setMc(phone, session, { authAt: now(), authAttempts: 0, lockedUntil: 0 });
++    await clearAuthFailures(phone);
++
++    // First match becomes the working chama unless we're resuming one that matched.
++    const working = currentStillValid
++      ? { chamaId: mc.chamaId, memberId: mc.memberId }
++      : { chamaId: matched[0].chamaId, memberId: matched[0].memberId };
++    const workingMember = matchedMembers.get(working.chamaId + '/' + working.memberId)!;
++    const workingCandidate = matched.find(
++      (c) => c.chamaId === working.chamaId && c.memberId === working.memberId
++    )!;
++
++    await setMc(phone, session, {
++      candidates: matched,
++      chamaId: workingCandidate.chamaId,
++      chamaName: workingCandidate.chamaName,
++      memberId: workingCandidate.memberId,
++      memberName: workingMember.name,
++      role: workingMember.role,
++      memberPhone: workingMember.phoneNormalized || mc.memberPhone,
++      authAt: now(),
++      authAttempts: 0,
++      lockedUntil: 0,
++    });
++
+     await auditWhatsApp({
+       phone,
+-      chamaId: mc.chamaId,
+-      memberId: mc.memberId,
++      chamaId: workingCandidate.chamaId,
++      memberId: workingCandidate.memberId,
+       action: 'auth.verify',
+       outcome: 'success',
++      detail: { viaClaimedPhone: !!mc.claimedPhone },
+     });
+ 
+-    const candidates = mc.candidates || [];
+-
+     // Re-auth mid-session: drop straight back where they were.
+-    const stack = mc.stack || [];
++    const stack = getMc(session).stack || [];
+     const resume = stack.length > 0 ? await popState(phone, session) : null;
+     if (resume) {
+       return await renderState(phone, session, resume);
+     }
+ 
+-    if (candidates.length > 1) {
++    if (matched.length > 1) {
+       await replaceState(phone, session, STATE.MYCHAMA_SELECT_CHAMA, {});
+       return await renderChamaPicker(phone, session);
+     }
+@@ -435,6 +730,7 @@ export async function handleMyChamaSelectChama(
+       return mcMsg('PICK_NUMBER', session.language);
+     }
+ 
++    // Candidates were ID-verified at sign-in, so switching needs no new check.
+     await replaceState(phone, session, STATE.MYCHAMA_MENU, {
+       chamaId: chosen.chamaId,
+       chamaName: chosen.chamaName,
+@@ -445,7 +741,11 @@ export async function handleMyChamaSelectChama(
+ 
+     const member = await getMember(chosen.chamaId, chosen.memberId);
+     if (member) {
+-      await setMc(phone, session, { memberName: member.name, role: member.role });
++      await setMc(phone, session, {
++        memberName: member.name,
++        role: member.role,
++        memberPhone: member.phoneNormalized || getMc(session).memberPhone,
++      });
+     }
+ 
+     return myChamaMenu(session);
+@@ -539,7 +839,9 @@ async function renderContributionPicker(phone: string, session: Session): Promis
+       mcMsg('CONTRIB_NONE_DUE', lang, {
+         total: kes(ctx.member.totalContributed || 0),
+         credit,
+-      }) + nav(lang)
++      }) +
++      (await pendingNote(ctx, lang, ['contribution'])) +
++      nav(lang)
+     );
+   }
+ 
+@@ -554,7 +856,11 @@ async function renderContributionPicker(phone: string, session: Session): Promis
+     })
+   );
+ 
+-  return mcMsg('CONTRIB_SELECT', lang, { list }) + nav(lang);
++  return (
++    mcMsg('CONTRIB_SELECT', lang, { list }) +
++    (await pendingNote(ctx, lang, ['contribution'])) +
++    nav(lang)
++  );
+ }
+ 
+ export async function handleContributionSelect(
+@@ -616,7 +922,9 @@ export async function handleContributionAmount(
+     if (!ctx || !mc.contributionId) return await beginMyChama(phone, session);
+ 
+     const contribution = await getContribution(ctx.chama.id, mc.contributionId);
+-    if (!contribution) return await beginMyChama(phone, session);
++    if (!contribution || contribution.memberId !== ctx.member.memberId) {
++      return await beginMyChama(phone, session);
++    }
+ 
+     const due = contributionDue(contribution);
+     const cleaned = input.trim().toUpperCase();
+@@ -993,7 +1301,11 @@ export async function handleLoanPaySelect(
+     if (!ctx) return await beginMyChama(phone, session);
+ 
+     const loan = await getLoan(ctx.chama.id, loanId);
+-    if (!loan || loan.memberId !== ctx.member.memberId) {
++    if (
++      !loan ||
++      loan.memberId !== ctx.member.memberId ||
++      (loan.status !== 'active' && loan.status !== 'overdue')
++    ) {
+       return mcMsg('PICK_NUMBER', lang);
+     }
+ 
+@@ -1041,7 +1353,10 @@ export async function handleLoanPayAmount(
+     if (!ctx || !mc.loanId) return await beginMyChama(phone, session);
+ 
+     const loan = await getLoan(ctx.chama.id, mc.loanId);
+-    if (!loan) return await beginMyChama(phone, session);
++    if (!loan || loan.memberId !== ctx.member.memberId) return await beginMyChama(phone, session);
++    if (loan.status !== 'active' && loan.status !== 'overdue') {
++      return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
++    }
+ 
+     const next = nextUnpaidInstallment(loan);
+     if (!next) return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
+@@ -1134,7 +1449,7 @@ async function renderLoanBalance(session: Session): Promise<string> {
+     return lines.join('\n');
+   });
+ 
+-  return header + blocks.join('\n') + nav(lang);
++  return header + blocks.join('\n') + (await pendingNote(ctx, lang, ['loan_repayment'])) + nav(lang);
+ }
+ 
+ export async function handleLoanBalance(
+@@ -1216,8 +1531,14 @@ async function renderPotDetail(phone: string, session: Session): Promise<string>
+     return mcMsg('MGR_DRAFT', lang) + nav(lang);
+   }
+ 
++  // Members only ever see their OWN pots and records; a pot the member is not
++  // in is treated as absent even if its id somehow ended up in the session.
++  if (!(pot.memberIds || []).includes(ctx.member.memberId)) {
++    return await renderPotPicker(phone, session);
++  }
++
+   const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
+-  const mine = records.find((r) => r.period === pot.period);
++  const progress = mgrProgress(pot, records);
+   const paidCount = records.filter((r) => r.status === 'paid').length;
+   const missedCount = records.filter((r) => r.status === 'missed').length;
+ 
+@@ -1226,34 +1547,75 @@ async function renderPotDetail(phone: string, session: Session): Promise<string>
+     nextIds.map(async (id) => (await getMember(ctx.chama.id, id))?.name || id)
+   );
+ 
+-  const myStatus = mine
+-    ? mine.status === 'paid'
+-      ? `✅ ${kes(mine.amount)} ${lang === 'en' ? 'paid' : 'imelipwa'}`
+-      : `⚠️ ${lang === 'en' ? 'not paid' : 'haijalipwa'}`
++  const myStatus = progress.done
++    ? `✅ ${kes(progress.paid || pot.amount)} ${lang === 'en' ? 'paid' : 'imelipwa'}`
++    : progress.paid > 0
++    ? `⏳ ${kes(progress.paid)} ${lang === 'en' ? 'of' : 'kati ya'} ${kes(pot.amount)} ${
++        lang === 'en' ? 'paid — part payment' : 'imelipwa — malipo ya sehemu'
++      }`
++    : progress.mine?.status === 'missed'
++    ? `⚠️ ${lang === 'en' ? 'not paid' : 'haijalipwa'}`
+     : `⏳ ${lang === 'en' ? 'not paid yet' : 'bado haijalipwa'}`;
+ 
+-  const payable = !mine || mine.status !== 'paid';
+-  const actions = payable
+-    ? mcMsg('MGR_ACTIONS_PAYABLE', lang, { amount: kes(pot.amount) })
+-    : mcMsg('MGR_ACTIONS_PAID', lang);
+-
+-  await setMc(phone, session, { potPeriod: pot.period, options: [] });
+-
+-  return mcMsg('MGR_DETAIL', lang, {
+-    name: pot.name,
+-    amount: kes(pot.amount),
+-    frequency: pot.frequency,
+-    memberCount: pot.memberIds?.length || 0,
+-    cycle: pot.cycleNumber,
+-    period: pot.period,
+-    next: nextNames.join(' & ') || '—',
+-    position: queuePosition(pot, ctx.member.memberId) || '—',
+-    pool: kes(potPoolEstimate(pot)),
+-    myStatus,
+-    paidCount,
+-    missedCount,
+-    actions,
+-  });
++  // Money is only accepted while the pot is collecting; the webhook applies
++  // to an active pot only, so offering payment on a closed one would charge
++  // the member for nothing. An open arrear, however, can be paid any time —
++  // it is a standing debt to the chama, not tied to this period's window.
++  const collecting = pot.status === 'active';
++  const payable = collecting && !progress.done;
++  const arrear = await getOpenArrearForMember(ctx.chama.id, pot.id, ctx.member.memberId);
++
++  // Build the numbered action list to match what's actually offered — never
++  // a fixed 1/2/3 that could point at the wrong thing once an arrear or a
++  // closed period changes which actions apply.
++  const optionIds: string[] = [];
++  const lines: string[] = [];
++  if (payable) {
++    optionIds.push('pay_period');
++    lines.push(
++      lang === 'en'
++        ? `Pay for this period — full or part (${kes(progress.remaining)} still due)`
++        : `Lipa kwa kipindi hiki — kamili au sehemu (${kes(progress.remaining)} bado inadaiwa)`
++    );
++  }
++  if (arrear) {
++    optionIds.push('pay_arrear');
++    lines.push(
++      lang === 'en'
++        ? `Pay arrears — full or part (${kes(arrear.amount)} owed)`
++        : `Lipa malimbikizo — kamili au sehemu (${kes(arrear.amount)} yanadaiwa)`
++    );
++  }
++  optionIds.push('history');
++  lines.push(lang === 'en' ? 'View my payment history' : 'Angalia historia yangu ya malipo');
++
++  await setOptions(phone, session, optionIds);
++  await setMc(phone, session, { potPeriod: pot.period });
++
++  const actionsBlock =
++    numberedList(lines) + '\n\n' + (lang === 'en' ? '*0* Back  *00* My Chama menu' : '*0* Nyuma  *00* Menyu ya My Chama');
++
++  const arrearLine = arrear
++    ? mcMsg('MGR_ARREAR_LINE', lang, { amount: kes(arrear.amount) })
++    : '';
++
++  return (
++    mcMsg('MGR_DETAIL', lang, {
++      name: pot.name,
++      amount: kes(pot.amount),
++      frequency: pot.frequency,
++      memberCount: pot.memberIds?.length || 0,
++      cycle: pot.cycleNumber,
++      period: pot.period,
++      next: nextNames.join(' & ') || '—',
++      position: queuePosition(pot, ctx.member.memberId) || '—',
++      pool: kes(potPoolEstimate(pot)),
++      myStatus,
++      paidCount,
++      missedCount,
++      actions: arrearLine + actionsBlock,
++    }) + (await pendingNote(ctx, lang, ['mgr_contribution']))
++  );
+ }
+ 
+ export async function handleMgrDetail(
+@@ -1272,21 +1634,17 @@ export async function handleMgrDetail(
+     if (!ctx || !mc.potId) return await beginMyChama(phone, session);
+ 
+     const pot = await getPot(ctx.chama.id, mc.potId);
+-    if (!pot) return await renderPotPicker(phone, session);
+-
+-    const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
+-    const mine = records.find((r) => r.period === pot.period);
+-    const payable = !mine || mine.status !== 'paid';
++    if (!pot || !(pot.memberIds || []).includes(ctx.member.memberId)) {
++      return await renderPotPicker(phone, session);
++    }
+ 
+-    const choice = parseChoice(input, 1, 2);
+-    if (choice === null) {
++    const action = resolveOption(session, input);
++    if (!action) {
+       return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+     }
+ 
+-    // When the period is already paid, option 1 is history rather than pay.
+-    const wantsHistory = payable ? choice === 2 : choice === 1;
+-
+-    if (wantsHistory) {
++    if (action === 'history') {
++      const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
+       await pushState(phone, session, STATE.MYCHAMA_MGR_HISTORY);
+       const rows = records
+         .slice(0, 15)
+@@ -1300,28 +1658,163 @@ export async function handleMgrDetail(
+       return head + (rows.join('\n') || (lang === 'en' ? 'No records yet.' : 'Hakuna kumbukumbu.')) + nav(lang);
+     }
+ 
+-    if (!payable) {
+-      return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+-    }
+-
+     if (!canCollectOnline(ctx.chama.plan)) {
+       return mcMsg('PAY_NOT_ON_PLAN', lang) + nav(lang);
+     }
+ 
++    if (action === 'pay_arrear') {
++      const arrear = await getOpenArrearForMember(ctx.chama.id, pot.id, ctx.member.memberId);
++      if (!arrear) return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
++
++      await pushState(phone, session, STATE.MYCHAMA_MGR_PAY_AMOUNT, {
++        potId: pot.id,
++        potPeriod: undefined,
++        arrearId: arrear.id,
++      });
++      return await renderMgrPayAmount(phone, session);
++    }
++
++    if (action === 'pay_period') {
++      const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
++      const progress = mgrProgress(pot, records);
++      if (pot.status !== 'active' || progress.done) {
++        return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
++      }
++      await pushState(phone, session, STATE.MYCHAMA_MGR_PAY_AMOUNT, {
++        potId: pot.id,
++        potPeriod: pot.period,
++        arrearId: undefined,
++      });
++      return await renderMgrPayAmount(phone, session);
++    }
++
++    return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
++  } catch (error) {
++    return await failSoft(phone, session, 'handleMgrDetail', error);
++  }
++}
++
++/**
++ * Resolves what the pending MGR amount step is actually for — the current
++ * period, or (when the session carries an arrearId) an open arrear — and how
++ * much is still owed on it. Centralised so render and handle can never
++ * disagree about the target or the remaining amount.
++ */
++async function mgrAmountTarget(
++  ctx: { chama: Chama; member: ChamaMember },
++  mc: ReturnType<typeof getMc>
++): Promise<
++  | { kind: 'period'; pot: MgrPot; remaining: number; paid: number }
++  | { kind: 'arrear'; pot: MgrPot; arrear: MgrArrear; remaining: number }
++  | null
++> {
++  if (!mc.potId) return null;
++  const pot = await getPot(ctx.chama.id, mc.potId);
++  if (!pot || !(pot.memberIds || []).includes(ctx.member.memberId)) return null;
++
++  if (mc.arrearId) {
++    const arrear = await getArrear(ctx.chama.id, pot.id, mc.arrearId);
++    if (!arrear || arrear.memberId !== ctx.member.memberId || arrear.status !== 'open') return null;
++    return { kind: 'arrear', pot, arrear, remaining: arrear.amount };
++  }
++
++  if (pot.status !== 'active') return null;
++  const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
++  const progress = mgrProgress(pot, records);
++  if (progress.done) return null;
++  return { kind: 'period', pot, remaining: progress.remaining, paid: progress.paid };
++}
++
++/** Amount prompt for a merry-go-round contribution or arrear — full or part. */
++async function renderMgrPayAmount(phone: string, session: Session): Promise<string> {
++  const lang = session.language;
++  const mc = getMc(session);
++  const ctx = await loadContext(session);
++  if (!ctx) return await beginMyChama(phone, session);
++
++  const target = await mgrAmountTarget(ctx, mc);
++  if (!target) return await renderPotDetail(phone, session);
++
++  if (target.kind === 'arrear') {
++    return (
++      mcMsg('MGR_ARREAR_PAY_AMOUNT', lang, {
++        name: target.pot.name,
++        remaining: kes(target.remaining),
++      }) + nav(lang)
++    );
++  }
++
++  return (
++    mcMsg('MGR_PAY_AMOUNT', lang, {
++      name: target.pot.name,
++      period: target.pot.period,
++      amount: kes(target.pot.amount),
++      paid: kes(target.paid),
++      remaining: kes(target.remaining),
++    }) + nav(lang)
++  );
++}
++
++export async function handleMgrPayAmount(
++  phone: string,
++  input: string,
++  session: Session
++): Promise<string> {
++  const lang = session.language;
++
++  const g = await guard(phone, input, session);
++  if (g.done) return g.response;
++
++  try {
++    const mc = getMc(session);
++    const ctx = await loadContext(session);
++    if (!ctx) return await beginMyChama(phone, session);
++
++    const target = await mgrAmountTarget(ctx, mc);
++    if (!target) return await renderPotDetail(phone, session);
++
++    const cleaned = input.trim().toUpperCase();
++    let amount: number;
++    if (cleaned === 'FULL' || cleaned === 'ZOTE' || cleaned === 'YOTE') {
++      amount = target.remaining;
++    } else {
++      const parsed = Number(input.trim());
++      if (!Number.isFinite(parsed) || parsed < MIN_PAYMENT) {
++        return mcMsg('ENTER_VALID_AMOUNT', lang) + nav(lang);
++      }
++      amount = Math.round(parsed);
++    }
++
++    if (amount > target.remaining + 0.01) {
++      return mcMsg('MGR_PAY_TOO_HIGH', lang, { remaining: kes(target.remaining) }) + nav(lang);
++    }
++
++    if (target.kind === 'arrear') {
++      const label =
++        lang === 'en' ? `${target.pot.name} · arrears` : `${target.pot.name} · malimbikizo`;
++      return await startPayment(phone, session, {
++        purpose: 'mgr_contribution',
++        net: amount,
++        label,
++        potId: target.pot.id,
++        arrearId: target.arrear.id,
++      });
++    }
++
+     const label =
+       lang === 'en'
+-        ? `${pot.name} · period ${pot.period}`
+-        : `${pot.name} · kipindi ${pot.period}`;
++        ? `${target.pot.name} · period ${target.pot.period}`
++        : `${target.pot.name} · kipindi ${target.pot.period}`;
+ 
+     return await startPayment(phone, session, {
+       purpose: 'mgr_contribution',
+-      net: pot.amount,
++      net: amount,
+       label,
+-      potId: pot.id,
+-      potPeriod: pot.period,
++      potId: target.pot.id,
++      potPeriod: target.pot.period,
+     });
+   } catch (error) {
+-    return await failSoft(phone, session, 'handleMgrDetail', error);
++    return await failSoft(phone, session, 'handleMgrPayAmount', error);
+   }
+ }
+ 
+@@ -1484,6 +1977,7 @@ async function startPayment(
+     installmentNo?: number;
+     potId?: string;
+     potPeriod?: number;
++    arrearId?: string;
+   }
+ ): Promise<string> {
+   await pushState(phone, session, STATE.MYCHAMA_PAY_PHONE, {
+@@ -1495,6 +1989,7 @@ async function startPayment(
+     installmentNo: params.installmentNo,
+     potId: params.potId,
+     potPeriod: params.potPeriod,
++    arrearId: params.arrearId,
+   });
+ 
+   return renderPayPhonePrompt(session);
+@@ -1502,10 +1997,12 @@ async function startPayment(
+ 
+ function renderPayPhonePrompt(session: Session): string {
+   const lang = session.language;
+-  return (
+-    mcMsg('PAY_ASK_PHONE', lang, { registered: localPhone(normalizePhone(session.phone)) }) +
+-    nav(lang)
+-  );
++  // Default to the number REGISTERED for the member. When they reached My
++  // Chama from a different WhatsApp number (phone-claim path) those differ,
++  // and the prompt must not silently charge the WhatsApp number instead.
++  const mc = getMc(session);
++  const registered = mc.memberPhone || normalizePhone(session.phone);
++  return mcMsg('PAY_ASK_PHONE', lang, { registered: localPhone(registered) }) + nav(lang);
+ }
+ 
+ export async function handlePayPhone(
+@@ -1523,7 +2020,7 @@ export async function handlePayPhone(
+     let target: string;
+ 
+     if (cleaned === '1') {
+-      target = normalizePhone(session.phone);
++      target = getMc(session).memberPhone || normalizePhone(session.phone);
+     } else {
+       const normalized = normalizePhone(cleaned);
+       if (!/^\+254[17]\d{8}$/.test(normalized)) {
+@@ -1586,10 +2083,7 @@ async function renderPayConfirm(phone: string, session: Session): Promise<string
+     return await beginMyChama(phone, session);
+   }
+ 
+-  const fees =
+-    mc.payPurpose === 'loan_repayment'
+-      ? loanRepaymentFees(mc.payNet, ctx.chama.plan)
+-      : contributionFees(mc.payNet);
++  const fees = feesFor(mc.payPurpose, mc.payNet, ctx.chama.plan);
+ 
+   return mcMsg('PAY_CONFIRM', lang, {
+     label: mc.payLabel || '',
+@@ -1636,6 +2130,32 @@ export async function handlePayConfirm(
+       return mcMsg('PAY_NO_SPLIT', lang) + '\n\n' + myChamaMenu(session);
+     }
+ 
++    // Re-validate against live data before asking Paystack for money.
++    if (!(await paymentTargetStillValid(ctx, mc))) {
++      await auditWhatsApp({
++        phone,
++        chamaId: ctx.chama.id,
++        memberId: ctx.member.memberId,
++        action: 'payment.initiate',
++        outcome: 'denied',
++        detail: { reason: 'stale_target', purpose: mc.payPurpose, net: mc.payNet },
++      });
++      await replaceState(phone, session, STATE.MYCHAMA_MENU, {
++        stack: [],
++        payPurpose: undefined,
++        payNet: undefined,
++        payLabel: undefined,
++        payPhone: undefined,
++        contributionId: undefined,
++        loanId: undefined,
++        installmentNo: undefined,
++        potId: undefined,
++        potPeriod: undefined,
++        arrearId: undefined,
++      });
++      return mcMsg('PAY_STALE_TARGET', lang) + '\n\n' + myChamaMenu(session);
++    }
++
+     const allowed = await withinIntentRateLimit(ctx.chama.id, ctx.member.memberId);
+     if (!allowed) {
+       await auditWhatsApp({
+@@ -1650,10 +2170,7 @@ export async function handlePayConfirm(
+       return mcMsg('PAY_RATE_LIMITED', lang) + '\n\n' + myChamaMenu(session);
+     }
+ 
+-    const fees =
+-      mc.payPurpose === 'loan_repayment'
+-        ? loanRepaymentFees(mc.payNet, ctx.chama.plan)
+-        : contributionFees(mc.payNet);
++    const fees = feesFor(mc.payPurpose, mc.payNet, ctx.chama.plan);
+ 
+     const target: IntentTarget = {
+       purpose: mc.payPurpose,
+@@ -1662,6 +2179,7 @@ export async function handlePayConfirm(
+       installmentNo: mc.installmentNo,
+       potId: mc.potId,
+       potPeriod: mc.potPeriod,
++      arrearId: mc.arrearId,
+       note: mc.payLabel,
+     };
+ 
+@@ -1688,6 +2206,8 @@ export async function handlePayConfirm(
+         net: fees.net,
+         gross: fees.gross,
+         reference: result.reference,
++        duplicate: !!result.duplicate,
++        error: result.success ? undefined : result.error,
+       },
+     });
+ 
+@@ -1702,8 +2222,20 @@ export async function handlePayConfirm(
+       installmentNo: undefined,
+       potId: undefined,
+       potPeriod: undefined,
++      arrearId: undefined,
+     });
+ 
++    if (result.duplicate) {
++      return (
++        mcMsg('PAY_DUPLICATE', lang, {
++          net: kes(fees.net),
++          ref: (result.reference || '').slice(-10),
++        }) +
++        '\n\n' +
++        myChamaMenu(session)
++      );
++    }
++
+     if (!result.success) {
+       return (
+         mcMsg('PAY_FAILED', lang, { reason: result.error || 'unknown' }) +
+diff --git a/functions/src/services/mychama.payment.service.ts b/functions/src/services/mychama.payment.service.ts
+index 9da6c2a..f84c301 100644
+--- a/functions/src/services/mychama.payment.service.ts
++++ b/functions/src/services/mychama.payment.service.ts
+@@ -5,6 +5,13 @@
+  * Paystack's /charge mobile_money endpoint, routing funds to the chama through
+  * its settlement split code.
+  *
++ * Guarantees given to the member (and to whoever reconciles later):
++ *   - An intent is never created without the exact target it pays (loan,
++ *     contribution or pot+period). An untargeted intent would be charged but
++ *     could never be applied — the failure mode this file exists to prevent.
++ *   - One STK prompt per identical pending payment, so a double-tap cannot
++ *     charge the member twice.
++ *
+  * Deliberately NOT here: any balance mutation. The intent is the bot's only
+  * financial write. MyChama's own Paystack webhook matches on `reference`,
+  * applies the money to the contribution / instalment / pot period, and writes
+@@ -40,6 +47,8 @@ export interface IntentTarget {
+   installmentNo?: number;
+   potId?: string;
+   potPeriod?: number;
++  /** MGR only: pay this open arrear instead of the current period. */
++  arrearId?: string;
+   note?: string;
+ }
+ 
+@@ -47,6 +56,60 @@ export interface InitiateResult {
+   success: boolean;
+   reference?: string;
+   error?: string;
++  /** True when an identical payment is already awaiting the member's PIN. */
++  duplicate?: boolean;
++}
++
++/**
++ * Every purpose must carry exactly the ids the webhook needs to apply it.
++ * Returns an error string, or null when the target is complete.
++ */
++export function validateIntentTarget(target: IntentTarget): string | null {
++  switch (target.purpose) {
++    case 'contribution':
++      return target.contributionId ? null : 'missing contributionId';
++    case 'loan_repayment':
++      return target.loanId ? null : 'missing loanId';
++    case 'mgr_contribution':
++      // An arrear payment needs the pot + arrear; a period payment needs
++      // the pot + the period it is for. Either way PAY must be able to tell
++      // exactly what this money settles.
++      if (!target.potId) return 'missing potId';
++      if (target.arrearId) return null;
++      return typeof target.potPeriod === 'number' ? null : 'missing potPeriod';
++    default:
++      return 'unknown purpose';
++  }
++}
++
++/**
++ * A pending, unexpired intent for the same member, same target and same net
++ * amount, raised in the last few minutes. STK prompts stay live on the
++ * member's phone for a while — sending a second one for the same thing just
++ * risks a double charge.
++ */
++export async function findDuplicatePendingIntent(
++  chamaId: string,
++  memberId: string,
++  target: IntentTarget,
++  net: number
++): Promise<PaymentIntent | null> {
++  const recent = await getPendingIntents(chamaId, memberId, 10);
++  const cutoff = Date.now() - 3 * 60 * 1000;
++
++  return (
++    recent.find(
++      (i) =>
++        i.createdAt >= cutoff &&
++        i.purpose === target.purpose &&
++        Math.abs(i.amount - net) < 0.01 &&
++        (i.contributionId || null) === (target.contributionId || null) &&
++        (i.loanId || null) === (target.loanId || null) &&
++        (i.potId || null) === (target.potId || null) &&
++        (i.potPeriod ?? null) === (target.potPeriod ?? null) &&
++        (i.arrearId || null) === (target.arrearId || null)
++    ) || null
++  );
+ }
+ 
+ /**
+@@ -101,6 +164,17 @@ export async function initiateMyChamaPayment(params: {
+   const { chamaId, chamaName, memberId, memberName, phone, provider, fees, splitCode, target } =
+     params;
+ 
++  const targetError = validateIntentTarget(target);
++  if (targetError) {
++    logger.error('MyChama intent refused: incomplete target', { chamaId, memberId, purpose: target.purpose, targetError });
++    return { success: false, error: targetError };
++  }
++
++  const duplicate = await findDuplicatePendingIntent(chamaId, memberId, target, fees.net);
++  if (duplicate) {
++    return { success: false, duplicate: true, reference: duplicate.reference, error: 'duplicate_pending' };
++  }
++
+   const reference = buildReference(chamaId, target.purpose);
+   const normalized = normalizePhone(phone);
+   const now = Date.now();
+@@ -124,6 +198,7 @@ export async function initiateMyChamaPayment(params: {
+     installmentNo: target.installmentNo,
+     potId: target.potId,
+     potPeriod: target.potPeriod,
++    arrearId: target.arrearId,
+     splitCode,
+     createdAt: now,
+     updatedAt: now,
+@@ -151,6 +226,11 @@ export async function initiateMyChamaPayment(params: {
+       reference,
+       split_code: splitCode,
+       metadata: {
++        // Same routing keys the app's initiatePayment sends, so the webhook
++        // classifies bot and app payments identically instead of relying on
++        // the reference prefix alone.
++        chargeType: 'mychama_payment',
++        targetProject: 'mychama1',
+         chamaId,
+         chamaName,
+         memberId,
+@@ -161,6 +241,7 @@ export async function initiateMyChamaPayment(params: {
+         installmentNo: target.installmentNo ?? null,
+         potId: target.potId || null,
+         potPeriod: target.potPeriod ?? null,
++        arrearId: target.arrearId || null,
+         netAmount: fees.net,
+         paystackFee: fees.paystackFee,
+         ourFee: fees.ourFee,
+@@ -189,7 +270,8 @@ export async function initiateMyChamaPayment(params: {
+       }
+     );
+ 
+-    if (!response.data.status) {
++    const chargeStatus = response.data.data?.status;
++    if (!response.data.status || chargeStatus === 'failed') {
+       await intentRef.update({
+         status: 'failed',
+         paystackMessage: response.data.message || 'Charge rejected',
+diff --git a/functions/src/services/mychama.service.ts b/functions/src/services/mychama.service.ts
+index aebcdc4..ff7a80e 100644
+--- a/functions/src/services/mychama.service.ts
++++ b/functions/src/services/mychama.service.ts
+@@ -14,7 +14,7 @@
+  */
+ 
+ import { Timestamp } from 'firebase-admin/firestore';
+-import { mychamaDb, mcPath, FEES, MC } from '../config/mychama.config';
++import { mychamaDb, mcPath, FEES, MC, MC_SECURITY } from '../config/mychama.config';
+ import {
+   Chama,
+   ChamaMember,
+@@ -27,6 +27,8 @@ import {
+   ChamaTransaction,
+   ChamaPlan,
+   FeeBreakdown,
++  IntentPurpose,
++  MgrArrear,
+ } from '../types/mychama.types';
+ import { logger } from '../utils/logger';
+ 
+@@ -130,6 +132,16 @@ export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
+   return grossUpForFees(net, rate ?? 0);
+ }
+ 
++/**
++ * Single entry point for every payable flow so the quote shown on the confirm
++ * screen and the amount actually charged can never come from two different
++ * formulas. MGR collections use the contribution markup (see the app's
++ * mgr_contribution_fees).
++ */
++export function feesFor(purpose: IntentPurpose, net: number, plan: ChamaPlan): FeeBreakdown {
++  return purpose === 'loan_repayment' ? loanRepaymentFees(net, plan) : contributionFees(net);
++}
++
+ export function canCollectOnline(plan: ChamaPlan): boolean {
+   return plan !== 'free';
+ }
+@@ -520,6 +532,33 @@ export async function getPotRecordsForMember(
+   return snap.docs.map((d) => ({ ...(d.data() as MgrRecord), id: d.id }));
+ }
+ 
++/** The member's open arrear in a pot, if any (the app keeps at most one). */
++export async function getOpenArrearForMember(
++  chamaId: string,
++  potId: string,
++  memberId: string
++): Promise<MgrArrear | null> {
++  const snap = await mychamaDb()
++    .collection(mcPath.mgrArrears(chamaId, potId))
++    .where('memberId', '==', memberId)
++    .where('status', '==', 'open')
++    .limit(1)
++    .get();
++  if (snap.empty) return null;
++  const d = snap.docs[0];
++  return { ...(d.data() as MgrArrear), id: d.id };
++}
++
++export async function getArrear(
++  chamaId: string,
++  potId: string,
++  arrearId: string
++): Promise<MgrArrear | null> {
++  const snap = await mychamaDb().collection(mcPath.mgrArrears(chamaId, potId)).doc(arrearId).get();
++  if (!snap.exists) return null;
++  return { ...(snap.data() as MgrArrear), id: snap.id };
++}
++
+ export function potPoolEstimate(pot: MgrPot): number {
+   return (pot.amount || 0) * (pot.memberIds?.length || 0) * (pot.periodsPerRound || 1);
+ }
+@@ -585,3 +624,112 @@ export async function auditWhatsApp(entry: {
+     logger.warn('Failed to write MyChama audit entry', { action: entry.action });
+   }
+ }
++
++
++/* ------------------------------------------------------------------ *
++ * Durable authentication throttle
++ *
++ * The session-scoped counter in `mc` is wiped by every exit (000) and every
++ * fresh entry, which would let a sender reset their own lockout by simply
++ * re-entering My Chama. This throttle lives in `whatsappRateLimits/{phone}`
++ * (server-only, see firestore.rules) so it survives the session.
++ *
++ * Lockouts escalate: 15 min, 30 min, 1 h ... capped at 24 h. That keeps a
++ * 4-digit ID suffix from being brute-forced across many short lockouts.
++ * ------------------------------------------------------------------ */
++
++const THROTTLE_RESET_AFTER_MS = 24 * 60 * 60 * 1000;
++const THROTTLE_MAX_LOCK_MS = 24 * 60 * 60 * 1000;
++/** Failed ID attempts from *other* numbers against one member, per 24 h. */
++const CLAIM_MAX_FAILURES = 9;
++
++interface ThrottleDoc {
++  attempts?: number;
++  lockouts?: number;
++  lockedUntil?: number;
++  lastFailureAt?: number;
++}
++
++function throttleRef(key: string) {
++  return mychamaDb().collection(MC.WHATSAPP_RATE_LIMITS).doc(key);
++}
++
++/** Epoch ms the sender is locked until, or 0 if not locked. */
++export async function getAuthLock(senderPhone: string): Promise<number> {
++  const key = normalizePhone(senderPhone) || senderPhone;
++  const snap = await throttleRef(key).get();
++  const lockedUntil = (snap.data() as ThrottleDoc | undefined)?.lockedUntil || 0;
++  return lockedUntil > Date.now() ? lockedUntil : 0;
++}
++
++export async function recordAuthFailure(
++  senderPhone: string
++): Promise<{ attempts: number; remaining: number; lockedUntil: number }> {
++  const key = normalizePhone(senderPhone) || senderPhone;
++  const ref = throttleRef(key);
++
++  return await mychamaDb().runTransaction(async (tx) => {
++    const now = Date.now();
++    const cur = ((await tx.get(ref)).data() || {}) as ThrottleDoc;
++
++    const stale = cur.lastFailureAt && now - cur.lastFailureAt > THROTTLE_RESET_AFTER_MS;
++    let attempts = stale ? 0 : cur.attempts || 0;
++    let lockouts = stale ? 0 : cur.lockouts || 0;
++    let lockedUntil = cur.lockedUntil && cur.lockedUntil > now ? cur.lockedUntil : 0;
++
++    attempts += 1;
++
++    if (attempts >= MC_SECURITY.MAX_AUTH_ATTEMPTS) {
++      const lockMs = Math.min(
++        MC_SECURITY.AUTH_LOCKOUT_SECONDS * 1000 * Math.pow(2, lockouts),
++        THROTTLE_MAX_LOCK_MS
++      );
++      lockedUntil = now + lockMs;
++      lockouts += 1;
++      attempts = 0;
++    }
++
++    tx.set(ref, { attempts, lockouts, lockedUntil, lastFailureAt: now, updatedAt: now });
++
++    return {
++      attempts,
++      remaining: Math.max(0, MC_SECURITY.MAX_AUTH_ATTEMPTS - attempts),
++      lockedUntil,
++    };
++  });
++}
++
++export async function clearAuthFailures(senderPhone: string): Promise<void> {
++  const key = normalizePhone(senderPhone) || senderPhone;
++  await throttleRef(key).set(
++    { attempts: 0, lockouts: 0, lockedUntil: 0, updatedAt: Date.now() },
++    { merge: true }
++  );
++}
++
++/**
++ * Phone-claim guard. When someone reaches a member from a WhatsApp number that
++ * is NOT the member's registered number, failures are also counted against
++ * the member (across every sender). Past the cap the claim route for that
++ * member is closed for 24 h — the member's own registered number still works.
++ */
++export async function isClaimBlocked(chamaId: string, memberId: string): Promise<boolean> {
++  const snap = await throttleRef(`claim_${chamaId}_${memberId}`).get();
++  const d = (snap.data() || {}) as { failures?: number; windowStart?: number };
++  if (!d.windowStart || Date.now() - d.windowStart > THROTTLE_RESET_AFTER_MS) return false;
++  return (d.failures || 0) >= CLAIM_MAX_FAILURES;
++}
++
++export async function recordClaimFailure(chamaId: string, memberId: string): Promise<void> {
++  const ref = throttleRef(`claim_${chamaId}_${memberId}`);
++  await mychamaDb().runTransaction(async (tx) => {
++    const now = Date.now();
++    const d = ((await tx.get(ref)).data() || {}) as { failures?: number; windowStart?: number };
++    const fresh = !d.windowStart || now - d.windowStart > THROTTLE_RESET_AFTER_MS;
++    tx.set(ref, {
++      failures: fresh ? 1 : (d.failures || 0) + 1,
++      windowStart: fresh ? now : d.windowStart,
++      updatedAt: now,
++    });
++  });
++}
+diff --git a/functions/src/types/mychama.types.ts b/functions/src/types/mychama.types.ts
+index 9e4fee2..302a300 100644
+--- a/functions/src/types/mychama.types.ts
++++ b/functions/src/types/mychama.types.ts
+@@ -131,17 +131,33 @@ export interface MgrPot {
+   drawDone: boolean;
+   drawMethod: 'smart' | 'random' | null;
+   autoDemoteLate: boolean;
+-  status: 'draft' | 'active' | 'completed';
++  status: 'draft' | 'active' | 'completed' | 'closed';
+   cycleNumber: number;
+   period: number;
+   createdOn: string;
+ }
+ 
++/**
++ * chamas/{c}/mgrPots/{p}/arrears/{id} — one open running balance per member
++ * per pot, opened by the app when a period closes with a gap. The bot only
++ * ever READS this; money is applied by PAY (see the intent's `arrearId`).
++ */
++export interface MgrArrear {
++  id: string;
++  memberId: string;
++  periods: number[];
++  /** Outstanding balance. */
++  amount: number;
++  status: 'open' | 'settled' | 'written_off';
++  settledAmount?: number;
++}
++
+ export interface MgrRecord {
+   id: string;
+   period: number;
+   memberId: string;
+-  status: 'paid' | 'missed' | 'pending';
++  /** 'partial' = part-paid this period (mirrors the app's MgrRecord). */
++  status: 'paid' | 'partial' | 'missed' | 'pending';
+   amount: number;
+   date: string | null;
+   method: PayMethod;
+@@ -225,6 +241,8 @@ export interface PaymentIntent {
+   installmentNo?: number;
+   potId?: string;
+   potPeriod?: number;
++  /** MGR payment toward this open arrear (instead of the current period). */
++  arrearId?: string;
+   splitCode?: string;
+   paystackMessage?: string;
+   createdAt: number;
+@@ -244,6 +262,16 @@ export interface MyChamaSessionContext {
+   authAt?: number;
+   authAttempts?: number;
+   lockedUntil?: number;
++  /**
++   * Phone-claim path: the member's number is not the WhatsApp number, so the
++   * sender typed the number registered in the chama. `claimedPhone` is what
++   * they typed (E.164); ID verification still follows.
++   */
++  claimedPhone?: string;
++  /** Wrong registered-number attempts in the current phone-claim prompt. */
++  phoneAttempts?: number;
++  /** The member's own registered number (E.164) — default STK target. */
++  memberPhone?: string;
+   /** Navigation back-stack of STATE values. */
+   stack?: string[];
+   /** Options rendered on the last numbered list, in display order. */
+@@ -254,6 +282,8 @@ export interface MyChamaSessionContext {
+   installmentNo?: number;
+   potId?: string;
+   potPeriod?: number;
++  /** Set when the in-flight MGR payment is toward an open arrear. */
++  arrearId?: string;
+   productId?: string;
+   amount?: number;
+   term?: number;
+diff --git a/functions/src/utils/mychama.nav.ts b/functions/src/utils/mychama.nav.ts
+index 2a538d2..e3d6d2a 100644
+--- a/functions/src/utils/mychama.nav.ts
++++ b/functions/src/utils/mychama.nav.ts
+@@ -13,6 +13,7 @@
+  * plenty of users type rather than tap.
+  */
+ 
++import { FieldValue } from 'firebase-admin/firestore';
+ import { Session } from '../types/session.types';
+ import { updateSessionContext, updateSessionState } from '../services/session.service';
+ import { MyChamaSessionContext } from '../types/mychama.types';
+@@ -36,11 +37,28 @@ export async function setMc(
+   session: Session,
+   patch: Partial<MyChamaSessionContext>
+ ): Promise<MyChamaSessionContext> {
+-  const next = { ...getMc(session), ...patch };
+-  await updateSessionContext(phone, { mc: next });
++  const merged = { ...getMc(session), ...patch } as Record<string, unknown>;
++
++  // The session document is written with merge:true and the Admin SDK drops
++  // `undefined` values, so `{ loanId: undefined }` would silently leave the
++  // OLD loanId in Firestore. Turn every undefined into an explicit delete so
++  // "cleared" really means cleared — a stale payment target must never leak
++  // from one flow into the next.
++  const write: Record<string, unknown> = {};
++  const next: Record<string, unknown> = {};
++  for (const [key, value] of Object.entries(merged)) {
++    if (value === undefined) {
++      write[key] = FieldValue.delete();
++    } else {
++      write[key] = value;
++      next[key] = value;
++    }
++  }
++
++  await updateSessionContext(phone, { mc: write } as never);
+   // Keep the in-memory session aligned so later reads in the same turn are correct.
+   session.context = { ...(session.context || {}), mc: next };
+-  return next;
++  return next as MyChamaSessionContext;
+ }
+ 
+ /** Wipe every MyChama value from the session — used on exit and on sign-out. */
+diff --git a/functions/src/webhooks/whatsapp-webhook.ts b/functions/src/webhooks/whatsapp-webhook.ts
+index a423e0a..0f5cfbd 100644
+--- a/functions/src/webhooks/whatsapp-webhook.ts
++++ b/functions/src/webhooks/whatsapp-webhook.ts
+@@ -46,6 +46,7 @@ import {
+   handleChargeCustomerProcessing,
+ } from '../handlers/payment.charge.handler';
+ import {
++  handleMyChamaAuthPhone,
+   handleMyChamaAuthId,
+   handleMyChamaSelectChama,
+   handleMyChamaMenu,
+@@ -61,6 +62,7 @@ import {
+   handleLoanBalance,
+   handleMgrSelect,
+   handleMgrDetail,
++  handleMgrPayAmount,
+   handleMgrHistory,
+   handleStatementType,
+   handleStatementPeriod,
+@@ -430,6 +432,11 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+         break;
+ 
+       // ── My Chama flow (cross-project: mychama1) ──
++      case STATE.MYCHAMA_AUTH_PHONE:
++        logger.info('Routing to My Chama registered-phone step');
++        response = await handleMyChamaAuthPhone(phone, text, session);
++        break;
++
+       case STATE.MYCHAMA_AUTH_ID:
+         logger.info('Routing to My Chama identity verification');
+         response = await handleMyChamaAuthId(phone, text, session);
+@@ -505,6 +512,11 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+         response = await handleMgrDetail(phone, text, session);
+         break;
+ 
++      case STATE.MYCHAMA_MGR_PAY_AMOUNT:
++        logger.info('Routing to My Chama MGR payment amount');
++        response = await handleMgrPayAmount(phone, text, session);
++        break;
++
+       case STATE.MYCHAMA_MGR_HISTORY:
+         logger.info('Routing to My Chama merry-go-round history');
+         response = await handleMgrHistory(phone, text, session);

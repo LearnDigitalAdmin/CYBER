@@ -22,7 +22,7 @@ export const MC_MENUS: Record<string, Record<Lang, string>> = {
       '7. Switch Chama 🔁\n' +
       '8. Back to Main Menu',
     sw:
-      '*Chama Changu* — {chamaName}\n' +
+      '*My Chama* — {chamaName}\n' +
       'Umeingia kama {memberName}\n\n' +
       '1. Lipa Mchango 💰\n' +
       '2. Omba Mkopo 📝\n' +
@@ -59,7 +59,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   AUTH_INTRO: {
     en:
       '*My Chama* 🏦\n\nChecking your membership using this WhatsApp number…',
-    sw: '*Chama Changu* 🏦\n\nTunakagua uanachama wako kwa namba hii ya WhatsApp…',
+    sw: '*My Chama* 🏦\n\nTunakagua uanachama wako kwa namba hii ya WhatsApp…',
   },
   AUTH_NOT_REGISTERED: {
     en:
@@ -68,6 +68,34 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
     sw:
       'Hatujapata uanachama wa chama unaohusiana na namba hii ya WhatsApp.\n\n' +
       'Muombe mweka hazina wa chama chako aongeze namba hii kwenye wasifu wako, kisha jaribu tena.',
+  },
+  AUTH_ASK_PHONE: {
+    en:
+      '*My Chama* 🏦\n\n' +
+      'We could not match this WhatsApp number to a chama membership.\n\n' +
+      'If your membership is registered under a *different phone number*, enter that number (07XXXXXXXX or 01XXXXXXXX) to continue:',
+    sw:
+      '*My Chama* 🏦\n\n' +
+      'Hatukuweza kuoanisha namba hii ya WhatsApp na uanachama wowote wa chama.\n\n' +
+      'Kama uanachama wako umesajiliwa kwa *namba nyingine ya simu*, ingiza namba hiyo (07XXXXXXXX au 01XXXXXXXX) kuendelea:',
+  },
+  AUTH_PHONE_FORMAT: {
+    en: 'That does not look like a valid Kenyan number. Enter it as 07XXXXXXXX or 01XXXXXXXX:',
+    sw: 'Hiyo haionekani kuwa namba sahihi ya Kenya. Iingize kama 07XXXXXXXX au 01XXXXXXXX:',
+  },
+  AUTH_PHONE_NOT_MATCHED: {
+    en:
+      'We could not match that number to an active membership. You have *{remaining}* attempt(s) left.\n\n' +
+      'Enter the phone number registered with your chama, or ask your treasurer to update your profile:',
+    sw:
+      'Hatukuweza kuoanisha namba hiyo na uanachama unaofanya kazi. Umebakiwa na majaribio *{remaining}*.\n\n' +
+      'Ingiza namba ya simu iliyosajiliwa kwenye chama chako, au muombe mweka hazina asasishe wasifu wako:',
+  },
+  AUTH_ASK_ID_CLAIM: {
+    en:
+      'Thanks. For your security, enter the *last 4 digits* of the National ID of the member registered on that number:',
+    sw:
+      'Asante. Kwa usalama wako, ingiza *tarakimu 4 za mwisho* za Kitambulisho cha mwanachama aliyesajiliwa kwa namba hiyo:',
   },
   AUTH_INACTIVE: {
     en:
@@ -98,7 +126,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '🔒 Too many incorrect attempts. My Chama is locked on this number for *{minutes}* minutes.\n\n' +
       'If this was not you, contact your chama officials.',
     sw:
-      '🔒 Majaribio mengi yasiyo sahihi. Chama Changu kimefungwa kwenye namba hii kwa dakika *{minutes}*.\n\n' +
+      '🔒 Majaribio mengi yasiyo sahihi. My Chama imefungwa kwenye namba hii kwa dakika *{minutes}*.\n\n' +
       'Kama huwa wewe, wasiliana na viongozi wa chama chako.',
   },
   AUTH_REAUTH: {
@@ -130,12 +158,10 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   CONTRIB_AMOUNT: {
     en:
       '*{period}*\nAmount due: *{due}*\n\n' +
-      'How much do you want to pay? Enter an amount in KES, or reply *FULL* to pay {due}.\n\n' +
-      'Any excess is applied to your next period automatically.',
+      'How much do you want to pay? Enter any amount in KES (a part payment is fine), or reply *FULL* to pay {due}.',
     sw:
       '*{period}*\nDeni: *{due}*\n\n' +
-      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au jibu *ZOTE* kulipa {due}.\n\n' +
-      'Ziada yoyote itatumika kwenye kipindi kijacho kiotomatiki.',
+      'Unataka kulipa kiasi gani? Ingiza kiasi chochote kwa KES (unaweza kulipa kidogo kidogo), au jibu *ZOTE* kulipa {due}.',
   },
   CONTRIB_AMOUNT_TOO_HIGH: {
     en: 'That is more than this period needs. Maximum for *{period}* is *{due}*.\n\nEnter an amount up to {due}:',
@@ -289,13 +315,23 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📊 Umelipa vipindi {paidCount} na umekosa {missedCount}\n\n' +
       '{actions}',
   },
-  MGR_ACTIONS_PAYABLE: {
-    en: '1. Pay {amount} for this period\n2. View my payment history\n\n*0* Back  *00* My Chama menu',
-    sw: '1. Lipa {amount} kwa kipindi hiki\n2. Angalia historia yangu ya malipo\n\n*0* Nyuma  *00* Menyu ya Chama',
+  MGR_PAY_AMOUNT: {
+    en:
+      '*{name}* — period {period}\n' +
+      'This period: *{amount}*\n' +
+      'Paid so far: *{paid}*\n' +
+      'Still due: *{remaining}*\n\n' +
+      'How much do you want to pay? Enter an amount in KES, or reply *FULL* for {remaining}.',
+    sw:
+      '*{name}* — kipindi {period}\n' +
+      'Kipindi hiki: *{amount}*\n' +
+      'Umelipa hadi sasa: *{paid}*\n' +
+      'Bado inadaiwa: *{remaining}*\n\n' +
+      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au jibu *ZOTE* kwa {remaining}.',
   },
-  MGR_ACTIONS_PAID: {
-    en: '✅ Already paid for this period.\n\n1. View my payment history\n\n*0* Back  *00* My Chama menu',
-    sw: '✅ Tayari umelipa kwa kipindi hiki.\n\n1. Angalia historia yangu ya malipo\n\n*0* Nyuma  *00* Menyu ya Chama',
+  MGR_PAY_TOO_HIGH: {
+    en: 'That is more than what is still due this period (*{remaining}*).\n\nEnter an amount up to {remaining}:',
+    sw: 'Hiyo ni zaidi ya kinachodaiwa kwa kipindi hiki (*{remaining}*).\n\nIngiza kiasi hadi {remaining}:',
   },
   MGR_DRAFT: {
     en: 'This pot is still a draft — the queue draw has not been done, so contributions are not open yet.',
@@ -367,6 +403,22 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '⚠️ Chama chako hakijakamilisha kuweka akaunti ya malipo, hivyo malipo mtandaoni hayapatikani bado.\n\n' +
       'Tafadhali mlipe mweka hazina moja kwa moja.',
   },
+  PAY_DUPLICATE: {
+    en:
+      '⏳ You already have a payment of *{net}* waiting for your PIN (ref *{ref}*).\n\n' +
+      'Complete it on your phone, or wait a few minutes before trying again — this stops you being charged twice.',
+    sw:
+      '⏳ Tayari una malipo ya *{net}* yanayosubiri PIN yako (kumbukumbu *{ref}*).\n\n' +
+      'Yakamilishe kwenye simu yako, au subiri dakika chache kabla ya kujaribu tena — hii inakuzuia kutozwa mara mbili.',
+  },
+  PAY_STALE_TARGET: {
+    en: '⚠️ What you owe changed while you were setting this up, so nothing was charged. Please start again to see the latest amount.',
+    sw: '⚠️ Kiasi unachodaiwa kimebadilika ulipokuwa unaandaa malipo, kwa hiyo hakuna kilichotozwa. Tafadhali anza tena uone kiasi cha sasa.',
+  },
+  PENDING_PAYMENTS: {
+    en: '\n⏳ *Awaiting confirmation:* {list}\nThese update your balance automatically once confirmed.',
+    sw: '\n⏳ *Yanasubiri uthibitisho:* {list}\nHaya yatasasisha salio lako kiotomatiki yakithibitishwa.',
+  },
   PAY_RATE_LIMITED: {
     en: '⏳ You have started several payments in the last hour. Please complete or cancel those first, then try again.',
     sw: '⏳ Umeanzisha malipo kadhaa katika saa iliyopita. Tafadhali kamilisha au ghairi hayo kwanza, kisha jaribu tena.',
@@ -383,11 +435,11 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   },
   UNAVAILABLE: {
     en: '⚠️ My Chama is temporarily unreachable. Please try again in a few minutes.',
-    sw: '⚠️ Chama Changu hakipatikani kwa muda. Tafadhali jaribu tena baada ya dakika chache.',
+    sw: '⚠️ My Chama haipatikani kwa muda. Tafadhali jaribu tena baada ya dakika chache.',
   },
   NAV_HINT: {
     en: '\n\n*0* Back  •  *00* My Chama menu  •  *000* Exit',
-    sw: '\n\n*0* Nyuma  •  *00* Menyu ya Chama  •  *000* Toka',
+    sw: '\n\n*0* Nyuma  •  *00* Menyu ya My Chama  •  *000* Toka',
   },
   NAV_HINT_TOP: {
     en: '\n\n*0* Main menu  •  *000* Exit',
@@ -395,7 +447,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   },
   BACK_TO_MYCHAMA: {
     en: '↩️ Back to My Chama.',
-    sw: '↩️ Rudi kwa Chama Changu.',
+    sw: '↩️ Rudi kwa My Chama.',
   },
 };
 

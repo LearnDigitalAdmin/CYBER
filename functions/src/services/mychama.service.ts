@@ -14,7 +14,7 @@
  */
 
 import { Timestamp } from 'firebase-admin/firestore';
-import { mychamaDb, mcPath, FEES, MC } from '../config/mychama.config';
+import { mychamaDb, mcPath, FEES, MC, MC_SECURITY } from '../config/mychama.config';
 import {
   Chama,
   ChamaMember,
@@ -27,6 +27,8 @@ import {
   ChamaTransaction,
   ChamaPlan,
   FeeBreakdown,
+  IntentPurpose,
+  MgrArrear,
 } from '../types/mychama.types';
 import { logger } from '../utils/logger';
 
@@ -128,6 +130,16 @@ export function contributionFees(net: number): FeeBreakdown {
 export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
   const rate = FEES.LOAN_MARKUP_RATE[plan];
   return grossUpForFees(net, rate ?? 0);
+}
+
+/**
+ * Single entry point for every payable flow so the quote shown on the confirm
+ * screen and the amount actually charged can never come from two different
+ * formulas. MGR collections use the contribution markup (see the app's
+ * mgr_contribution_fees).
+ */
+export function feesFor(purpose: IntentPurpose, net: number, plan: ChamaPlan): FeeBreakdown {
+  return purpose === 'loan_repayment' ? loanRepaymentFees(net, plan) : contributionFees(net);
 }
 
 export function canCollectOnline(plan: ChamaPlan): boolean {
@@ -520,6 +532,33 @@ export async function getPotRecordsForMember(
   return snap.docs.map((d) => ({ ...(d.data() as MgrRecord), id: d.id }));
 }
 
+/** The member's open arrear in a pot, if any (the app keeps at most one). */
+export async function getOpenArrearForMember(
+  chamaId: string,
+  potId: string,
+  memberId: string
+): Promise<MgrArrear | null> {
+  const snap = await mychamaDb()
+    .collection(mcPath.mgrArrears(chamaId, potId))
+    .where('memberId', '==', memberId)
+    .where('status', '==', 'open')
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  return { ...(d.data() as MgrArrear), id: d.id };
+}
+
+export async function getArrear(
+  chamaId: string,
+  potId: string,
+  arrearId: string
+): Promise<MgrArrear | null> {
+  const snap = await mychamaDb().collection(mcPath.mgrArrears(chamaId, potId)).doc(arrearId).get();
+  if (!snap.exists) return null;
+  return { ...(snap.data() as MgrArrear), id: snap.id };
+}
+
 export function potPoolEstimate(pot: MgrPot): number {
   return (pot.amount || 0) * (pot.memberIds?.length || 0) * (pot.periodsPerRound || 1);
 }
@@ -584,4 +623,113 @@ export async function auditWhatsApp(entry: {
     // Auditing must never break the member's conversation.
     logger.warn('Failed to write MyChama audit entry', { action: entry.action });
   }
+}
+
+
+/* ------------------------------------------------------------------ *
+ * Durable authentication throttle
+ *
+ * The session-scoped counter in `mc` is wiped by every exit (000) and every
+ * fresh entry, which would let a sender reset their own lockout by simply
+ * re-entering My Chama. This throttle lives in `whatsappRateLimits/{phone}`
+ * (server-only, see firestore.rules) so it survives the session.
+ *
+ * Lockouts escalate: 15 min, 30 min, 1 h ... capped at 24 h. That keeps a
+ * 4-digit ID suffix from being brute-forced across many short lockouts.
+ * ------------------------------------------------------------------ */
+
+const THROTTLE_RESET_AFTER_MS = 24 * 60 * 60 * 1000;
+const THROTTLE_MAX_LOCK_MS = 24 * 60 * 60 * 1000;
+/** Failed ID attempts from *other* numbers against one member, per 24 h. */
+const CLAIM_MAX_FAILURES = 9;
+
+interface ThrottleDoc {
+  attempts?: number;
+  lockouts?: number;
+  lockedUntil?: number;
+  lastFailureAt?: number;
+}
+
+function throttleRef(key: string) {
+  return mychamaDb().collection(MC.WHATSAPP_RATE_LIMITS).doc(key);
+}
+
+/** Epoch ms the sender is locked until, or 0 if not locked. */
+export async function getAuthLock(senderPhone: string): Promise<number> {
+  const key = normalizePhone(senderPhone) || senderPhone;
+  const snap = await throttleRef(key).get();
+  const lockedUntil = (snap.data() as ThrottleDoc | undefined)?.lockedUntil || 0;
+  return lockedUntil > Date.now() ? lockedUntil : 0;
+}
+
+export async function recordAuthFailure(
+  senderPhone: string
+): Promise<{ attempts: number; remaining: number; lockedUntil: number }> {
+  const key = normalizePhone(senderPhone) || senderPhone;
+  const ref = throttleRef(key);
+
+  return await mychamaDb().runTransaction(async (tx) => {
+    const now = Date.now();
+    const cur = ((await tx.get(ref)).data() || {}) as ThrottleDoc;
+
+    const stale = cur.lastFailureAt && now - cur.lastFailureAt > THROTTLE_RESET_AFTER_MS;
+    let attempts = stale ? 0 : cur.attempts || 0;
+    let lockouts = stale ? 0 : cur.lockouts || 0;
+    let lockedUntil = cur.lockedUntil && cur.lockedUntil > now ? cur.lockedUntil : 0;
+
+    attempts += 1;
+
+    if (attempts >= MC_SECURITY.MAX_AUTH_ATTEMPTS) {
+      const lockMs = Math.min(
+        MC_SECURITY.AUTH_LOCKOUT_SECONDS * 1000 * Math.pow(2, lockouts),
+        THROTTLE_MAX_LOCK_MS
+      );
+      lockedUntil = now + lockMs;
+      lockouts += 1;
+      attempts = 0;
+    }
+
+    tx.set(ref, { attempts, lockouts, lockedUntil, lastFailureAt: now, updatedAt: now });
+
+    return {
+      attempts,
+      remaining: Math.max(0, MC_SECURITY.MAX_AUTH_ATTEMPTS - attempts),
+      lockedUntil,
+    };
+  });
+}
+
+export async function clearAuthFailures(senderPhone: string): Promise<void> {
+  const key = normalizePhone(senderPhone) || senderPhone;
+  await throttleRef(key).set(
+    { attempts: 0, lockouts: 0, lockedUntil: 0, updatedAt: Date.now() },
+    { merge: true }
+  );
+}
+
+/**
+ * Phone-claim guard. When someone reaches a member from a WhatsApp number that
+ * is NOT the member's registered number, failures are also counted against
+ * the member (across every sender). Past the cap the claim route for that
+ * member is closed for 24 h — the member's own registered number still works.
+ */
+export async function isClaimBlocked(chamaId: string, memberId: string): Promise<boolean> {
+  const snap = await throttleRef(`claim_${chamaId}_${memberId}`).get();
+  const d = (snap.data() || {}) as { failures?: number; windowStart?: number };
+  if (!d.windowStart || Date.now() - d.windowStart > THROTTLE_RESET_AFTER_MS) return false;
+  return (d.failures || 0) >= CLAIM_MAX_FAILURES;
+}
+
+export async function recordClaimFailure(chamaId: string, memberId: string): Promise<void> {
+  const ref = throttleRef(`claim_${chamaId}_${memberId}`);
+  await mychamaDb().runTransaction(async (tx) => {
+    const now = Date.now();
+    const d = ((await tx.get(ref)).data() || {}) as { failures?: number; windowStart?: number };
+    const fresh = !d.windowStart || now - d.windowStart > THROTTLE_RESET_AFTER_MS;
+    tx.set(ref, {
+      failures: fresh ? 1 : (d.failures || 0) + 1,
+      windowStart: fresh ? now : d.windowStart,
+      updatedAt: now,
+    });
+  });
 }

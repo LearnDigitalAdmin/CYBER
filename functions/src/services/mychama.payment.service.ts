@@ -5,6 +5,13 @@
  * Paystack's /charge mobile_money endpoint, routing funds to the chama through
  * its settlement split code.
  *
+ * Guarantees given to the member (and to whoever reconciles later):
+ *   - An intent is never created without the exact target it pays (loan,
+ *     contribution or pot+period). An untargeted intent would be charged but
+ *     could never be applied — the failure mode this file exists to prevent.
+ *   - One STK prompt per identical pending payment, so a double-tap cannot
+ *     charge the member twice.
+ *
  * Deliberately NOT here: any balance mutation. The intent is the bot's only
  * financial write. MyChama's own Paystack webhook matches on `reference`,
  * applies the money to the contribution / instalment / pot period, and writes
@@ -40,6 +47,8 @@ export interface IntentTarget {
   installmentNo?: number;
   potId?: string;
   potPeriod?: number;
+  /** MGR only: pay this open arrear instead of the current period. */
+  arrearId?: string;
   note?: string;
 }
 
@@ -47,6 +56,60 @@ export interface InitiateResult {
   success: boolean;
   reference?: string;
   error?: string;
+  /** True when an identical payment is already awaiting the member's PIN. */
+  duplicate?: boolean;
+}
+
+/**
+ * Every purpose must carry exactly the ids the webhook needs to apply it.
+ * Returns an error string, or null when the target is complete.
+ */
+export function validateIntentTarget(target: IntentTarget): string | null {
+  switch (target.purpose) {
+    case 'contribution':
+      return target.contributionId ? null : 'missing contributionId';
+    case 'loan_repayment':
+      return target.loanId ? null : 'missing loanId';
+    case 'mgr_contribution':
+      // An arrear payment needs the pot + arrear; a period payment needs
+      // the pot + the period it is for. Either way PAY must be able to tell
+      // exactly what this money settles.
+      if (!target.potId) return 'missing potId';
+      if (target.arrearId) return null;
+      return typeof target.potPeriod === 'number' ? null : 'missing potPeriod';
+    default:
+      return 'unknown purpose';
+  }
+}
+
+/**
+ * A pending, unexpired intent for the same member, same target and same net
+ * amount, raised in the last few minutes. STK prompts stay live on the
+ * member's phone for a while — sending a second one for the same thing just
+ * risks a double charge.
+ */
+export async function findDuplicatePendingIntent(
+  chamaId: string,
+  memberId: string,
+  target: IntentTarget,
+  net: number
+): Promise<PaymentIntent | null> {
+  const recent = await getPendingIntents(chamaId, memberId, 10);
+  const cutoff = Date.now() - 3 * 60 * 1000;
+
+  return (
+    recent.find(
+      (i) =>
+        i.createdAt >= cutoff &&
+        i.purpose === target.purpose &&
+        Math.abs(i.amount - net) < 0.01 &&
+        (i.contributionId || null) === (target.contributionId || null) &&
+        (i.loanId || null) === (target.loanId || null) &&
+        (i.potId || null) === (target.potId || null) &&
+        (i.potPeriod ?? null) === (target.potPeriod ?? null) &&
+        (i.arrearId || null) === (target.arrearId || null)
+    ) || null
+  );
 }
 
 /**
@@ -101,6 +164,17 @@ export async function initiateMyChamaPayment(params: {
   const { chamaId, chamaName, memberId, memberName, phone, provider, fees, splitCode, target } =
     params;
 
+  const targetError = validateIntentTarget(target);
+  if (targetError) {
+    logger.error('MyChama intent refused: incomplete target', { chamaId, memberId, purpose: target.purpose, targetError });
+    return { success: false, error: targetError };
+  }
+
+  const duplicate = await findDuplicatePendingIntent(chamaId, memberId, target, fees.net);
+  if (duplicate) {
+    return { success: false, duplicate: true, reference: duplicate.reference, error: 'duplicate_pending' };
+  }
+
   const reference = buildReference(chamaId, target.purpose);
   const normalized = normalizePhone(phone);
   const now = Date.now();
@@ -124,6 +198,7 @@ export async function initiateMyChamaPayment(params: {
     installmentNo: target.installmentNo,
     potId: target.potId,
     potPeriod: target.potPeriod,
+    arrearId: target.arrearId,
     splitCode,
     createdAt: now,
     updatedAt: now,
@@ -151,6 +226,11 @@ export async function initiateMyChamaPayment(params: {
       reference,
       split_code: splitCode,
       metadata: {
+        // Same routing keys the app's initiatePayment sends, so the webhook
+        // classifies bot and app payments identically instead of relying on
+        // the reference prefix alone.
+        chargeType: 'mychama_payment',
+        targetProject: 'mychama1',
         chamaId,
         chamaName,
         memberId,
@@ -161,6 +241,7 @@ export async function initiateMyChamaPayment(params: {
         installmentNo: target.installmentNo ?? null,
         potId: target.potId || null,
         potPeriod: target.potPeriod ?? null,
+        arrearId: target.arrearId || null,
         netAmount: fees.net,
         paystackFee: fees.paystackFee,
         ourFee: fees.ourFee,
@@ -189,7 +270,8 @@ export async function initiateMyChamaPayment(params: {
       }
     );
 
-    if (!response.data.status) {
+    const chargeStatus = response.data.data?.status;
+    if (!response.data.status || chargeStatus === 'failed') {
       await intentRef.update({
         status: 'failed',
         paystackMessage: response.data.message || 'Charge rejected',
