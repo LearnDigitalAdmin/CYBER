@@ -101,6 +101,7 @@ import { useAuth } from "../context/authContext";
 import UploadsPage from "../pages/Uploads";
 import AddServices from "../pages/AddServices";
 import FormPage from "../pages/Form";
+import DeskApp from "../desk/core/DeskApp";
 
 /**
  * AppRoutes:
@@ -166,6 +167,9 @@ const AppRoutes: React.FC = () => {
             </ProtectedRoute>
           }
         /> 
+
+        {/* Samuhia Desk (all screens live under src/desk) */}
+        <Route path="/desk/*" element={<ProtectedRoute><DeskApp /></ProtectedRoute>} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

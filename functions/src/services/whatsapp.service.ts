@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { getWhatsAppApiUrl, getWhatsAppHeaders } from '../config/whatsapp.config';
 import { logger } from '../utils/logger';
+import { recordWhatsAppUsage } from '../utils/whatsapp.usage';
 
 /**
  * Send text message via WhatsApp API
@@ -35,6 +36,7 @@ export async function sendWhatsAppMessage(phone: string, message: string): Promi
     const messageId = response.data?.messages?.[0]?.id;
 
     logger.info('WhatsApp message sent successfully', { phone, messageId });
+    recordWhatsAppUsage({ kind: 'outbound', ok: true });
 
     return {
       success: true,
@@ -44,6 +46,7 @@ export async function sendWhatsAppMessage(phone: string, message: string): Promi
     logger.error('Failed to send WhatsApp message', error);
 
     const errorMessage = error instanceof axios.AxiosError ? error.response?.data?.message || error.message : String(error);
+    recordWhatsAppUsage({ kind: 'outbound', ok: false });
 
     return {
       success: false,

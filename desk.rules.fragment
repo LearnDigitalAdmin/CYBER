@@ -1,0 +1,36 @@
+// desk.rules.fragment — paste INSIDE `match /databases/{database}/documents { ... }` in the ONE repo that deploys
+// Firestore rules for this project. Cloud Functions use the Admin SDK and bypass rules, so every write path below
+// is closed to browsers. agentId == the agent's Firebase Auth uid.
+
+match /desk_agents/{id} {
+  allow read: if request.auth != null && request.auth.uid == id;
+  allow write: if false;
+}
+match /desk_sessions/{id} {
+  allow read: if request.auth != null && resource.data.agentId == request.auth.uid;
+  allow write: if false;
+}
+match /desk_tickets/{id} {
+  allow read: if request.auth != null && resource.data.agentId == request.auth.uid;
+  allow write: if false;
+}
+match /desk_ledger/{id} {
+  allow read: if request.auth != null && resource.data.agentId == request.auth.uid;
+  allow write: if false;
+}
+match /desk_rent_batches/{id} {
+  allow read: if request.auth != null && resource.data.agentId == request.auth.uid;
+  allow write: if false;
+}
+match /desk_support/{id} {
+  allow read: if request.auth != null && resource.data.agentId == request.auth.uid;
+  allow write: if false;
+}
+// Server-only: config, customers, action OTPs, audit, events, counters, cached Paystack split codes
+match /desk_config/{id}      { allow read, write: if false; }
+match /desk_customers/{id}   { allow read, write: if false; }
+match /desk_actionOtps/{id}  { allow read, write: if false; }
+match /desk_audit/{id}       { allow read, write: if false; }
+match /desk_events/{id}      { allow read, write: if false; }
+match /desk_counters/{id}    { allow read, write: if false; }
+match /desk_split_codes/{id} { allow read, write: if false; }

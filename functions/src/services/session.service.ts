@@ -7,6 +7,7 @@ import { db } from '../config/firebase.config';
 import { Session, SessionContext } from '../types/session.types';
 import { logger } from '../utils/logger';
 import { STATE } from '../constants/states';
+import { recordWhatsAppUsage } from '../utils/whatsapp.usage';
 
 const SESSIONS_COLLECTION = 'whatsapp_sessions';
 const SESSION_TIMEOUT = 30 * 60; // 30 minutes in seconds
@@ -16,6 +17,8 @@ const SESSION_TIMEOUT = 30 * 60; // 30 minutes in seconds
  */
 export async function createOrGetSession(phone: string): Promise<Session> {
   try {
+    // Called exactly once per inbound WhatsApp message (webhooks/whatsapp-webhook.ts).
+    recordWhatsAppUsage({ kind: 'inbound', phone });
     const docRef = db.collection(SESSIONS_COLLECTION).doc(phone);
     const doc = await docRef.get();
 
@@ -54,6 +57,7 @@ async function createNewSession(phone: string): Promise<Session> {
     // Save to Firestore
     const docRef = db.collection(SESSIONS_COLLECTION).doc(phone);
     await docRef.set(session);
+    recordWhatsAppUsage({ kind: 'sessionStarted', phone });
     logger.info('New session created and saved', { phone });
 
     return session;
