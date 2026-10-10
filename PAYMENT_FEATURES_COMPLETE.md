@@ -22,7 +22,7 @@ All payment features have been fully implemented and tested. Build compiles with
 
 **What Happens**:
 1. Payment setup request saved to Firestore: `paymentSetupRequests/{requestId}`
-2. **WhatsApp message sent to Cogvana admin** (+254791286165) with:
+2. **WhatsApp message sent to Samuhia admin** (+254791286165) with:
    - Shop ID (prominently displayed)
    - Shop name & owner details
    - Payment method & account details
@@ -97,7 +97,7 @@ All payment features have been fully implemented and tested. Build compiles with
    - Cases 8 & 9 shifted from old 6 & 7
 
 3. **`handlers/payment.setup.handler.ts`**
-   - ✅ Now sends actual WhatsApp message to Cogvana
+   - ✅ Now sends actual WhatsApp message to Samuhia
    - Added imports: `sendWhatsAppMessage`, `formatPhoneForWhatsApp`
    - Integrated WhatsApp sending in confirmation flow
 
@@ -139,7 +139,7 @@ All payment features have been fully implemented and tested. Build compiles with
 
 ### ✅ Shop ID in All Messages
 - Displayed in user confirmation messages
-- Included in Cogvana admin messages
+- Included in Samuhia admin messages
 - Used in transaction metadata for webhook processing
 
 ### ✅ Bilingual Support
@@ -149,7 +149,7 @@ All payment features have been fully implemented and tested. Build compiles with
 ### ✅ Error Handling
 - Validates payment account is set up before sending STK
 - Gracefully handles missing transactions in webhook
-- Doesn't fail user request if Cogvana WhatsApp fails to send
+- Doesn't fail user request if Samuhia WhatsApp fails to send
 
 ### ✅ Transaction Tracking
 - Transactions saved in Firestore for audit trail
@@ -172,7 +172,7 @@ User: "ACC12345"
 Bot: "✓ Account: ACC12345. Confirm? YES/NO"
 User: "YES"
 Bot: "✅ Setup request sent! Shop ID: 1234"
-[Cogvana admin receives WhatsApp with all details + Shop ID]
+[Samuhia admin receives WhatsApp with all details + Shop ID]
 ```
 
 ### Charge Customer
@@ -195,7 +195,7 @@ Bot: "✅ STK Push Sent! Amount: 2000, Customer: 0712345678"
 
 - [x] Menu options visible (6 & 7)
 - [x] Setup Payment Account flow working
-- [x] WhatsApp to Cogvana implemented
+- [x] WhatsApp to Samuhia implemented
 - [x] Charge Customer flow working
 - [x] Transaction saved to Firestore
 - [x] Payment account refactored to field (not collection)
@@ -217,7 +217,7 @@ This adds:
 
 ### 2. Test Integration
 1. Create a shop
-2. Setup payment account (receive WhatsApp at Cogvana number)
+2. Setup payment account (receive WhatsApp at Samuhia number)
 3. Use your admin script to approve and add Paystack sub-account ID
 4. Charge a customer (with test Paystack credentials)
 5. Verify webhook updates transaction and sends confirmation
@@ -241,7 +241,7 @@ firebase deploy --only functions
 
 **New/Updated Files**:
 - `constants/menus.ts` - Menu definitions
-- `handlers/payment.setup.handler.ts` - Setup flow + Cogvana WhatsApp
+- `handlers/payment.setup.handler.ts` - Setup flow + Samuhia WhatsApp
 - `handlers/payment.charge.handler.ts` - STK push flow
 - `services/payment.setup.service.ts` - Request & account management
 - `services/payment.charge.service.ts` - STK push + webhook helpers

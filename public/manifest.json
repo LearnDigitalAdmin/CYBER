@@ -1,7 +1,7 @@
 {
-  "name": "Cogvana Cyber Platform",
-  "short_name": "Cyber",
-  "description": "Cogvana Cyber is a digital workspace for modern cybers and freelancers — enabling secure uploads, instant payments, and smart business tools. Seamlessly manage client uploads, handle rent payments via Plot Yangu, and grow your income with ease.",
+  "name": "Samuhia Desk Platform",
+  "short_name": "Desk",
+  "description": "Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
@@ -40,7 +40,7 @@
       "sizes": "540x720",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Mobile view of Cogvana Cyber dashboard"
+      "label": "Mobile view of Samuhia Desk dashboard"
     },
     {
       "src": "/screenshots/desktop-1.png",
@@ -71,7 +71,7 @@
       ]
     },
     {
-      "name": "Cyber Dashboard",
+      "name": "Desk Dashboard",
       "short_name": "Dashboard",
       "description": "Access your dashboard for uploads, analytics, and payments.",
       "url": "/dashboard",

@@ -43,7 +43,7 @@ After initial 400 Bad Request error, implementation was refactored to use the **
 ```typescript
 // CORRECT approach (working):
 {
-  email: "stk-push-{shopId}@cogvana.co.ke",
+  email: "stk-push-{shopId}@samuhia.co.ke",
   amount: amountInCents,
   currency: "KES",
   mobile_money: {
@@ -101,7 +101,7 @@ This approach:
 - `handlePaymentMethodSelection()` - Step 1: Choose method
 - `handleMpesaSetup()` / `handleAirtelSetup()` / `handleBankSetup()` - Step 2-3: Collect details
 - `handlePaymentSetupConfirm()` - Step 4: Prepare WhatsApp message
-- `sendWhatsAppSetupMessage()` - Step 5: Send WhatsApp to Cogvana (+254791286165)
+- `sendWhatsAppSetupMessage()` - Step 5: Send WhatsApp to Samuhia (+254791286165)
 - `handleWhatsAppSent()` - Step 6: Completion confirmation
 - Non-blocking WhatsApp error handling
 - Shop ID included in WhatsApp message for admin identification
@@ -173,12 +173,12 @@ User selects "6" in MY_SHOP_MENU
 4. Prepare WhatsApp Message
    Formatted message with all setup details + SHOP_ID
     ↓
-5. Send WhatsApp to Cogvana
+5. Send WhatsApp to Samuhia
    Destination: +254791286165
    Format: Structured JSON-like format for easy copy
     ↓
 6. Confirmation
-   "Setup request sent to Cogvana admin!"
+   "Setup request sent to Samuhia admin!"
    Request saved to: paymentSetupRequests/{requestId}
 ```
 
@@ -223,7 +223,7 @@ User selects "7" in MY_SHOP_MENU
 5. Call Paystack /charge Endpoint
    Payload:
    {
-     email: "stk-push-{shopId}@cogvana.co.ke",
+     email: "stk-push-{shopId}@samuhia.co.ke",
      amount: amountInCents,
      currency: "KES",
      mobile_money: {
@@ -266,7 +266,7 @@ shops/{shopId}/transactions/{txnId}: {
 
 ### Step 1: Shop Owner - Setup Payment Account (Option 6)
 - Chooses payment method and enters account details
-- System sends WhatsApp to Cogvana admin (+254791286165)
+- System sends WhatsApp to Samuhia admin (+254791286165)
 - Message includes **Shop ID** for easy identification
 
 ### Step 2: Admin - Create Paystack Split Code
@@ -371,7 +371,7 @@ The `findTransactionByReference()` function searches across all shops to find th
 
 - [ ] Shop owner can access MY_SHOP_MENU option 6 (Setup Payment Account)
 - [ ] Setup flow collects all required information
-- [ ] WhatsApp message sends to Cogvana admin (+254791286165)
+- [ ] WhatsApp message sends to Samuhia admin (+254791286165)
 - [ ] WhatsApp message includes Shop ID for easy identification
 - [ ] Admin can call `approvePaymentSetupRequest()` with split code
 - [ ] Split code saves to `shop.paymentAccount.paystackSplitCode`
@@ -418,7 +418,7 @@ The `findTransactionByReference()` function searches across all shops to find th
 
 2. **Test End-to-End** (Validation)
    - Shop owner: Option 6 → Setup payment account
-   - Verify WhatsApp message reaches Cogvana admin
+   - Verify WhatsApp message reaches Samuhia admin
    - Admin: Create split code, call `approvePaymentSetupRequest()`
    - Shop owner: Option 7 → Charge customer
    - Customer: Receive and complete STK push
@@ -442,7 +442,7 @@ The payment feature implementation is **complete, tested, and production-ready**
 ✅ Multi-step navigatable flows
 ✅ Proper state management and context preservation
 ✅ Paystack integration using proven mobile_money + split_code pattern
-✅ WhatsApp messaging to Cogvana for admin notifications
+✅ WhatsApp messaging to Samuhia for admin notifications
 ✅ Transaction tracking and webhook integration
 ✅ Bilingual support (English & Swahili)
 ✅ 0 TypeScript errors

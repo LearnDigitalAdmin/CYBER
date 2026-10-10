@@ -13,7 +13,7 @@ export default function SEO({
   title,
   description,
   keywords = '',
-  ogImage = 'https://cyber.cogvana.co.ke/og-image.jpg',
+  ogImage = 'https://cyber.samuhia.co.ke/og-image.jpg',
   ogType = 'website',
   canonicalUrl = window.location.href
 }: SEOProps) {
@@ -53,7 +53,7 @@ export default function SEO({
     if (keywords) setMetaTag('keywords', keywords);
     setMetaTag('robots', 'index, follow');
     setMetaTag('viewport', 'width=device-width, initial-scale=1.0');
-    setMetaTag('author', 'Cogvana Cyber');
+    setMetaTag('author', 'Samuhia Desk');
 
     // Open Graph tags
     setMetaTag('og:title', title, true);
@@ -61,7 +61,7 @@ export default function SEO({
     setMetaTag('og:type', ogType, true);
     setMetaTag('og:url', canonicalUrl, true);
     setMetaTag('og:image', ogImage, true);
-    setMetaTag('og:site_name', 'Cogvana Cyber', true);
+    setMetaTag('og:site_name', 'Samuhia Desk', true);
     setMetaTag('og:locale', 'en_KE', true);
 
     // Twitter Card tags
@@ -81,7 +81,7 @@ export default function SEO({
     setMetaTag('mobile-web-app-capable', 'yes');
     setMetaTag('apple-mobile-web-app-capable', 'yes');
     setMetaTag('apple-mobile-web-app-status-bar-style', 'black-translucent');
-    setMetaTag('apple-mobile-web-app-title', 'Cogvana Cyber');
+    setMetaTag('apple-mobile-web-app-title', 'Samuhia Desk');
 
     // Theme color
     setMetaTag('theme-color', '#06b6d4');

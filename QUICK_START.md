@@ -4,7 +4,7 @@
 
 ✅ **Options 6 & 7 now visible in My Shop Menu**
 ✅ **Setup Payment Account flow working**
-✅ **Cogvana WhatsApp notifications implemented**
+✅ **Samuhia WhatsApp notifications implemented**
 ✅ **Charge Customer STK push working**
 ✅ **Build: 0 errors**
 
@@ -15,7 +15,7 @@
 ### 1. Setup Payment Account (Option 6)
 - Opens navigatable context
 - Collects payment details (M-Pesa/Airtel/Bank)
-- Sends WhatsApp to Cogvana admin (+254791286165)
+- Sends WhatsApp to Samuhia admin (+254791286165)
 - Admin can approve and add Paystack sub-account ID
 
 ### 2. Charge Customer (Option 7)
@@ -66,7 +66,7 @@ Enter Details (Paybill/Till or Bank info)
 Confirm
 ↓
 ✅ Success Message with Shop ID
-→ Cogvana admin gets WhatsApp with details
+→ Samuhia admin gets WhatsApp with details
 ```
 
 ### Charge Flow
@@ -90,7 +90,7 @@ STK Push sent to customer
 - `constants/menus.ts` - Menu shows options 6 & 7
 
 **Backend changes**:
-- `handlers/payment.setup.handler.ts` - Now sends WhatsApp to Cogvana
+- `handlers/payment.setup.handler.ts` - Now sends WhatsApp to Samuhia
 - `handlers/payment.charge.handler.ts` - STK push flow
 - `services/payment.charge.service.ts` - New webhook helper function
 - `services/payment.setup.service.ts` - Request management
@@ -101,7 +101,7 @@ STK Push sent to customer
 ## Testing Checklist
 
 - [ ] View My Shop Menu - see options 6 & 7
-- [ ] Setup Payment Account - get WhatsApp at Cogvana (254791286165)
+- [ ] Setup Payment Account - get WhatsApp at Samuhia (254791286165)
 - [ ] Check Firestore - verify request saved in `paymentSetupRequests`
 - [ ] Approve setup - manually add Paystack sub-account ID to `shop.paymentAccount`
 - [ ] Charge customer - verify transaction saved to `shops/{shopId}/transactions`
@@ -117,7 +117,7 @@ STK Push sent to customer
 - Clear session with: `00`
 - Type: `4` (My Shop)
 
-**WhatsApp to Cogvana not received?**
+**WhatsApp to Samuhia not received?**
 - Check WhatsApp service is configured
 - Verify phone number: +254791286165
 - Check logs for errors

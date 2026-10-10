@@ -90,7 +90,7 @@ export interface CompanyInfo {
   website?: string;
 }
 
-export interface CogvanaMessage {
+export interface SamuhiaMessage {
   id: string;
   category: string;
   title: string;
@@ -111,7 +111,7 @@ const LAYOUT = {
   CARD_PADDING: 12,
   BORDER_RADIUS: 5,
   TOP_MARGIN: 40, // Reduced from excessive margin
-  COGVANA_SPACING: 35 // Proper spacing between Cogvana and invoice data
+  SAMUHIA_SPACING: 35 // Proper spacing between Samuhia and invoice data
 };
 
 const COLORS = {
@@ -160,9 +160,9 @@ function sanitizeTextForPDF(text: string): string {
     .trim();
 }
 
-// Enhanced Cogvana message with complete sanitization
-// function getRandomCogvanaMessage(): CogvanaMessage {
-//   const messages = cogvanaMessages.messages;
+// Enhanced Samuhia message with complete sanitization
+// function getRandomSamuhiaMessage(): SamuhiaMessage {
+//   const messages = samuhiaMessages.messages;
 //   const randomIndex = Math.floor(Math.random() * messages.length);
 //   const originalMessage = messages[randomIndex];
   
@@ -186,7 +186,7 @@ function sanitizeTextForPDF(text: string): string {
 //       parseInt(result[3], 16) / 255
 //     ];
 //   }
-//   return [0.31, 0.27, 0.9]; // Default Cogvana blue
+//   return [0.31, 0.27, 0.9]; // Default Samuhia blue
 // }
 
 // Fixed header with proper positioning
@@ -727,8 +727,8 @@ async function generateEnhancedInvoicePDF(
       name: sanitizeTextForPDF(companyInfo.name || 'Plot Yangu'),
       address: sanitizeTextForPDF(companyInfo.address || 'Narobi, Kenya'),
       phone: sanitizeTextForPDF(companyInfo.phone || '000000000000'),
-      email: sanitizeTextForPDF(companyInfo.email || 'sales@cogvana.co.ke'),
-      website: sanitizeTextForPDF(companyInfo.website || 'https://cogvana.co.ke/')
+      email: sanitizeTextForPDF(companyInfo.email || 'sales@samuhia.co.ke'),
+      website: sanitizeTextForPDF(companyInfo.website || 'https://samuhia.co.ke/')
     };
     
     // const sanitizedPayments = payments.map(payment => ({
@@ -1011,11 +1011,11 @@ async function drawEnhancedFooter(
     currentY -= 12;
   }
   
-  currentY -= LAYOUT.COGVANA_SPACING; // Proper spacing before Cogvana banner
+  currentY -= LAYOUT.SAMUHIA_SPACING; // Proper spacing before Samuhia banner
   
-  // Add Cogvana promotional section with space-aware positioning
-  //const cogvanaStartY = Math.max(currentY, 120); // Ensure Cogvana doesn't go too low
-  //currentY = await drawEnhancedCogvanaBanner(page, font, boldFont, cogvanaStartY, width, user ? user.tier : 'free');
+  // Add Samuhia promotional section with space-aware positioning
+  //const samuhiaStartY = Math.max(currentY, 120); // Ensure Samuhia doesn't go too low
+  //currentY = await drawEnhancedSamuhiaBanner(page, font, boldFont, samuhiaStartY, width, user ? user.tier : 'free');
   
   // Footer separator line - ensure it's visible
   const separatorY = Math.max(currentY - 5, 80);
@@ -1037,8 +1037,8 @@ async function drawEnhancedFooter(
   });
 }
 
-// Updated Cogvana banner with better space awareness
-// async function drawEnhancedCogvanaBanner(
+// Updated Samuhia banner with better space awareness
+// async function drawEnhancedSamuhiaBanner(
 //   page: any,
 //   font: any,
 //   boldFont: any,
@@ -1046,13 +1046,13 @@ async function drawEnhancedFooter(
 //   width: number,
 //   userTier: string
 // ): Promise<number> {
-//   // Hide Cogvana section for premium users
+//   // Hide Samuhia section for premium users
 //   if (userTier === 'business' || userTier === 'pro' || userTier === 'enterprise') {
 //     return yPosition;
 //   }
   
-//   const cogvanaMsg = getRandomCogvanaMessage();
-//   const [r, g, b] = hexToRgb(cogvanaMsg.color);
+//   const samuhiaMsg = getRandomSamuhiaMessage();
+//   const [r, g, b] = hexToRgb(samuhiaMsg.color);
 //   const bannerHeight = 60;
   
 //   // Ensure banner doesn't go below page minimum
@@ -1085,8 +1085,8 @@ async function drawEnhancedFooter(
 //     borderWidth: 2
 //   });
   
-//   // Cogvana branding section
-//   page.drawText('COGVANA', {
+//   // Samuhia branding section
+//   page.drawText('SAMUHIA', {
 //     x: LAYOUT.MARGIN + 15,
 //     y: adjustedY - 18,
 //     size: 14,
@@ -1112,10 +1112,10 @@ async function drawEnhancedFooter(
 //     'creators': '[CREATORS]',
 //     'students': '[STUDENTS]',
 //     'general': '[INFO]'
-//   }[cogvanaMsg.category] || '[COGVANA]';
+//   }[samuhiaMsg.category] || '[SAMUHIA]';
   
 //   // Title with text truncation
-//   let titleText = `${categoryPrefix} ${cogvanaMsg.title}`;
+//   let titleText = `${categoryPrefix} ${samuhiaMsg.title}`;
 //   const maxTitleChars = Math.floor(maxContentWidth / 5);
 //   if (titleText.length > maxTitleChars) {
 //     titleText = titleText.substring(0, maxTitleChars - 3) + '...';
@@ -1130,7 +1130,7 @@ async function drawEnhancedFooter(
 //   });
   
 //   // Message with safe wrapping
-//   const messageWords = cogvanaMsg.message.split(' ').filter(word => word.length > 0);
+//   const messageWords = samuhiaMsg.message.split(' ').filter(word => word.length > 0);
 //   let messageLine = '';
 //   let messageY = adjustedY - 32;
 //   const maxMessageChars = Math.floor(maxContentWidth / 4.5);
@@ -1166,7 +1166,7 @@ async function drawEnhancedFooter(
   
 //   // Call to action with safe positioning
 //   if (adjustedY - 50 > adjustedY - bannerHeight + 10) {
-//     const ctaText = cogvanaMsg.cta ? `>> ${cogvanaMsg.cta}` : '>> Learn More';
+//     const ctaText = samuhiaMsg.cta ? `>> ${samuhiaMsg.cta}` : '>> Learn More';
 //     const maxCtaChars = Math.floor((maxContentWidth - 100) / 5);
 //     const truncatedCta = ctaText.length > maxCtaChars 
 //       ? ctaText.substring(0, maxCtaChars - 3) + '...'
@@ -1181,9 +1181,9 @@ async function drawEnhancedFooter(
 //     });
     
 //     // Contact information aligned to right
-//     const contactText = cogvanaMsg.category === 'tutors' || cogvanaMsg.category === 'creators' 
-//       ? 'sales@cogvana.co.ke | cogvana.co.ke/cogni'
-//       : 'cogvana.co.ke | Download on Play Store';
+//     const contactText = samuhiaMsg.category === 'tutors' || samuhiaMsg.category === 'creators' 
+//       ? 'sales@samuhia.co.ke | samuhia.co.ke/cogni'
+//       : 'samuhia.co.ke | Download on Play Store';
     
 //     if (width - 220 > contentX + 150) { // Ensure no overlap
 //       page.drawText(contactText, {

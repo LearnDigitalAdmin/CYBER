@@ -64,7 +64,7 @@
 ### PDF Reports ✅
 - Professional 2-page layout
 - White-labeled headers
-- Cogvana watermarking
+- Samuhia watermarking
 - Summary & daily breakdown
 - Color-coded styling
 - Currency formatting (KES)

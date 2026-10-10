@@ -21,7 +21,7 @@ Switched to the **mobile_money endpoint with split codes** (matching your workin
 
 ```json
 {
-  "email": "stk-push-shopId@cogvana.co.ke",
+  "email": "stk-push-shopId@samuhia.co.ke",
   "amount": 100000,
   "currency": "KES",
   "mobile_money": {
@@ -57,7 +57,7 @@ paystackSplitCode: "SPL_xxxx"
 
 // NEW - Mobile Money endpoint (works!)
 {
-  email: 'stk-push-${shopId}@cogvana.co.ke',
+  email: 'stk-push-${shopId}@samuhia.co.ke',
   amount: amountInCents,
   currency: 'KES',
   mobile_money: {

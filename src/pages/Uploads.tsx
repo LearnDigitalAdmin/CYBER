@@ -62,8 +62,8 @@ const SERVICE_TYPES = [
   'Other'
 ];
 
-const CACHE_KEY = 'cogvana_cyber_details';
-const CACHE_PID_KEY = 'cogvana_cyber_pid';
+const CACHE_KEY = 'samuhia_desk_details';
+const CACHE_PID_KEY = 'samuhia_desk_pid';
 
 const UploadsPage = () => {
   const [step, setStep] = useState<'cyber-id' | 'details' | 'upload' | 'success'>('cyber-id');
@@ -140,7 +140,7 @@ const UploadsPage = () => {
       return;
     }
     if (!isOnline) {
-      toast.error('Please connect to the internet to search for cyber');
+      toast.error('Please connect to the internet to search for your desk');
       return;
     }
     setSearchingCyber(true);
@@ -158,7 +158,7 @@ const UploadsPage = () => {
       // const q = query(agentsRef, where('pId', '==', fullPId));
       // const snapshot = await getDocs(q);
       if (snapshot.empty) {
-        setCyberError(`No cyber found with ID: ${fullPId}`);
+        setCyberError(`No desk found with ID: ${fullPId}`);
         setSearchingCyber(false);
         return;
       }
@@ -441,13 +441,13 @@ const UploadsPage = () => {
                 <motion.div key="cyber-id" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8">
                   <div className="text-center space-y-4">
                     <motion.h1 className="text-4xl md:text-5xl font-bold" initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
-                      Welcome to <span className="text-cyan-400">Cogvana Cyber</span>
+                      Welcome to <span className="text-cyan-400">Samuhia Desk</span>
                     </motion.h1>
-                    <p className="text-gray-400 text-lg">Connect to your cyber to upload documents</p>
+                    <p className="text-gray-400 text-lg">Connect to your desk to upload documents</p>
                   </div>
                   <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl border border-gray-700 p-8 space-y-6">
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Enter Cyber ID</label>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">Enter Desk ID</label>
                       <div className="relative">
                         <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-mono">COG-</div>
                         <input type="text" value={cyberId} onChange={(e) => handleCyberIdChange(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && searchCyber()} placeholder="0000" maxLength={20} className="w-full pl-20 pr-4 py-4 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white font-mono text-lg" />
@@ -460,7 +460,7 @@ const UploadsPage = () => {
                       )}
                     </div>
                     <button onClick={searchCyber} disabled={cyberId.length < 4 || searchingCyber || !isOnline} className="w-full py-4 bg-cyan-500 text-black rounded-lg hover:bg-cyan-400 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed transition-all font-semibold text-lg shadow-lg shadow-cyan-500/30 flex items-center justify-center gap-2">
-                      {searchingCyber ? (<><Loader2 className="w-5 h-5 animate-spin" />Searching...</>) : (<>Connect to Cyber<ArrowRight className="w-5 h-5" /></>)}
+                      {searchingCyber ? (<><Loader2 className="w-5 h-5 animate-spin" />Searching...</>) : (<>Connect to Desk<ArrowRight className="w-5 h-5" /></>)}
                     </button>
                   </div>
                 </motion.div>
@@ -657,7 +657,7 @@ const UploadsPage = () => {
                       <div className="flex justify-between"><span className="text-gray-400">Phone:</span><span className="text-white font-medium">{customerPhone}</span></div>
                       <div className="flex justify-between"><span className="text-gray-400">Service:</span><span className="text-white font-medium">{serviceType}</span></div>
                       <div className="flex justify-between"><span className="text-gray-400">Files:</span><span className="text-white font-medium">{files.length} file(s)</span></div>
-                      <div className="flex justify-between pt-3 border-t border-gray-700"><span className="text-gray-400">Cyber:</span><span className="text-white font-medium">{cyberDetails?.shopName || cyberDetails?.name}</span></div>
+                      <div className="flex justify-between pt-3 border-t border-gray-700"><span className="text-gray-400">Desk:</span><span className="text-white font-medium">{cyberDetails?.shopName || cyberDetails?.name}</span></div>
                     </div>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -683,10 +683,10 @@ const UploadsPage = () => {
 
         {/* Footer */}
         <footer className="relative z-10 text-center text-sm text-gray-500 px-4 py-6">
-          <p className="mb-1">© {new Date().getFullYear()} Cogvana Cyber. All rights reserved.</p>
+          <p className="mb-1">© {new Date().getFullYear()} Samuhia Desk. All rights reserved.</p>
           <div className="space-x-4">
-            <a href="https://payments.cogvana.co.ke/contact" className="hover:text-cyan-400 transition-colors">Contact Us</a>
-            <a href="https://cogvana.co.ke/terms" className="hover:text-cyan-400 transition-colors">Terms of Use</a>
+            <a href="https://payments.samuhia.co.ke/contact" className="hover:text-cyan-400 transition-colors">Contact Us</a>
+            <a href="https://samuhia.co.ke/terms" className="hover:text-cyan-400 transition-colors">Terms of Use</a>
           </div>
         </footer>
       </div>

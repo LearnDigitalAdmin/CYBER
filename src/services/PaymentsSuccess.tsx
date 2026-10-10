@@ -261,8 +261,8 @@ export class PaymentSuccessHandler {
         name: agentData.company?.name || 'Plot Yangu',
         address: agentData.company?.address || agentData.address || 'Nairobi, Kenya',
         phone: agentData.company?.phone || agentData.phone || '0791286165',
-        email: agentData.company?.email || agentData.email || 'info@cogvana.co.ke',
-        website: agentData.company?.website || 'https://cogvana.co.ke'
+        email: agentData.company?.email || agentData.email || 'info@samuhia.co.ke',
+        website: agentData.company?.website || 'https://samuhia.co.ke'
       };
     } catch (error: any) {
       console.error('Error fetching agent info:', error);
@@ -271,8 +271,8 @@ export class PaymentSuccessHandler {
         name: 'Plot Yangu',
         address: 'Nairobi, Kenya',
         phone: '0791286165',
-        email: 'info@cogvana.co.ke',
-        website: 'https://cogvana.co.ke'
+        email: 'info@samuhia.co.ke',
+        website: 'https://samuhia.co.ke'
       };
     }
   }

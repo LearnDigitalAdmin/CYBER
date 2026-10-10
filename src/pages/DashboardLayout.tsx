@@ -14,9 +14,9 @@ import {
   Briefcase,
   FileText,
   Settings,
-  Film,
   ImagePlay,
-  FileArchive} from 'lucide-react';
+  FileArchive,
+  Headset} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -29,9 +29,7 @@ import { Paystack } from '../services/paystackService';
 import { Screening } from '../services/Screening';
 import TerminalModal from '../components/global/Terminal';
 import IncomeTab from '../components/income/IncomeTab';
-import ShopTab from '../components/shop/ShopTab';
 import { useNavigate } from 'react-router-dom';
-import MoviesTab from '../components/movies/MoviesTab';
 import { PassportPhotoModal } from '../components/PassportPhotoModal';
 import { downloadFile } from '../services/firebaseStorage';
 import ImageToPdfModal from '../components/ImageToPdfModal';
@@ -276,9 +274,7 @@ const Dashboard = () => {
 
   const tabs = [
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-4 h-4" /> },
-    { id: 'shops', label: 'Shops', icon: <Briefcase className="w-4 h-4" /> },
-    { id: 'cyber', label: 'Cyber Services', icon: <Printer className="w-4 h-4" /> },
-    { id: 'movies', label: 'Movies', icon: <Film className="w-4 h-4" /> }, // ADD THIS LINE
+    { id: 'cyber', label: 'Desk Services', icon: <Printer className="w-4 h-4" /> },
     { id: 'income', label: 'Income', icon: <BarChart3 className="w-4 h-4" /> }
   ];
 
@@ -289,13 +285,21 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div onClick={() => navigate('/')} className="flex-shrink-0">
               <h1 className="text-lg sm:text-xl font-bold text-white">
-                Cogvana <span className="text-cyan-400">Cyber</span>
+                Samuhia <span className="text-cyan-400">Desk</span>
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">Dashboard Overview</p>
             </div>
 
             {/* Center Navigation Icons */}
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => navigate('/desk')}
+                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
+                title="Desk"
+                aria-label="Open Samuhia Desk"
+              >
+                <Headset className="w-5 h-5" />
+              </button>
               <button
                 onClick={() => navigate('/services')}
                 className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
@@ -340,11 +344,11 @@ const Dashboard = () => {
                   {firestoreUser?.pId || 'COG-0000-12345'}
                 </div>
                 <div className="text-xs text-gray-400 hidden sm:block">
-                  {firestoreUser?.name || 'Cyber Operator'}
+                  {firestoreUser?.name || 'Desk Agent'}
                 </div>
               </div>
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-cyan-500 to-violet-500 rounded-full flex items-center justify-center text-white text-xs sm:text-sm font-semibold shadow-lg shadow-cyan-500/30">
-                {getInitials(firestoreUser?.name || 'Cyber Operator')}
+                {getInitials(firestoreUser?.name || 'Desk Agent')}
               </div>
             </div>
           </div>
@@ -355,7 +359,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div onClick={() => navigate('/services')} className="flex-shrink-0">
               <h1 className="text-lg sm:text-xl font-bold text-white">
-                Cogvana <span className="text-cyan-400">Cyber</span>
+                Samuhia <span className="text-cyan-400">Desk</span>
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">Dashboard Overview</p>
             </div>
@@ -365,11 +369,11 @@ const Dashboard = () => {
                   {firestoreUser?.pId || 'COG-0000-12345'}
                 </div>
                 <div className="text-xs text-gray-400 hidden sm:block">
-                  {firestoreUser?.name || 'Cyber Operator'}
+                  {firestoreUser?.name || 'Desk Agent'}
                 </div>
               </div>
               <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-cyan-500 to-violet-500 rounded-full flex items-center justify-center text-white text-xs sm:text-sm font-semibold shadow-lg shadow-cyan-500/30 flex-shrink-0">
-                {getInitials(firestoreUser?.name || 'Cyber Operator')}
+                {getInitials(firestoreUser?.name || 'Desk Agent')}
               </div>
             </div>
           </div>
@@ -419,9 +423,7 @@ const Dashboard = () => {
 
       <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-[120px] sm:pt-[128px] pb-24 sm:pb-8">
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
-        {activeTab === 'shops' && <ShopTab />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
-        {activeTab === 'movies' && <MoviesTab />}
         {activeTab === 'income' && <IncomeTab />}
       </main>
 

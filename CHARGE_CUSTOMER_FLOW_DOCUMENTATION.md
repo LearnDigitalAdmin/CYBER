@@ -153,7 +153,7 @@ You can:
 2. Get payment account with Paystack subaccount ID
 3. Get or create split code (1.5% platform commission)
 4. Send STK push via Paystack /charge endpoint with:
-   - email: stk-push-{shopId}@cogvana.co.ke
+   - email: stk-push-{shopId}@samuhia.co.ke
    - amount: in cents
    - mobile_money: { phone, provider: 'mpesa'|'airtel' }
    - split_code: routes to shop's subaccount
@@ -557,7 +557,7 @@ shops/{shopId}/transactions/{reference}
 ### Paystack STK Push Payload
 ```json
 {
-  "email": "stk-push-{shopId}@cogvana.co.ke",
+  "email": "stk-push-{shopId}@samuhia.co.ke",
   "amount": 50000,
   "currency": "KES",
   "mobile_money": {

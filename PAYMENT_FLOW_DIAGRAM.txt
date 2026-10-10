@@ -25,7 +25,7 @@ User (WhatsApp)              Bot                              Firestore
    │─ "YES" ────────────────→ │                                   │
    │                          │ 1. Save request ───────────────→ │
    │                          │    paymentSetupRequests         │
-   │                          │ 2. Send WhatsApp to Cogvana    │
+   │                          │ 2. Send WhatsApp to Samuhia    │
    │                          │    +254791286165              │
    │                          │ 3. Clear context               │
    │←─ ✅ Success ──────────│ 4. Return to MY_SHOP_MENU     │
@@ -70,7 +70,7 @@ IMPLEMENTATION STATUS
 ✅ COMPLETED & WORKING:
    1. Menu options 6 & 7 visible
    2. Setup Payment Account flow (multi-step context)
-   3. WhatsApp to Cogvana admin
+   3. WhatsApp to Samuhia admin
    4. Charge Customer flow (3 steps)
    5. STK push via Paystack
    6. Transaction saved to Firestore

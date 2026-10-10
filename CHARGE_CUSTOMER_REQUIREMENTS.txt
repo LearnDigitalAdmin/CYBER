@@ -54,7 +54,7 @@ Step 1: Shop Owner Does Option 6 (Setup Payment Account)
 Step 2: Admin Reviews Request
    ├─ Checks paymentSetupRequests/{requestId}
    ├─ Sees Shop ID, shop details, payment method, account info
-   └─ Sends WhatsApp to +254791286165 (Cogvana) with details
+   └─ Sends WhatsApp to +254791286165 (Samuhia) with details
 
 Step 3: Admin Creates Paystack Sub-Account
    ├─ Logs into Paystack Dashboard
@@ -164,7 +164,7 @@ Example Paystack call:
   "ussd": { "type": "pt" },           ← Safaricom
   "amount": 200000,                   ← Cents
   "phone": "254712345678",            ← Customer
-  "email": "stk-push-1234@cogvana.co.ke",
+  "email": "stk-push-1234@samuhia.co.ke",
   "subaccount": "ACT_xxxx",           ← FROM shop.paymentAccount!
   "metadata": {...}
 }

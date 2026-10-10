@@ -1,0 +1,2639 @@
+From 356c82df15f02dc06200de8bd743c50719ba4e34 Mon Sep 17 00:00:00 2001
+From: desk-w1c <w1c@local>
+Date: Sat, 10 Oct 2026 15:56:01 +0000
+Subject: [PATCH 2/2] feat(desk): W1-C access, payout accounts and execution
+ backend
+
+desk_applyAgent, desk_resolveEntity, desk_requestAccess/verifyAccess/endSession,
+desk_requestActionOtp/verifyActionOtp, desk_validateImport, desk_initiateRentStk,
+desk_syncPayoutAccounts (+ writeDeskOwner), desk_logSupport/confirmSupport,
+desk_onTicketPaid. Pure helpers unit-tested; emulator suites cover every callable and trigger.
+---
+ functions-desk/src/agents/agents.emu.test.ts  |  59 +++++
+ functions-desk/src/agents/apply.ts            |  71 ++++++
+ functions-desk/src/agents/index.ts            |   8 +
+ functions-desk/src/agents/pure.test.ts        |  45 ++++
+ functions-desk/src/agents/pure.ts             |  36 +++
+ functions-desk/src/connectors/common.ts       |  28 +++
+ .../src/connectors/connectors.emu.test.ts     | 211 ++++++++++++++++++
+ functions-desk/src/connectors/deps.ts         |  84 +++++++
+ functions-desk/src/connectors/deskOwner.ts    |  51 +++++
+ functions-desk/src/connectors/entities.ts     |  62 +++++
+ functions-desk/src/connectors/harness.test.ts | 109 +++++++++
+ functions-desk/src/connectors/index.ts        |  40 ++++
+ functions-desk/src/connectors/input.ts        |  24 ++
+ functions-desk/src/connectors/payout.ts       | 127 +++++++++++
+ functions-desk/src/connectors/pure.test.ts    |  62 +++++
+ functions-desk/src/connectors/resolve.ts      |  53 +++++
+ functions-desk/src/connectors/tickets.ts      | 145 ++++++++++++
+ functions-desk/src/otp/core.ts                | 109 +++++++++
+ functions-desk/src/otp/handlers.ts            | 119 ++++++++++
+ functions-desk/src/otp/index.ts               |  15 ++
+ functions-desk/src/otp/messages.ts            |  62 +++++
+ functions-desk/src/otp/otp.emu.test.ts        |  77 +++++++
+ functions-desk/src/otp/otp.test.ts            |  67 ++++++
+ functions-desk/src/sessions/access.ts         | 171 ++++++++++++++
+ functions-desk/src/sessions/index.ts          |  25 +++
+ functions-desk/src/sessions/pure.test.ts      |  19 ++
+ functions-desk/src/sessions/pure.ts           |  35 +++
+ functions-desk/src/sessions/rent.emu.test.ts  |  63 ++++++
+ functions-desk/src/sessions/rent.ts           |  53 +++++
+ .../src/sessions/sessions.emu.test.ts         | 151 +++++++++++++
+ functions-desk/src/support/handlers.ts        |  95 ++++++++
+ functions-desk/src/support/index.ts           |  14 ++
+ .../src/support/support.emu.test.ts           |  69 ++++++
+ 33 files changed, 2359 insertions(+)
+ create mode 100644 functions-desk/src/agents/agents.emu.test.ts
+ create mode 100644 functions-desk/src/agents/apply.ts
+ create mode 100644 functions-desk/src/agents/index.ts
+ create mode 100644 functions-desk/src/agents/pure.test.ts
+ create mode 100644 functions-desk/src/agents/pure.ts
+ create mode 100644 functions-desk/src/connectors/common.ts
+ create mode 100644 functions-desk/src/connectors/connectors.emu.test.ts
+ create mode 100644 functions-desk/src/connectors/deps.ts
+ create mode 100644 functions-desk/src/connectors/deskOwner.ts
+ create mode 100644 functions-desk/src/connectors/entities.ts
+ create mode 100644 functions-desk/src/connectors/harness.test.ts
+ create mode 100644 functions-desk/src/connectors/index.ts
+ create mode 100644 functions-desk/src/connectors/input.ts
+ create mode 100644 functions-desk/src/connectors/payout.ts
+ create mode 100644 functions-desk/src/connectors/pure.test.ts
+ create mode 100644 functions-desk/src/connectors/resolve.ts
+ create mode 100644 functions-desk/src/connectors/tickets.ts
+ create mode 100644 functions-desk/src/otp/core.ts
+ create mode 100644 functions-desk/src/otp/handlers.ts
+ create mode 100644 functions-desk/src/otp/index.ts
+ create mode 100644 functions-desk/src/otp/messages.ts
+ create mode 100644 functions-desk/src/otp/otp.emu.test.ts
+ create mode 100644 functions-desk/src/otp/otp.test.ts
+ create mode 100644 functions-desk/src/sessions/access.ts
+ create mode 100644 functions-desk/src/sessions/index.ts
+ create mode 100644 functions-desk/src/sessions/pure.test.ts
+ create mode 100644 functions-desk/src/sessions/pure.ts
+ create mode 100644 functions-desk/src/sessions/rent.emu.test.ts
+ create mode 100644 functions-desk/src/sessions/rent.ts
+ create mode 100644 functions-desk/src/sessions/sessions.emu.test.ts
+ create mode 100644 functions-desk/src/support/handlers.ts
+ create mode 100644 functions-desk/src/support/index.ts
+ create mode 100644 functions-desk/src/support/support.emu.test.ts
+
+diff --git a/functions-desk/src/agents/agents.emu.test.ts b/functions-desk/src/agents/agents.emu.test.ts
+new file mode 100644
+index 0000000..0ee164e
+--- /dev/null
++++ b/functions-desk/src/agents/agents.emu.test.ts
+@@ -0,0 +1,59 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { col } from "../db.js";
++import { applyAgent } from "./apply.js";
++import { rejects } from "../connectors/harness.test.js";
++import type { AgentDoc } from "../types.js";
++
++const opts = { skip: !emulatorEnabled };
++const form = (o = {}) => ({ name: "Jane Wanjiru", phone: "0712345678", idNumber: "12345678", wardId: "w1", ...o });
++beforeEach(async () => { if (emulatorEnabled) await clearFirestore(); });
++
++test("apply creates an applied clerk with COG-0001, masked ID and an audit row", opts, async () => {
++  const out = await applyAgent("u1", "jane@x.co", form(), 1000);
++  assert.deepEqual(out, { agentId: "u1", status: "applied" });
++  const a = (await col("agents").doc("u1").get()).data() as AgentDoc;
++  assert.equal(a.agentCode, "COG-0001"); assert.equal(a.rank, "clerk"); assert.equal(a.status, "applied");
++  assert.equal(a.idNumberMasked, "****5678"); assert.equal(a.termsAcceptedAt, 1000); assert.equal(a.email, "jane@x.co");
++  assert.equal(a.phone, "+254712345678"); assert.match(a.idHash, /^[0-9a-f]{64}$/); assert.ok(!JSON.stringify(a).includes("12345678"));
++  const audits = await col("audit").where("action", "==", "agent_applied").get();
++  assert.equal(audits.size, 1);
++});
++test("apply is idempotent: no second doc, no second code, no changes", opts, async () => {
++  await applyAgent("u1", "jane@x.co", form(), 1000);
++  const again = await applyAgent("u1", "jane@x.co", form({ name: "Someone Else" }), 2000);
++  assert.deepEqual(again, { agentId: "u1", status: "applied" });
++  const a = (await col("agents").doc("u1").get()).data() as AgentDoc;
++  assert.equal(a.name, "Jane Wanjiru");
++  assert.equal((await col("counters").doc("agents").get()).data()?.value, 1);
++  assert.equal((await col("audit").where("action", "==", "agent_applied").get()).size, 1);
++});
++test("codes are sequential and COG-0000 is never issued", opts, async () => {
++  await applyAgent("u1", "a@x.co", form(), 1);
++  await applyAgent("u2", "b@x.co", form({ idNumber: "87654321" }), 2);
++  assert.equal(((await col("agents").doc("u2").get()).data() as AgentDoc).agentCode, "COG-0002");
++  const all = await col("agents").get();
++  assert.ok(all.docs.every((d) => d.data().agentCode !== "COG-0000"));
++});
++test("concurrent applications get distinct codes", opts, async () => {
++  await Promise.all(Array.from({ length: 6 }, (_, i) => applyAgent(`c${i}`, `c${i}@x.co`, form({ idNumber: `1000000${i}` }), 1)));
++  const codes = (await col("agents").get()).docs.map((d) => d.data().agentCode);
++  assert.equal(new Set(codes).size, 6);
++});
++test("a second agent with the same ID number is refused", opts, async () => {
++  await applyAgent("u1", "a@x.co", form(), 1);
++  await rejects(applyAgent("u2", "b@x.co", form(), 2), "already_exists");
++  assert.ok(!(await col("agents").doc("u2").get()).exists);
++});
++test("same ID applied by two accounts at once creates exactly one agent", opts, async () => {
++  const r = await Promise.allSettled([applyAgent("p1", "a@x.co", form(), 1), applyAgent("p2", "b@x.co", form(), 1)]);
++  assert.equal(r.filter((x) => x.status === "fulfilled").length, 1);
++  assert.equal((await col("agents").get()).size, 1);
++});
++test("email is required and validation errors create nothing", opts, async () => {
++  await rejects(applyAgent("u1", undefined, form(), 1), "invalid_argument", /email/i);
++  await rejects(applyAgent("u1", "a@x.co", form({ idNumber: "123" }), 1), "invalid_argument");
++  await rejects(applyAgent("u1", "a@x.co", form({ phone: "12" }), 1), "invalid_argument");
++  assert.equal((await col("agents").get()).size, 0);
++});
+diff --git a/functions-desk/src/agents/apply.ts b/functions-desk/src/agents/apply.ts
+new file mode 100644
+index 0000000..63bf402
+--- /dev/null
++++ b/functions-desk/src/agents/apply.ts
+@@ -0,0 +1,71 @@
++import { randomBytes } from "node:crypto";
++import type { ApplyAgentOut } from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import type { AgentDoc } from "../types.js";
++import { formatAgentCode, hashIdNumber, maskIdNumber, nextCounterValue, validateApplication } from "./pure.js";
++
++let saltCache: string | undefined;
++
++/**
++ * Per-project salt for ID-number hashes. Created once (create-only, so concurrent first calls agree) in the
++ * server-only `desk_counters` collection: no new secret is needed.
++ */
++export async function getIdSalt(): Promise<string> {
++  if (saltCache) return saltCache;
++  const ref = col("counters").doc("idsalt");
++  try {
++    await ref.create({ salt: randomBytes(32).toString("hex"), createdAt: Date.now() });
++  } catch (err) {
++    if ((err as { code?: number }).code !== 6) throw err; // 6 = ALREADY_EXISTS
++  }
++  const salt = (await ref.get()).data()?.salt as string | undefined;
++  if (!salt) throw new DeskError("internal", "Could not read the application salt");
++  saltCache = salt;
++  return salt;
++}
++
++const EMAIL = /^\S+@\S+\.\S+$/;
++
++/**
++ * Creates `desk_agents/{uid}` only if absent. The desk code comes from a transactional counter, and the salted ID hash is
++ * locked in a create-only doc inside the same transaction so two accounts can never share one ID number.
++ */
++export async function applyAgent(uid: string, email: string | undefined, raw: unknown, now: number): Promise<ApplyAgentOut> {
++  const app = validateApplication(raw);
++  if (!email || !EMAIL.test(email)) throw new DeskError("invalid_argument", "Your account needs an email address before you can apply");
++  const idHash = hashIdNumber(app.idNumber, await getIdSalt());
++
++  const agentRef = col("agents").doc(uid);
++  const counterRef = col("counters").doc("agents");
++  const lockRef = col("counters").doc(`idhash_${idHash}`);
++
++  const result = await db().runTransaction(async (tx) => {
++    const existing = await tx.get(agentRef);
++    if (existing.exists) return { kind: "existing" as const, status: (existing.data() as AgentDoc).status };
++    const lock = await tx.get(lockRef);
++    if (lock.exists) return { kind: "duplicate" as const };
++    const counter = await tx.get(counterRef);
++    const n = nextCounterValue(counter.data()?.value);
++    const agentCode = formatAgentCode(n);
++    const doc: AgentDoc = {
++      agentId: uid, agentCode, name: app.name, phone: app.phone, email: email.trim(), idHash,
++      idNumberMasked: maskIdNumber(app.idNumber), status: "applied", rank: "clerk", wardId: app.wardId,
++      termsAcceptedAt: now, createdAt: now,
++    };
++    tx.set(counterRef, { value: n, updatedAt: now });
++    tx.create(lockRef, { agentId: uid, createdAt: now });
++    tx.create(agentRef, doc);
++    return { kind: "created" as const, agentCode };
++  });
++
++  if (result.kind === "duplicate") {
++    throw new DeskError("already_exists", "An application with this ID number already exists. Contact Samuhia support if this is a mistake.");
++  }
++  if (result.kind === "created") {
++    await audit({ action: "agent_applied", agentId: uid, meta: { agentCode: result.agentCode, wardId: app.wardId } });
++    return { agentId: uid, status: "applied" };
++  }
++  return { agentId: uid, status: result.status };
++}
+diff --git a/functions-desk/src/agents/index.ts b/functions-desk/src/agents/index.ts
+new file mode 100644
+index 0000000..a76eedb
+--- /dev/null
++++ b/functions-desk/src/agents/index.ts
+@@ -0,0 +1,8 @@
++import type { ApplyAgentIn, ApplyAgentOut } from "../contract.js";
++import { deskCallable } from "../connectors/common.js";
++import { applyAgent } from "./apply.js";
++
++export const desk_applyAgent = deskCallable<ApplyAgentIn, ApplyAgentOut>(
++  {},
++  (uid, data, token) => applyAgent(uid, token.email, data, Date.now()),
++);
+diff --git a/functions-desk/src/agents/pure.test.ts b/functions-desk/src/agents/pure.test.ts
+new file mode 100644
+index 0000000..a1fb5ed
+--- /dev/null
++++ b/functions-desk/src/agents/pure.test.ts
+@@ -0,0 +1,45 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { formatAgentCode, hashIdNumber, maskIdNumber, nextCounterValue, validateApplication } from "./pure.js";
++
++const ok = { name: "Jane Wanjiru", phone: "0712345678", idNumber: "12345678", wardId: "ward-1" };
++const bad = (o: Record<string, unknown>) => () => validateApplication({ ...ok, ...o });
++
++test("valid application is normalised", () => {
++  const a = validateApplication({ ...ok, name: "  Jane Wanjiru ", idNumber: "1234 5678" });
++  assert.equal(a.name, "Jane Wanjiru");
++  assert.equal(a.phone, "+254712345678");
++  assert.equal(a.idNumber, "12345678");
++});
++test("name 2–80", () => { assert.throws(bad({ name: "J" })); assert.throws(bad({ name: "x".repeat(81) })); assert.doesNotThrow(bad({ name: "Jo" })); });
++test("ID number 6–12 digits only", () => {
++  assert.throws(bad({ idNumber: "12345" })); assert.throws(bad({ idNumber: "1".repeat(13) })); assert.throws(bad({ idNumber: "12345A78" }));
++  assert.doesNotThrow(bad({ idNumber: "123456" })); assert.doesNotThrow(bad({ idNumber: "1".repeat(12) }));
++});
++test("ward 1–40", () => { assert.throws(bad({ wardId: "" })); assert.throws(bad({ wardId: "w".repeat(41) })); });
++test("phone must be Kenyan", () => assert.throws(bad({ phone: "123" })));
++test("non-object input is refused", () => assert.throws(() => validateApplication(null)));
++
++test("agent code pads to 4 digits and never issues COG-0000", () => {
++  assert.equal(formatAgentCode(1), "COG-0001");
++  assert.equal(formatAgentCode(42), "COG-0042");
++  assert.equal(formatAgentCode(12345), "COG-12345");
++  assert.throws(() => formatAgentCode(0));
++  assert.throws(() => formatAgentCode(-3));
++  assert.throws(() => formatAgentCode(1.5));
++});
++test("counter starts at 1 and ignores damaged values", () => {
++  assert.equal(nextCounterValue(undefined), 1);
++  assert.equal(nextCounterValue(0), 1);
++  assert.equal(nextCounterValue(7), 8);
++  assert.equal(nextCounterValue(-5), 1);
++  assert.equal(nextCounterValue("9"), 1);
++});
++test("id hash is salted, stable and not the number", () => {
++  const h = hashIdNumber("12345678", "salt-a");
++  assert.equal(h, hashIdNumber("12345678", "salt-a"));
++  assert.notEqual(h, hashIdNumber("12345678", "salt-b"));
++  assert.match(h, /^[0-9a-f]{64}$/);
++  assert.ok(!h.includes("12345678"));
++});
++test("mask keeps last 4", () => assert.equal(maskIdNumber("12345678"), "****5678"));
+diff --git a/functions-desk/src/agents/pure.ts b/functions-desk/src/agents/pure.ts
+new file mode 100644
+index 0000000..a253892
+--- /dev/null
++++ b/functions-desk/src/agents/pure.ts
+@@ -0,0 +1,36 @@
++import { createHash } from "node:crypto";
++import { DESK_CODE_PREFIX } from "../contract.js";
++import { DeskError } from "../errors.js";
++import { normalizeKenyaPhone } from "../paystack/phone.js";
++import { record, text } from "../connectors/input.js";
++
++export interface ApplicationFields { name: string; phone: string; idNumber: string; wardId: string }
++
++/** Validates and normalises an application. Phone becomes +254…; ID number is digits only. Pure. */
++export function validateApplication(raw: unknown): ApplicationFields {
++  const d = record(raw);
++  const name = text(d.name, "Name", 2, 80);
++  const wardId = text(d.wardId, "Ward", 1, 40);
++  const phone = normalizeKenyaPhone(typeof d.phone === "string" ? d.phone : "");
++  const idNumber = typeof d.idNumber === "string" ? d.idNumber.replace(/\s+/g, "") : "";
++  if (!/^\d{6,12}$/.test(idNumber)) throw new DeskError("invalid_argument", "ID number must be 6–12 digits");
++  return { name, phone, idNumber, wardId };
++}
++
++/** COG-0001, COG-0002 … at least 4 digits. COG-0000 is the company's top desk and is never issued. */
++export function formatAgentCode(n: number): string {
++  if (!Number.isSafeInteger(n) || n < 1) throw new DeskError("internal", "Invalid desk number");
++  return `${DESK_CODE_PREFIX}${String(n).padStart(4, "0")}`;
++}
++
++/** Next number from the stored counter: the counter holds the LAST issued number, so a fresh or damaged one yields 1. */
++export function nextCounterValue(stored: unknown): number {
++  const n = typeof stored === "number" && Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
++  return n + 1;
++}
++
++/** Salted SHA-256 of the ID number. Never store the number itself. */
++export const hashIdNumber = (idNumber: string, salt: string): string =>
++  createHash("sha256").update(`${salt}:${idNumber}`).digest("hex");
++
++export const maskIdNumber = (idNumber: string): string => `****${idNumber.slice(-4)}`;
+diff --git a/functions-desk/src/connectors/common.ts b/functions-desk/src/connectors/common.ts
+new file mode 100644
+index 0000000..def6392
+--- /dev/null
++++ b/functions-desk/src/connectors/common.ts
+@@ -0,0 +1,28 @@
++import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
++import { defineSecret } from "firebase-functions/params";
++type SecretParam = ReturnType<typeof defineSecret>;
++import { DeskError, httpsCodeFor } from "../errors.js";
++
++export interface CallableOptions { secrets?: SecretParam[]; timeoutSeconds?: number }
++type AuthToken = NonNullable<CallableRequest["auth"]>["token"];
++
++/**
++ * Wraps a handler as a callable: requires sign-in, maps DeskError to the right HttpsError and never leaks internals.
++ * Handlers get the caller's uid and Auth token; privileges are enforced inside them (requireActiveAgent / requireSession).
++ */
++export function deskCallable<I, O>(
++  opts: CallableOptions,
++  handler: (uid: string, data: I, token: AuthToken) => Promise<O>,
++) {
++  return onCall({ secrets: opts.secrets ?? [], timeoutSeconds: opts.timeoutSeconds ?? 60 }, async (req: CallableRequest<I>) => {
++    if (!req.auth) throw new HttpsError("unauthenticated", "Please sign in");
++    try {
++      return await handler(req.auth.uid, req.data, req.auth.token);
++    } catch (err) {
++      if (err instanceof HttpsError) throw err;
++      if (err instanceof DeskError) throw new HttpsError(httpsCodeFor(err.code), err.message);
++      console.error("desk callable failed", err);
++      throw new HttpsError("internal", "Something went wrong. Please try again.");
++    }
++  });
++}
+diff --git a/functions-desk/src/connectors/connectors.emu.test.ts b/functions-desk/src/connectors/connectors.emu.test.ts
+new file mode 100644
+index 0000000..36c197d
+--- /dev/null
++++ b/functions-desk/src/connectors/connectors.emu.test.ts
+@@ -0,0 +1,211 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { DEFAULT_DESK_CONFIG } from "../config.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { resolveEntity, validateImport } from "./resolve.js";
++import { syncPayoutAccounts } from "./payout.js";
++import { executePaidTicket, MAX_EXECUTION_ATTEMPTS } from "./tickets.js";
++import { writeDeskOwner } from "./deskOwner.js";
++import { ADMIN_PHONE, clearChama, entityInfo, harness, openSession, rejects, seedAgent, type Harness } from "./harness.test.js";
++import type { AgentDoc, TicketDoc } from "../types.js";
++
++const opts = { skip: !emulatorEnabled };
++const KEY = "chama:SMC-0001";
++let h: Harness;
++beforeEach(async () => { if (!emulatorEnabled) return; await clearFirestore(); await clearChama(); h = harness(); await seedAgent("1"); });
++
++// ---------------------------------------------------------------- resolve
++test("resolve returns name, masked phone and grant; never the full phone", opts, async () => {
++  const out = await resolveEntity(h.deps, "1", { code: "smc-0001" });
++  assert.equal(out.entityKey, KEY); assert.equal(out.product, "chama"); assert.equal(out.displayName, "Umoja Chama"); assert.equal(out.agentHasGrant, true);
++  assert.ok(!JSON.stringify(out).includes(ADMIN_PHONE.slice(1)));
++  assert.equal(h.calls[0].req.action, "entity_info"); assert.equal(h.calls[0].req.agentCode, "COG-0001");
++  assert.equal((await col("audit").where("action", "==", "entity_resolved").get()).size, 1);
++});
++test("resolve maps school and pms codes and reports a missing grant", opts, async () => {
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  assert.equal((await resolveEntity(h.deps, "1", { code: "01234567" })).product, "school");
++  const pms = await resolveEntity(h.deps, "1", { code: "PYL-0009" });
++  assert.equal(pms.product, "pms"); assert.equal(pms.agentHasGrant, false);
++});
++test("COG-0000 is authorised on every entity", opts, async () => {
++  await seedAgent("0", { agentCode: "COG-0000" });
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  assert.equal((await resolveEntity(h.deps, "0", { code: KEY.split(":")[1] })).agentHasGrant, true);
++});
++test("resolve rejects other shapes, inactive agents and surfaces product refusals", opts, async () => {
++  await rejects(resolveEntity(h.deps, "1", { code: "HELLO" }), "invalid_argument");
++  await rejects(resolveEntity(h.deps, "1", {}), "invalid_argument");
++  await col("agents").doc("1").update({ status: "suspended" });
++  await rejects(resolveEntity(h.deps, "1", { code: "SMC-0001" }), "permission_denied");
++  await col("agents").doc("1").update({ status: "active" });
++  h.state.delegate = () => { throw new DeskError("not_found", "No chama with that code"); };
++  await rejects(resolveEntity(h.deps, "1", { code: "SMC-0001" }), "not_found", /No chama/);
++});
++
++// ---------------------------------------------------------------- validate import
++test("validateImport passes the product's result through unchanged", opts, async () => {
++  const sid = await openSession(h, "1", KEY, ["import"]);
++  const product = { valid: [{ name: "A", phone: "0712345678" }], errors: [{ row: 2, field: "phone", message: "Bad phone" }] };
++  h.state.delegate = (_p, req) => (req.action === "validate_records" ? product : entityInfo());
++  const out = await validateImport(h.deps, "1", { sessionId: sid, rows: [{ name: "A", phone: "0712345678" }, { name: "B", phone: "x" }] });
++  assert.deepEqual(out, product);
++  const call = h.calls.find((c) => c.req.action === "validate_records")!;
++  assert.equal(call.req.entityCode, "SMC-0001");
++  assert.equal((await col("audit").where("action", "==", "import_validated").get()).size, 1);
++});
++test("validateImport needs the import scope, rows and an active session", opts, async () => {
++  const readOnly = await openSession(h, "1", KEY, ["read"]);
++  await rejects(validateImport(h.deps, "1", { sessionId: readOnly, rows: [{ a: 1 }] }), "permission_denied");
++  const sid = await openSession(h, "1", KEY, ["import"]);
++  await rejects(validateImport(h.deps, "1", { sessionId: sid, rows: [] }), "invalid_argument");
++  await rejects(validateImport(h.deps, "1", { sessionId: sid, rows: ["x"] }), "invalid_argument");
++  await rejects(validateImport(h.deps, "1", { sessionId: sid, rows: Array.from({ length: 5001 }, () => ({})) }), "invalid_argument", /Too many/);
++  await rejects(validateImport(h.deps, "1", { sessionId: "nope", rows: [{}] }), "session_invalid");
++});
++
++// ---------------------------------------------------------------- payout accounts
++const chamaSeparate = () => { h.state.cfg = { ...DEFAULT_DESK_CONFIG, projects: { chama: "demo-chama", school: "" }, paystackAccounts: { ...DEFAULT_DESK_CONFIG.paystackAccounts, chama: "separate" } }; };
++const profile = async (uid = "1") => (await db().collection("agents").doc(uid).get()).data()!;
++
++test("no main subaccount: ready=false with the reason, nothing created", opts, async () => {
++  await seedAgent("5", {}, false);
++  chamaSeparate();
++  const out = await syncPayoutAccounts(h.deps, "5");
++  assert.equal(out.accounts[0].account, "main"); assert.equal(out.accounts[0].ready, false); assert.match(out.accounts[0].reason!, /payment account/i);
++  assert.equal(h.state.subaccountCalls, 0);
++});
++test("chama on the main account: only main is reported and nothing is created", opts, async () => {
++  const out = await syncPayoutAccounts(h.deps, "1");
++  assert.deepEqual(out.accounts, [{ account: "main", ready: true }]);
++  assert.equal(h.state.subaccountCalls, 0);
++});
++test("separate chama account is created once, even for concurrent calls", opts, async () => {
++  chamaSeparate();
++  const [a, b] = await Promise.all([syncPayoutAccounts(h.deps, "1"), syncPayoutAccounts(h.deps, "1")]);
++  assert.equal(h.state.subaccountCalls, 1);
++  assert.ok([a, b].some((r) => r.accounts.find((x) => x.account === "chama")?.ready === true));
++  assert.equal((await profile()).paymentInfo.productAccounts.chama, "ACCT_chama1");
++  assert.equal((await profile()).paymentInfo.accountId, "ACCT_main_1"); // main untouched
++  const again = await syncPayoutAccounts(h.deps, "1");
++  assert.equal(h.state.subaccountCalls, 1);
++  assert.deepEqual(again.accounts, [{ account: "main", ready: true }, { account: "chama", ready: true }]);
++});
++test("Paystack failure is reported, nothing is stored and the claim is released", opts, async () => {
++  chamaSeparate(); h.state.subaccountFails = true;
++  const out = await syncPayoutAccounts(h.deps, "1");
++  assert.equal(out.accounts[1].ready, false); assert.match(out.accounts[1].reason!, /Paystack said no/);
++  assert.equal((await profile()).paymentInfo.productAccounts, undefined);
++  h.state.subaccountFails = false;
++  assert.equal((await syncPayoutAccounts(h.deps, "1")).accounts[1].ready, true);
++});
++test("incomplete bank details are reported, not guessed", opts, async () => {
++  chamaSeparate();
++  await db().collection("agents").doc("1").update({ "paymentInfo.accountNumber": null });
++  const out = await syncPayoutAccounts(h.deps, "1");
++  assert.equal(out.accounts[1].ready, false); assert.equal(h.state.subaccountCalls, 0);
++});
++test("sync writes deskOwner on every chama this desk owns, using the chama subaccount", opts, async () => {
++  chamaSeparate();
++  for (const [id, code] of [["c1", "SMC-0001"], ["c2", "SMC-0002"], ["c3", "SMC-0003"]]) await h.chama.collection("chamas").doc(id).set({ code });
++  for (const code of ["SMC-0001", "SMC-0002"]) await col("customers").doc(`chama:${code}`).set({ entityKey: `chama:${code}`, product: "chama", ownerAgentId: "1", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
++  await col("customers").doc("chama:SMC-0003").set({ entityKey: "chama:SMC-0003", product: "chama", ownerAgentId: "other", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
++  await syncPayoutAccounts(h.deps, "1");
++  const owner = async (id: string) => (await h.chama.collection("chamas").doc(id).get()).data()?.deskOwner;
++  assert.equal((await owner("c1")).subaccountCode, "ACCT_chama1"); assert.equal((await owner("c2")).agentCode, "COG-0001");
++  assert.equal(await owner("c3"), undefined);
++});
++test("writeDeskOwner writes nothing when the account is not ready, with the reason", opts, async () => {
++  chamaSeparate();
++  await h.chama.collection("chamas").doc("c1").set({ code: "SMC-0001" });
++  await col("customers").doc(KEY).set({ entityKey: KEY, product: "chama", ownerAgentId: "1", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
++  const agent = (await col("agents").doc("1").get()).data() as AgentDoc;
++  const r = await writeDeskOwner(h.deps, h.state.cfg, agent, "SMC-0001");
++  assert.equal(r.written, false); assert.match(r.reason!, /not ready/);
++  assert.equal((await h.chama.collection("chamas").doc("c1").get()).data()?.deskOwner, undefined);
++});
++test("writeDeskOwner refuses a chama this desk does not own", opts, async () => {
++  await h.chama.collection("chamas").doc("c1").set({ code: "SMC-0001" });
++  const agent = (await col("agents").doc("1").get()).data() as AgentDoc;
++  assert.equal((await writeDeskOwner(h.deps, h.state.cfg, agent, "SMC-0001")).written, false);
++});
++
++// ---------------------------------------------------------------- tickets
++async function ticket(id: string, serviceType: TicketDoc["serviceType"], draft: Record<string, unknown>, status: TicketDoc["status"] = "paid") {
++  const t: TicketDoc = { ticketId: id, agentId: "1", entityKey: KEY, sessionId: "s", serviceType, amountMinor: 100, draft, status, createdAt: 1, updatedAt: 1 };
++  await col("tickets").doc(id).set(t);
++}
++const tk = async (id: string) => (await col("tickets").doc(id).get()).data() as TicketDoc & Record<string, unknown>;
++
++test("paid import commits through commit_records with requestId = ticketId, rows rebuilt from chunks", opts, async () => {
++  await ticket("t1", "import_excel", { rows: [{ name: "A" }] });
++  await col("tickets").doc("t1").collection("draft").doc("0001").set({ rows: [{ name: "C" }] });
++  await col("tickets").doc("t1").collection("draft").doc("0000").set({ rows: [{ name: "B" }] });
++  h.state.delegate = () => ({ created: 3, skipped: 0, errors: [] });
++  assert.equal(await executePaidTicket(h.deps, "t1"), "committed");
++  const call = h.calls[0];
++  assert.equal(call.req.action, "commit_records"); assert.equal(call.req.requestId, "t1");
++  assert.deepEqual((call.req.payload as { rows: { name: string }[] }).rows.map((r) => r.name), ["A", "B", "C"]);
++  const t = await tk("t1");
++  assert.equal(t.status, "committed"); assert.deepEqual(t.productResult, { created: 3, skipped: 0, errors: [] });
++  assert.equal((await col("audit").where("action", "==", "ticket_committed").get()).size, 1);
++});
++test("each service type uses its delegate action", opts, async () => {
++  h.state.delegate = () => ({ ok: true });
++  await ticket("m", "manual_entry", { rows: [{ name: "A" }] });
++  await ticket("s", "schedule_setup", { name: "n", message: "m", audience: "all", schedule: { kind: "daily", at: "09:00" } });
++  await ticket("b", "bulk_reminder", { message: "m", audience: "all" });
++  for (const id of ["m", "s", "b"]) await executePaidTicket(h.deps, id);
++  assert.deepEqual(h.calls.map((c) => c.req.action), ["commit_records", "schedule_sms", "send_sms_now"]);
++  assert.equal((h.calls[2].req.payload as { dryRun: boolean }).dryRun, false);
++});
++test("a product refusal fails the ticket with the product's message and an audit row", opts, async () => {
++  await ticket("t2", "bulk_reminder", { message: "m", audience: "all" });
++  h.state.delegate = () => { throw new DeskError("failed_precondition", "Not enough SMS credits"); };
++  assert.equal(await executePaidTicket(h.deps, "t2"), "failed");
++  const t = await tk("t2");
++  assert.equal(t.status, "failed"); assert.equal(t.failureReason, "Not enough SMS credits");
++  assert.equal((await col("audit").where("action", "==", "ticket_failed").get()).size, 1);
++});
++test("execution is idempotent: committed, failed and unpaid tickets are not run again", opts, async () => {
++  await ticket("t3", "manual_entry", { rows: [{ name: "A" }] });
++  h.state.delegate = () => ({ created: 1 });
++  assert.equal(await executePaidTicket(h.deps, "t3"), "committed");
++  assert.equal(await executePaidTicket(h.deps, "t3"), "skipped");
++  await ticket("t4", "manual_entry", { rows: [{ name: "A" }] }, "awaiting_payment");
++  assert.equal(await executePaidTicket(h.deps, "t4"), "skipped");
++  assert.equal(await executePaidTicket(h.deps, "missing"), "skipped");
++  assert.equal(h.calls.length, 1);
++});
++test("concurrent duplicate deliveries end with one committed status and one audit row", opts, async () => {
++  await ticket("t5", "manual_entry", { rows: [{ name: "A" }] });
++  h.state.delegate = () => ({ created: 1 });
++  const r = await Promise.all([executePaidTicket(h.deps, "t5"), executePaidTicket(h.deps, "t5")]);
++  assert.equal(r.filter((x) => x === "committed").length, 1);
++  assert.equal((await col("audit").where("action", "==", "ticket_committed").get()).size, 1);
++  assert.ok(h.calls.every((c) => c.req.requestId === "t5"));
++});
++test("an incomplete draft fails the ticket without calling the product", opts, async () => {
++  await ticket("t6", "import_excel", {});
++  assert.equal(await executePaidTicket(h.deps, "t6"), "failed");
++  assert.equal(h.calls.length, 0); assert.match((await tk("t6")).failureReason!, /incomplete/);
++});
++test("an unreachable product is retried, then failed after the attempt limit", opts, async () => {
++  await ticket("t7", "manual_entry", { rows: [{ name: "A" }] });
++  h.state.delegate = () => { throw new DeskError("internal", "timeout"); };
++  for (let i = 1; i < MAX_EXECUTION_ATTEMPTS; i++) {
++    await rejects(executePaidTicket(h.deps, "t7"), "internal");
++    assert.equal((await tk("t7")).status, "paid");
++  }
++  assert.equal(await executePaidTicket(h.deps, "t7"), "failed");
++  assert.match((await tk("t7")).failureReason!, /could not be reached/);
++});
++test("a large product result is stored bounded", opts, async () => {
++  await ticket("t8", "manual_entry", { rows: [{ name: "A" }] });
++  h.state.delegate = () => ({ created: 0, skipped: 0, errors: Array.from({ length: 900 }, (_, i) => ({ row: i, field: "x", message: "m" })) });
++  await executePaidTicket(h.deps, "t8");
++  const r = (await tk("t8")).productResult as { errors: unknown[]; errorsTotal: number };
++  assert.equal(r.errors.length, 200); assert.equal(r.errorsTotal, 900);
++});
+diff --git a/functions-desk/src/connectors/deps.ts b/functions-desk/src/connectors/deps.ts
+new file mode 100644
+index 0000000..5393e5c
+--- /dev/null
++++ b/functions-desk/src/connectors/deps.ts
+@@ -0,0 +1,84 @@
++/**
++ * Everything a desk handler needs from the outside world, behind one interface so emulator tests can substitute SMS,
++ * Paystack and the product delegates. Production wiring is `defaultDeps()`; test doubles live only in test files.
++ */
++import { getApps, initializeApp } from "firebase-admin/app";
++import { getFirestore, type Firestore } from "firebase-admin/firestore";
++import axios from "axios";
++import { randomInt } from "node:crypto";
++import type { DeskConfig } from "../config.js";
++import type { DelegateRequest, Product } from "../contract.js";
++import { getConfig } from "../db.js";
++import { DeskError } from "../errors.js";
++import { callDelegate } from "../kernel/delegate.js";
++import { sendSms } from "../kernel/sms.js";
++import { MYCHAMA_PAYSTACK_SECRET_KEY, paystackMessage } from "../paystack/client.js";
++import { createSubaccount, type SubaccountDetails } from "../paystack/subaccount.js";
++
++export interface ChamaPaystack {
++  /** Paystack bank code for what the agent chose at payout setup ("mpesa", "airtel-ke", …), looked up in MyChama's account. */
++  resolveBankCode(settlementBank: string): Promise<string>;
++  /** Creates the subaccount in MyChama's OWN Paystack account. Returns its ACCT_ code. */
++  createSubaccount(details: SubaccountDetails): Promise<string>;
++}
++
++export interface Deps {
++  now(): number;
++  getConfig(): Promise<DeskConfig>;
++  sendSms(phoneE164: string, message: string): Promise<void>;
++  delegate<T>(cfg: DeskConfig, product: Product, req: Omit<DelegateRequest, "requestId"> & { requestId?: string }): Promise<T>;
++  /** Admin SDK handle on the Chama project's Firestore (desk reaches Chama; Chama never reaches desk). */
++  chamaDb(cfg: DeskConfig): Firestore;
++  chamaPaystack: ChamaPaystack;
++  randomOtp(): string;
++}
++
++/** Six digits from a CSPRNG, zero-padded. */
++export const randomOtp = (): string => randomInt(0, 1_000_000).toString().padStart(6, "0");
++
++export function chamaFirestore(cfg: DeskConfig): Firestore {
++  const projectId = (cfg.projects.chama ?? "").trim();
++  if (!projectId) throw new DeskError("failed_precondition", "The MyChama project is not connected yet");
++  const name = `desk-chama-${projectId}`;
++  const app = getApps().find((a) => a.name === name) ?? initializeApp({ projectId }, name);
++  return getFirestore(app);
++}
++
++interface PaystackBank { code?: string; name?: string }
++
++/** Same matching rules PAY's setupAccount applies to the agent's stored `settlementBank`. Pure. */
++export function matchBankCode(banks: readonly PaystackBank[], settlementBank: string): string {
++  const want = settlementBank.trim().toLowerCase();
++  const hit = banks.find((b) =>
++    b.code?.toLowerCase() === want ||
++    b.name?.toLowerCase().includes(want) ||
++    (want === "mpesa" && b.name?.toLowerCase().includes("m-pesa")));
++  return hit?.code ?? want;
++}
++
++const mychamaPaystack: ChamaPaystack = {
++  async resolveBankCode(settlementBank) {
++    try {
++      const res = await axios.get("https://api.paystack.co/bank", {
++        params: { country: "kenya" }, timeout: 20_000,
++        headers: { Authorization: `Bearer ${MYCHAMA_PAYSTACK_SECRET_KEY.value()}` },
++      });
++      return matchBankCode((res.data?.data ?? []) as PaystackBank[], settlementBank);
++    } catch (err) {
++      throw new DeskError("payment_failed", paystackMessage(err));
++    }
++  },
++  createSubaccount: (details) => createSubaccount(MYCHAMA_PAYSTACK_SECRET_KEY.value(), details),
++};
++
++export function defaultDeps(): Deps {
++  return {
++    now: () => Date.now(),
++    getConfig,
++    sendSms,
++    delegate: (cfg, product, req) => callDelegate(cfg, product, req),
++    chamaDb: chamaFirestore,
++    chamaPaystack: mychamaPaystack,
++    randomOtp,
++  };
++}
+diff --git a/functions-desk/src/connectors/deskOwner.ts b/functions-desk/src/connectors/deskOwner.ts
+new file mode 100644
+index 0000000..4bde6ff
+--- /dev/null
++++ b/functions-desk/src/connectors/deskOwner.ts
+@@ -0,0 +1,51 @@
++/**
++ * Writes `deskOwner` onto a chama document in the Chama project (desk -> product is the only direction; Chama never reaches
++ * desk). Chama builds its commission split from this field at charge time.
++ */
++import type { DeskConfig } from "../config.js";
++import type { DeskOwnerInfo } from "../contract.js";
++import { getAgentPayment, getCustomer } from "../kernel/agents.js";
++import { DeskError } from "../errors.js";
++import type { AgentDoc } from "../types.js";
++import type { Deps } from "./deps.js";
++
++/** Chama collection holding chama documents (functions/shared/constants.py: MC.CHAMAS). */
++export const CHAMA_COLLECTION = "chamas";
++/**
++ * Field on a chama document that holds its public SMC-… code. The current Chama repo has no such field yet (the SMC code
++ * scheme is delivered by Chama's own patch), so this is the single place to change if that patch names it differently.
++ */
++export const CHAMA_CODE_FIELD = "code";
++
++export interface DeskOwnerResult { written: boolean; reason?: string }
++
++export async function writeDeskOwner(deps: Deps, cfg: DeskConfig, agent: AgentDoc, chamaCode: string): Promise<DeskOwnerResult> {
++  if (agent.status !== "active") return { written: false, reason: "This desk is not active" };
++
++  // Defence in depth: only the recorded owner desk may be written onto a chama.
++  const customer = await getCustomer(`chama:${chamaCode}`);
++  if (!customer || customer.ownerAgentId !== agent.agentId) {
++    return { written: false, reason: `${chamaCode} is not owned by this desk` };
++  }
++
++  let subaccountCode: string;
++  try {
++    subaccountCode = (await getAgentPayment(agent.agentId, "chama", cfg)).subaccountCode;
++  } catch (err) {
++    if (err instanceof DeskError) return { written: false, reason: err.message };
++    throw err;
++  }
++
++  let chamaDb;
++  try { chamaDb = deps.chamaDb(cfg); } catch (err) {
++    if (err instanceof DeskError) return { written: false, reason: err.message };
++    throw err;
++  }
++  const found = await chamaDb.collection(CHAMA_COLLECTION).where(CHAMA_CODE_FIELD, "==", chamaCode).limit(2).get();
++  if (found.empty) return { written: false, reason: `Chama ${chamaCode} was not found in the MyChama project` };
++  if (found.size > 1) return { written: false, reason: `More than one chama carries the code ${chamaCode}` };
++
++  const owner: DeskOwnerInfo = { agentCode: agent.agentCode, subaccountCode, rank: agent.rank, updatedAt: deps.now() };
++  await found.docs[0].ref.update({ deskOwner: owner });
++  return { written: true };
++}
+diff --git a/functions-desk/src/connectors/entities.ts b/functions-desk/src/connectors/entities.ts
+new file mode 100644
+index 0000000..0da2305
+--- /dev/null
++++ b/functions-desk/src/connectors/entities.ts
+@@ -0,0 +1,62 @@
++import { DESK_TOP_CODE, type DelegateEntityInfo, type EntityKey, type Product } from "../contract.js";
++import { DeskError } from "../errors.js";
++import { parseEntityKey } from "../entity.js";
++import type { AgentDoc } from "../types.js";
++import { normalizeKenyaPhone } from "../paystack/phone.js";
++import type { DeskConfig } from "../config.js";
++import type { Deps } from "./deps.js";
++
++const CHAMA_CODE = /^SMC-\d{4,}$/;
++const PMS_CODE = /^PYL-\d{4,}$/;
++/** KNEC centre codes are 8 digits. */
++const SCHOOL_CODE = /^\d{8}$/;
++
++export const BAD_CODE_MESSAGE =
++  "That customer code isn't recognised. Use SMC-0000 for a chama, the 8-digit KNEC code for a school, or PYL-0000 for a landlord.";
++export const NOT_AUTHORISED_MESSAGE = "Ask the customer to add your desk code under Settings → Support Agents";
++
++/** Code -> product by shape; any other shape is rejected. Pure. */
++export function classifyEntityCode(raw: string): { product: Product; code: string } {
++  const code = (raw ?? "").trim().toUpperCase();
++  if (CHAMA_CODE.test(code)) return { product: "chama", code };
++  if (PMS_CODE.test(code)) return { product: "pms", code };
++  if (SCHOOL_CODE.test(code)) return { product: "school", code };
++  throw new DeskError("invalid_argument", BAD_CODE_MESSAGE);
++}
++
++/** Entity key from a client: it must parse AND its code must have the shape of its product. */
++export function assertEntityKey(entityKey: string): { product: Product; code: string; entityKey: EntityKey } {
++  if (typeof entityKey !== "string") throw new DeskError("invalid_argument", BAD_CODE_MESSAGE);
++  const parsed = parseEntityKey(entityKey.trim());
++  const found = classifyEntityCode(parsed.code);
++  if (found.product !== parsed.product) throw new DeskError("invalid_argument", BAD_CODE_MESSAGE);
++  return { product: parsed.product, code: found.code, entityKey: `${parsed.product}:${found.code}` };
++}
++
++/** `desk_customers` doc id for an entity key (identical to the kernel's getCustomer). */
++export const customerDocId = (entityKey: string): string => entityKey.replace(/\//g, "_");
++
++export const isTopDesk = (agent: Pick<AgentDoc, "agentCode">): boolean => agent.agentCode === DESK_TOP_CODE;
++
++export interface EntityLookup { info: DelegateEntityInfo; authorised: boolean }
++
++/** Asks the product (entity_info) and decides whether this desk is authorised. COG-0000 is authorised on every entity. */
++export async function lookupEntity(
++  deps: Deps, cfg: DeskConfig, agent: Pick<AgentDoc, "agentCode">, product: Product, code: string,
++): Promise<EntityLookup> {
++  const info = await deps.delegate<DelegateEntityInfo>(cfg, product, {
++    action: "entity_info", entityCode: code, agentCode: agent.agentCode, payload: {},
++  });
++  return { info, authorised: isTopDesk(agent) || info.agentAuthorised === true };
++}
++
++export function adminPhoneE164(info: DelegateEntityInfo): string {
++  try { return normalizeKenyaPhone(info.adminPhone ?? ""); } catch {
++    throw new DeskError("failed_precondition", "This customer has no valid admin phone number on file");
++  }
++}
++
++/** True when the agent's own phone is the customer admin's (self-owned accounts are refused). */
++export function isSameNumber(agentPhone: string, adminE164: string): boolean {
++  try { return normalizeKenyaPhone(agentPhone) === adminE164; } catch { return false; }
++}
+diff --git a/functions-desk/src/connectors/harness.test.ts b/functions-desk/src/connectors/harness.test.ts
+new file mode 100644
+index 0000000..7212c0d
+--- /dev/null
++++ b/functions-desk/src/connectors/harness.test.ts
+@@ -0,0 +1,109 @@
++/**
++ * Shared harness for the emulator suites: injectable SMS / delegate / Paystack doubles and Firestore seeding.
++ * Test doubles live only in test files; this file defines no tests of its own.
++ */
++import { getApps, initializeApp } from "firebase-admin/app";
++import { getFirestore, type Firestore } from "firebase-admin/firestore";
++import { DEFAULT_DESK_CONFIG, type DeskConfig } from "../config.js";
++import type { Product } from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import type { AgentDoc } from "../types.js";
++import type { Deps } from "./deps.js";
++import { requestAccess, verifyAccess } from "../sessions/access.js";
++
++export type DelegateHandler = (product: Product, req: { action: string; entityCode: string; agentCode: string; requestId?: string; payload: unknown }) => unknown;
++
++export interface Harness {
++  deps: Deps;
++  sms: { to: string; message: string }[];
++  calls: { product: Product; req: Parameters<DelegateHandler>[1] }[];
++  state: { delegate: DelegateHandler; smsFails: boolean; cfg: DeskConfig; subaccountCalls: number; subaccountFails: boolean };
++  chama: Firestore;
++}
++
++export const CHAMA_PROJECT = "demo-chama";
++export function chamaDb(): Firestore {
++  const app = getApps().find((a) => a.name === "test-chama") ?? initializeApp({ projectId: CHAMA_PROJECT }, "test-chama");
++  return getFirestore(app);
++}
++
++export const ADMIN_PHONE = "0722000111";
++export const entityInfo = (o: Record<string, unknown> = {}) => ({
++  displayName: "Umoja Chama", adminName: "Chair", adminPhone: ADMIN_PHONE, agentAuthorised: true, plan: "pro",
++  creditsBalance: 100, audiences: ["all"], reportTypes: [], exportKinds: ["members"], ...o,
++});
++
++export function harness(): Harness {
++  const h: Harness = {
++    sms: [], calls: [], chama: chamaDb(),
++    state: { delegate: () => entityInfo(), smsFails: false, cfg: { ...DEFAULT_DESK_CONFIG }, subaccountCalls: 0, subaccountFails: false },
++    deps: undefined as unknown as Deps,
++  };
++  h.deps = {
++    now: () => Date.now(),
++    getConfig: async () => h.state.cfg,
++    sendSms: async (to, message) => { if (h.state.smsFails) throw new DeskError("internal", "sms down"); h.sms.push({ to, message }); },
++    delegate: async <T>(_cfg: DeskConfig, product: Product, req: { action: string; entityCode: string; agentCode: string; requestId?: string; payload: unknown }) => {
++      h.calls.push({ product, req });
++      return h.state.delegate(product, req) as T;
++    },
++    chamaDb: () => h.chama,
++    chamaPaystack: {
++      resolveBankCode: async (b) => b.toUpperCase(),
++      createSubaccount: async () => {
++        h.state.subaccountCalls++;
++        await new Promise((r) => setTimeout(r, 40));
++        if (h.state.subaccountFails) throw new DeskError("payment_failed", "Paystack said no");
++        return `ACCT_chama${h.state.subaccountCalls}`;
++      },
++    },
++    randomOtp: () => String(100000 + Math.floor(Math.random() * 899999)),
++  };
++  return h;
++}
++
++export async function clearChama(): Promise<void> {
++  const c = chamaDb();
++  for (const d of (await c.collection("chamas").get()).docs) await d.ref.delete();
++}
++
++export async function seedAgent(uid: string, o: Partial<AgentDoc> = {}, withPayment = true): Promise<AgentDoc> {
++  const agent: AgentDoc = {
++    agentId: uid, agentCode: `COG-${uid.replace(/\D/g, "").padStart(4, "0")}`, name: `Agent ${uid}`, phone: "+254711000000",
++    email: `${uid}@x.co`, idHash: `h-${uid}`, idNumberMasked: "****0000", status: "active", rank: "clerk", wardId: "w1", createdAt: 1, ...o,
++  };
++  await col("agents").doc(uid).set(agent);
++  if (withPayment) {
++    await db().collection("agents").doc(uid).set({
++      email: agent.email, paymentInfo: {
++        accountId: `ACCT_main_${uid}`, businessName: "Biz", settlementBank: "mpesa", accountNumber: "0711000000",
++        name: agent.name, email: agent.email, phone: "254711000000",
++      },
++    });
++  }
++  return agent;
++}
++
++export const lastOtp = (h: Harness): string => {
++  const m = /(?:Code|code) (\d{6})/.exec(h.sms[h.sms.length - 1]?.message ?? "");
++  if (!m) throw new Error("no OTP in last SMS");
++  return m[1];
++};
++
++/** Real request + verify through the handlers. Returns the verified session id. */
++export async function openSession(h: Harness, uid: string, entityKey: string, scopes: string[]): Promise<string> {
++  const r = await requestAccess(h.deps, uid, { entityKey, scopes });
++  await verifyAccess(h.deps, uid, { sessionId: r.sessionId, otp: lastOtp(h) });
++  return r.sessionId;
++}
++
++export async function rejects(p: Promise<unknown>, code: string, msg?: RegExp): Promise<void> {
++  try { await p; } catch (err) {
++    if (!(err instanceof DeskError)) throw err;
++    if (err.code !== code) throw new Error(`expected ${code}, got ${err.code}: ${err.message}`);
++    if (msg && !msg.test(err.message)) throw new Error(`message ${err.message} !~ ${msg}`);
++    return;
++  }
++  throw new Error(`expected rejection with ${code}`);
++}
+diff --git a/functions-desk/src/connectors/index.ts b/functions-desk/src/connectors/index.ts
+new file mode 100644
+index 0000000..cd8c5f7
+--- /dev/null
++++ b/functions-desk/src/connectors/index.ts
+@@ -0,0 +1,40 @@
++import { onDocumentWritten } from "firebase-functions/v2/firestore";
++import type {
++  ResolveEntityIn, ResolveEntityOut, SyncPayoutAccountsIn, SyncPayoutAccountsOut, ValidateImportIn, ValidateImportOut,
++} from "../contract.js";
++import { DESK_COLLECTIONS } from "../contract.js";
++import { MYCHAMA_PAYSTACK_SECRET_KEY } from "../paystack/client.js";
++import { deskCallable } from "./common.js";
++import { defaultDeps } from "./deps.js";
++import { resolveEntity, validateImport } from "./resolve.js";
++import { syncPayoutAccounts } from "./payout.js";
++import { executePaidTicket } from "./tickets.js";
++
++export const desk_resolveEntity = deskCallable<ResolveEntityIn, ResolveEntityOut>(
++  { timeoutSeconds: 90 },
++  (uid, data) => resolveEntity(defaultDeps(), uid, data),
++);
++
++export const desk_validateImport = deskCallable<ValidateImportIn, ValidateImportOut>(
++  { timeoutSeconds: 120 },
++  (uid, data) => validateImport(defaultDeps(), uid, data),
++);
++
++export const desk_syncPayoutAccounts = deskCallable<SyncPayoutAccountsIn, SyncPayoutAccountsOut>(
++  { secrets: [MYCHAMA_PAYSTACK_SECRET_KEY], timeoutSeconds: 120 },
++  (uid) => syncPayoutAccounts(defaultDeps(), uid),
++);
++
++/**
++ * Fires when a desk ticket becomes `paid` and runs it through the product. `retry` re-delivers after a transient failure
++ * (the product could not be reached); executePaidTicket caps the attempts and is idempotent.
++ */
++export const desk_onTicketPaid = onDocumentWritten(
++  { document: `${DESK_COLLECTIONS.tickets}/{ticketId}`, retry: true, timeoutSeconds: 300 },
++  async (event) => {
++    const before = event.data?.before.data();
++    const after = event.data?.after.data();
++    if (!after || after.status !== "paid" || before?.status === "paid") return;
++    await executePaidTicket(defaultDeps(), event.params.ticketId);
++  },
++);
+diff --git a/functions-desk/src/connectors/input.ts b/functions-desk/src/connectors/input.ts
+new file mode 100644
+index 0000000..f8c7208
+--- /dev/null
++++ b/functions-desk/src/connectors/input.ts
+@@ -0,0 +1,24 @@
++import { DeskError } from "../errors.js";
++
++/** Callable payloads arrive untyped; every handler narrows them here before touching anything. */
++export function record(v: unknown): Record<string, unknown> {
++  if (!v || typeof v !== "object" || Array.isArray(v)) throw new DeskError("invalid_argument", "The request is not valid");
++  return v as Record<string, unknown>;
++}
++
++/** Trimmed string with a length range. A `min` of 0 allows empty. */
++export function text(v: unknown, label: string, min: number, max: number): string {
++  if (typeof v !== "string") throw new DeskError("invalid_argument", `${label} is required`);
++  const t = v.trim();
++  if (t.length < min || t.length > max) {
++    throw new DeskError("invalid_argument", min <= 1 ? `${label} must be 1–${max} characters` : `${label} must be ${min}–${max} characters`);
++  }
++  return t;
++}
++
++export function digits(v: unknown, label: string, len: number): string {
++  if (typeof v !== "string" || !new RegExp(`^\\d{${len}}$`).test(v.trim())) {
++    throw new DeskError("invalid_argument", `${label} must be ${len} digits`);
++  }
++  return v.trim();
++}
+diff --git a/functions-desk/src/connectors/payout.ts b/functions-desk/src/connectors/payout.ts
+new file mode 100644
+index 0000000..24efb2a
+--- /dev/null
++++ b/functions-desk/src/connectors/payout.ts
+@@ -0,0 +1,127 @@
++/**
++ * Payout accounts. An agent has ONE subaccount per Paystack account, all settling to the same bank:
++ *  - main  : `agents/{uid}.paymentInfo.accountId` (created by PAY's existing setupAccount),
++ *  - chama : `paymentInfo.productAccounts.chama`, only when `desk_config.paystackAccounts.chama` is "separate".
++ * Desk creates the chama one itself, inside MyChama's own Paystack account, from the bank details PAY stored.
++ */
++import type { DeskConfig } from "../config.js";
++import type { PayoutAccountStatus, SyncPayoutAccountsOut } from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import type { AgentDoc } from "../types.js";
++import type { Deps } from "./deps.js";
++import { writeDeskOwner } from "./deskOwner.js";
++
++export const MAIN_MISSING_REASON = "Set up your payment account first (Account → Payout), then try again.";
++const LOCK_MS = 2 * 60_000;
++
++interface PaymentInfo {
++  accountId?: string; productAccounts?: Record<string, string | undefined>;
++  businessName?: string; settlementBank?: string; accountNumber?: string; name?: string; email?: string; phone?: string;
++}
++
++/** The fields Paystack needs; undefined when anything is missing. Pure. */
++export function subaccountDetailsFrom(info: PaymentInfo): { ok: true; d: Required<Pick<PaymentInfo, "businessName" | "settlementBank" | "accountNumber" | "name" | "email" | "phone">> } | { ok: false } {
++  const { businessName, settlementBank, accountNumber, name, email, phone } = info;
++  if (!businessName || !settlementBank || !accountNumber || !name || !email || !phone) return { ok: false };
++  return { ok: true, d: { businessName, settlementBank, accountNumber, name, email, phone } };
++}
++
++const agentProfileRef = (uid: string) => db().collection("agents").doc(uid);
++const lockRef = (uid: string) => col("counters").doc(`payout_${uid}_chama`);
++
++async function ensureChamaSubaccount(deps: Deps, agent: AgentDoc, info: PaymentInfo): Promise<PayoutAccountStatus> {
++  if (info.productAccounts?.chama) return { account: "chama", ready: true };
++  const details = subaccountDetailsFrom(info);
++  if (!details.ok) {
++    return { account: "chama", ready: false, reason: "Your payout details are incomplete. Update your payment account, then try again." };
++  }
++
++  // Claim the right to create it. A second call during the claim window creates nothing.
++  const claimed = await db().runTransaction(async (tx) => {
++    const [profile, lock] = await Promise.all([tx.get(agentProfileRef(agent.agentId)), tx.get(lockRef(agent.agentId))]);
++    const existing = (profile.data()?.paymentInfo as PaymentInfo | undefined)?.productAccounts?.chama;
++    if (existing) return { kind: "exists" as const };
++    const at = lock.data()?.lockedAt as number | undefined;
++    if (at && at > deps.now() - LOCK_MS) return { kind: "busy" as const };
++    tx.set(lockRef(agent.agentId), { lockedAt: deps.now() });
++    return { kind: "claimed" as const };
++  });
++  if (claimed.kind === "exists") return { account: "chama", ready: true };
++  if (claimed.kind === "busy") return { account: "chama", ready: false, reason: "Your MyChama payout account is being set up. Try again in a minute." };
++
++  let code: string;
++  try {
++    const bank = await deps.chamaPaystack.resolveBankCode(details.d.settlementBank);
++    code = await deps.chamaPaystack.createSubaccount({
++      businessName: details.d.businessName, settlementBank: bank, accountNumber: details.d.accountNumber,
++      contactName: details.d.name, contactEmail: details.d.email, contactPhone: details.d.phone,
++      metadata: { deskCode: agent.agentCode, agentId: agent.agentId },
++    });
++  } catch (err) {
++    await lockRef(agent.agentId).delete().catch(() => undefined);
++    const reason = err instanceof DeskError ? err.message : "Could not create your MyChama payout account";
++    return { account: "chama", ready: false, reason };
++  }
++
++  // Merge the code in a transaction; a value that appeared meanwhile wins and is never overwritten.
++  const finalCode = await db().runTransaction(async (tx) => {
++    const profile = await tx.get(agentProfileRef(agent.agentId));
++    const existing = (profile.data()?.paymentInfo as PaymentInfo | undefined)?.productAccounts?.chama;
++    if (existing) { tx.delete(lockRef(agent.agentId)); return existing; }
++    tx.update(agentProfileRef(agent.agentId), { "paymentInfo.productAccounts.chama": code });
++    tx.delete(lockRef(agent.agentId));
++    return code;
++  });
++  await audit({ action: "payout_subaccount_created", agentId: agent.agentId, meta: { account: "chama", subaccountCode: finalCode, kept: finalCode === code } });
++  return { account: "chama", ready: true };
++}
++
++export async function syncPayoutAccounts(deps: Deps, uid: string): Promise<SyncPayoutAccountsOut> {
++  const agent = await requireActiveAgent(uid);
++  const cfg: DeskConfig = await deps.getConfig();
++  const separate = cfg.paystackAccounts.chama === "separate";
++
++  const snap = await agentProfileRef(uid).get();
++  const info = (snap.exists ? (snap.data()?.paymentInfo as PaymentInfo | undefined) : undefined) ?? {};
++  if (!info.accountId) {
++    const accounts: PayoutAccountStatus[] = [{ account: "main", ready: false, reason: MAIN_MISSING_REASON }];
++    if (separate) accounts.push({ account: "chama", ready: false, reason: "Finish your main payout account first." });
++    await audit({ action: "payout_accounts_synced", agentId: uid, meta: { ready: false } });
++    return { accounts };
++  }
++
++  const accounts: PayoutAccountStatus[] = [{ account: "main", ready: true }];
++  let chamaReady = true;
++  if (separate) {
++    const status = await ensureChamaSubaccount(deps, agent, info);
++    accounts.push(status);
++    chamaReady = status.ready;
++  }
++
++  // Every chama this desk owns gets its deskOwner written (or refreshed: rank and subaccount may have changed).
++  const failures: string[] = [];
++  let written = 0;
++  if (chamaReady) {
++    const owned = await col("customers").where("ownerAgentId", "==", uid).where("product", "==", "chama").get();
++    for (const doc of owned.docs) {
++      const code = (doc.data().entityKey as string).split(":")[1];
++      try {
++        const r = await writeDeskOwner(deps, cfg, agent, code);
++        if (r.written) written++; else failures.push(r.reason ?? `Could not update ${code}`);
++      } catch {
++        failures.push(`Could not update ${code}`);
++      }
++    }
++  }
++  if (failures.length > 0) {
++    const reason = `${failures.length} MyChama account${failures.length === 1 ? "" : "s"} could not be updated: ${failures[0]}`;
++    const target = accounts.find((a) => a.account === "chama") ?? accounts[0];
++    target.reason = reason;
++    if (target.account === "chama") target.ready = false;
++  }
++  await audit({ action: "payout_accounts_synced", agentId: uid, meta: { ready: true, chamasUpdated: written, failures: failures.length } });
++  return { accounts };
++}
+diff --git a/functions-desk/src/connectors/pure.test.ts b/functions-desk/src/connectors/pure.test.ts
+new file mode 100644
+index 0000000..cb87402
+--- /dev/null
++++ b/functions-desk/src/connectors/pure.test.ts
+@@ -0,0 +1,62 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { adminPhoneE164, assertEntityKey, classifyEntityCode, customerDocId, isSameNumber } from "./entities.js";
++import { matchBankCode } from "./deps.js";
++import { assembleDraft, buildDelegateCall, compactResult } from "./tickets.js";
++import { subaccountDetailsFrom } from "./payout.js";
++
++const info = (adminPhone: string) => ({ displayName: "x", adminName: "a", adminPhone, agentAuthorised: true, plan: "p", creditsBalance: 0, audiences: [], reportTypes: [], exportKinds: [] });
++
++test("code shapes map to products; others are rejected", () => {
++  assert.deepEqual(classifyEntityCode(" smc-0042 "), { product: "chama", code: "SMC-0042" });
++  assert.deepEqual(classifyEntityCode("PYL-0007"), { product: "pms", code: "PYL-0007" });
++  assert.deepEqual(classifyEntityCode("01234567"), { product: "school", code: "01234567" });
++  for (const bad of ["", "SMC-1", "XYZ-0001", "COG-0001", "1234567", "123456789", "SMC-00A1", "PYL0001"]) assert.throws(() => classifyEntityCode(bad), bad);
++});
++test("entity key product must match its code shape", () => {
++  assert.equal(assertEntityKey("chama:SMC-0001").entityKey, "chama:SMC-0001");
++  assert.throws(() => assertEntityKey("school:SMC-0001"));
++  assert.throws(() => assertEntityKey("chama:01234567"));
++  assert.equal(customerDocId("chama:SMC-0001"), "chama:SMC-0001");
++});
++test("admin phone is normalised; self-owned detected", () => {
++  assert.equal(adminPhoneE164(info("0712345678")), "+254712345678");
++  assert.throws(() => adminPhoneE164(info("nope")));
++  assert.ok(isSameNumber("+254712345678", "+254712345678"));
++  assert.ok(!isSameNumber("+254712345678", "+254722222222"));
++});
++test("bank code matching mirrors PAY", () => {
++  const banks = [{ code: "MPESA", name: "M-PESA" }, { code: "63", name: "Equity Bank" }];
++  assert.equal(matchBankCode(banks, "mpesa"), "MPESA");
++  assert.equal(matchBankCode(banks, "equity"), "63");
++  assert.equal(matchBankCode(banks, "Unknown"), "unknown");
++});
++test("payout details need every field", () => {
++  const full = { businessName: "b", settlementBank: "mpesa", accountNumber: "0712345678", name: "n", email: "e@x.co", phone: "254712345678" };
++  assert.ok(subaccountDetailsFrom(full).ok);
++  assert.ok(!subaccountDetailsFrom({ ...full, email: undefined }).ok);
++});
++test("drafts assemble inline rows then chunks in order", () => {
++  const d = assembleDraft({ rows: [{ a: 1 }], x: 1 }, [{ rows: [{ a: 2 }] }, { rows: [{ a: 3 }] }]);
++  assert.deepEqual(d.rows, [{ a: 1 }, { a: 2 }, { a: 3 }]); assert.equal(d.x, 1);
++  assert.deepEqual(assembleDraft(undefined, []), {});
++});
++test("service types map to the right delegate action", () => {
++  assert.equal(buildDelegateCall("import_excel", { rows: [{ name: "a" }] }).action, "commit_records");
++  assert.equal(buildDelegateCall("import_excel", { rows: [{ name: "a" }] }).payload.source, "excel");
++  assert.equal(buildDelegateCall("manual_entry", { rows: [{ name: "a" }] }).payload.source, "manual");
++  assert.equal(buildDelegateCall("schedule_setup", { name: "n", message: "m", audience: "all", schedule: { kind: "weekly", at: "09:00", days: [1] } }).action, "schedule_sms");
++  const send = buildDelegateCall("bulk_reminder", { message: "m", audience: "all" });
++  assert.equal(send.action, "send_sms_now"); assert.equal(send.payload.dryRun, false);
++});
++test("incomplete drafts are refused", () => {
++  assert.throws(() => buildDelegateCall("import_excel", {}));
++  assert.throws(() => buildDelegateCall("import_excel", { rows: [] }));
++  assert.throws(() => buildDelegateCall("schedule_setup", { name: "n", message: "m", audience: "all", schedule: { kind: "hourly", at: "x" } }));
++  assert.throws(() => buildDelegateCall("bulk_reminder", { message: "" , audience: "all" }));
++});
++test("stored product results are bounded", () => {
++  const r = compactResult({ created: 1, errors: Array.from({ length: 500 }, (_, i) => i) }) as { errors: number[]; errorsTotal: number };
++  assert.equal(r.errors.length, 200); assert.equal(r.errorsTotal, 500);
++  assert.deepEqual(compactResult({ created: 2 }), { created: 2 });
++});
+diff --git a/functions-desk/src/connectors/resolve.ts b/functions-desk/src/connectors/resolve.ts
+new file mode 100644
+index 0000000..e8f2688
+--- /dev/null
++++ b/functions-desk/src/connectors/resolve.ts
+@@ -0,0 +1,53 @@
++import type {
++  DelegateValidateResult, ImportRow, ResolveEntityOut, ValidateImportOut,
++} from "../contract.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { requireSession } from "../kernel/session.js";
++import { maskPhone } from "../paystack/phone.js";
++import type { Deps } from "./deps.js";
++import { adminPhoneE164, assertEntityKey, classifyEntityCode, lookupEntity } from "./entities.js";
++import { record } from "./input.js";
++
++/** Code -> product -> entity_info via the product's delegate. Never returns the full admin phone. */
++export async function resolveEntity(deps: Deps, uid: string, raw: unknown): Promise<ResolveEntityOut> {
++  const d = record(raw);
++  const { product, code } = classifyEntityCode(typeof d.code === "string" ? d.code : "");
++  const agent = await requireActiveAgent(uid);
++  const cfg = await deps.getConfig();
++  const { info, authorised } = await lookupEntity(deps, cfg, agent, product, code);
++  const out: ResolveEntityOut = {
++    entityKey: `${product}:${code}`, product, displayName: info.displayName,
++    adminPhoneMasked: maskPhone(adminPhoneE164(info)), agentHasGrant: authorised,
++  };
++  await audit({ action: "entity_resolved", agentId: uid, entityKey: out.entityKey, meta: { authorised } });
++  return out;
++}
++
++export const MAX_IMPORT_ROWS = 5000;
++
++/** scope `import` -> the product's own validate_records; its errors are passed through unchanged. */
++export async function validateImport(deps: Deps, uid: string, raw: unknown): Promise<ValidateImportOut> {
++  const d = record(raw);
++  const sessionId = typeof d.sessionId === "string" ? d.sessionId : "";
++  if (!sessionId) throw new DeskError("invalid_argument", "Session is required");
++  const rows = d.rows;
++  if (!Array.isArray(rows) || rows.length === 0) throw new DeskError("invalid_argument", "There are no rows to check");
++  if (rows.length > MAX_IMPORT_ROWS) throw new DeskError("invalid_argument", `Too many rows (${rows.length}). Split the file into parts of at most ${MAX_IMPORT_ROWS}.`);
++  if (rows.some((r) => !r || typeof r !== "object" || Array.isArray(r))) throw new DeskError("invalid_argument", "Every row must be a set of columns");
++
++  const agent = await requireActiveAgent(uid);
++  const ctx = await requireSession({ sessionId, uid, scope: "import" });
++  const { code } = assertEntityKey(ctx.entityKey);
++  const cfg = await deps.getConfig();
++  const result = await deps.delegate<DelegateValidateResult>(cfg, ctx.product, {
++    action: "validate_records", entityCode: code, agentCode: agent.agentCode,
++    payload: { rows: rows as ImportRow[] },
++  });
++  await audit({
++    action: "import_validated", agentId: uid, entityKey: ctx.entityKey, sessionId,
++    meta: { rows: rows.length, valid: result.valid.length, errors: result.errors.length },
++  });
++  return { valid: result.valid, errors: result.errors };
++}
+diff --git a/functions-desk/src/connectors/tickets.ts b/functions-desk/src/connectors/tickets.ts
+new file mode 100644
+index 0000000..f6d6da7
+--- /dev/null
++++ b/functions-desk/src/connectors/tickets.ts
+@@ -0,0 +1,145 @@
++/**
++ * Executes a PAID desk ticket through the product's delegate. The product runs its own rules; desk records the outcome.
++ * Idempotent: the delegate call carries requestId = ticketId (a repeat never repeats the effect) and the final status
++ * is written only while the ticket is still `paid`.
++ */
++import type {
++  DelegateAction, DelegateCommitPayload, DelegateSchedulePayload, DelegateSendPayload, ImportRow, ServiceType,
++} from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { parseEntityKey } from "../entity.js";
++import { audit } from "../kernel/audit.js";
++import type { AgentDoc, TicketDoc } from "../types.js";
++import type { Deps } from "./deps.js";
++
++export const MAX_EXECUTION_ATTEMPTS = 5;
++const MAX_STORED_ERRORS = 200;
++
++/**
++ * Drafts live inline on the ticket and, when large, in `desk_tickets/{id}/draft/{0000..}`. Chunks are read in id order and
++ * every chunk's `rows` are appended to the inline `rows`. Pure.
++ */
++export function assembleDraft(inline: Record<string, unknown> | undefined, chunks: readonly Record<string, unknown>[]): Record<string, unknown> {
++  const draft: Record<string, unknown> = { ...(inline ?? {}) };
++  const rows: unknown[] = Array.isArray(draft.rows) ? [...(draft.rows as unknown[])] : [];
++  for (const c of chunks) if (Array.isArray(c.rows)) rows.push(...(c.rows as unknown[]));
++  if (rows.length > 0 || "rows" in draft) draft.rows = rows;
++  return draft;
++}
++
++export interface DelegateCall { action: DelegateAction; payload: Record<string, unknown> }
++
++const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
++const str = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
++const incomplete = () => new DeskError("invalid_argument", "The saved request is incomplete, so it could not be run. Please contact support.");
++
++/** service type -> delegate action + payload. import/manual -> commit_records, schedule -> schedule_sms, reminder -> send_sms_now. Pure. */
++export function buildDelegateCall(serviceType: ServiceType, draft: Record<string, unknown>): DelegateCall {
++  switch (serviceType) {
++    case "import_excel":
++    case "manual_entry": {
++      const rows = draft.rows;
++      if (!Array.isArray(rows) || rows.length === 0 || !rows.every(isObj)) throw incomplete();
++      const payload: DelegateCommitPayload = { rows: rows as ImportRow[], source: serviceType === "import_excel" ? "excel" : "manual" };
++      return { action: "commit_records", payload: { ...payload } };
++    }
++    case "schedule_setup": {
++      const s = draft.schedule;
++      const kinds = ["once", "daily", "weekly", "monthly"];
++      if (!str(draft.name) || !str(draft.message) || !str(draft.audience) || !isObj(s) || !kinds.includes(s.kind as string) || !str(s.at)) throw incomplete();
++      const days = Array.isArray(s.days) && s.days.every((n) => typeof n === "number") ? (s.days as number[]) : undefined;
++      const memberIds = Array.isArray(draft.memberIds) && draft.memberIds.every(str) ? (draft.memberIds as string[]) : undefined;
++      const payload: DelegateSchedulePayload = {
++        name: draft.name as string, message: draft.message as string, audience: draft.audience as string,
++        ...(memberIds ? { memberIds } : {}),
++        schedule: { kind: s.kind as "once" | "daily" | "weekly" | "monthly", at: s.at as string, ...(days ? { days } : {}) },
++      };
++      return { action: "schedule_sms", payload: { ...payload } };
++    }
++    case "bulk_reminder": {
++      if (!str(draft.message) || !str(draft.audience)) throw incomplete();
++      const memberIds = Array.isArray(draft.memberIds) && draft.memberIds.every(str) ? (draft.memberIds as string[]) : undefined;
++      // dryRun is forced off: the customer already approved the send with their per-action OTP at charge time.
++      const payload: DelegateSendPayload = { message: draft.message as string, audience: draft.audience as string, ...(memberIds ? { memberIds } : {}), dryRun: false };
++      return { action: "send_sms_now", payload: { ...payload } };
++    }
++    default:
++      throw incomplete();
++  }
++}
++
++/** Keeps the stored copy of a product result well under Firestore's document limit. Pure. */
++export function compactResult(result: unknown): unknown {
++  if (!isObj(result) || !Array.isArray(result.errors) || result.errors.length <= MAX_STORED_ERRORS) return result;
++  return { ...result, errors: result.errors.slice(0, MAX_STORED_ERRORS), errorsTotal: result.errors.length };
++}
++
++export type ExecuteOutcome = "skipped" | "committed" | "failed";
++
++async function finalize(ticketId: string, patch: Record<string, unknown>, now: number): Promise<boolean> {
++  const ref = col("tickets").doc(ticketId);
++  return db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    if (!snap.exists || (snap.data() as TicketDoc).status !== "paid") return false;
++    tx.update(ref, { ...patch, updatedAt: now });
++    return true;
++  });
++}
++
++async function bumpAttempts(ticketId: string): Promise<number> {
++  const ref = col("tickets").doc(ticketId);
++  return db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const n = ((snap.data()?.executionAttempts as number | undefined) ?? 0) + 1;
++    tx.update(ref, { executionAttempts: n });
++    return n;
++  });
++}
++
++export async function executePaidTicket(deps: Deps, ticketId: string): Promise<ExecuteOutcome> {
++  const snap = await col("tickets").doc(ticketId).get();
++  if (!snap.exists) return "skipped";
++  const ticket = snap.data() as TicketDoc;
++  if (ticket.status !== "paid") return "skipped";
++
++  const fail = async (message: string): Promise<ExecuteOutcome> => {
++    const done = await finalize(ticketId, { status: "failed", failureReason: message }, deps.now());
++    if (!done) return "skipped";
++    await audit({ action: "ticket_failed", agentId: ticket.agentId, entityKey: ticket.entityKey, meta: { ticketId, serviceType: ticket.serviceType, reason: message } });
++    return "failed";
++  };
++
++  const agentSnap = await col("agents").doc(ticket.agentId).get();
++  if (!agentSnap.exists) return fail("The desk that bought this service no longer exists. Please contact support.");
++  const agent = agentSnap.data() as AgentDoc;
++
++  let call: DelegateCall;
++  let entity: { product: ReturnType<typeof parseEntityKey>["product"]; code: string };
++  try {
++    const chunkSnap = await col("tickets").doc(ticketId).collection("draft").get();
++    const chunks = chunkSnap.docs.sort((a, b) => (a.id < b.id ? -1 : 1)).map((d) => d.data());
++    call = buildDelegateCall(ticket.serviceType, assembleDraft(ticket.draft, chunks));
++    entity = parseEntityKey(ticket.entityKey);
++  } catch (err) {
++    return fail(err instanceof DeskError ? err.message : "The saved request could not be read. Please contact support.");
++  }
++
++  const cfg = await deps.getConfig();
++  try {
++    const result = await deps.delegate<unknown>(cfg, entity.product, {
++      action: call.action, entityCode: entity.code, agentCode: agent.agentCode, requestId: ticketId, payload: call.payload,
++    });
++    const done = await finalize(ticketId, { status: "committed", productResult: compactResult(result), committedAt: deps.now() }, deps.now());
++    if (!done) return "skipped";
++    await audit({ action: "ticket_committed", agentId: ticket.agentId, entityKey: ticket.entityKey, meta: { ticketId, serviceType: ticket.serviceType, productAction: call.action } });
++    return "committed";
++  } catch (err) {
++    if (!(err instanceof DeskError)) throw err;
++    if (err.code !== "internal") return fail(err.message); // the product refused: its message is the reason
++    // Could not reach the product: let the trigger retry, up to a limit.
++    const attempts = await bumpAttempts(ticketId);
++    if (attempts < MAX_EXECUTION_ATTEMPTS) throw err;
++    return fail("The service could not be reached after several tries. Please contact support; your payment is on record.");
++  }
++}
+diff --git a/functions-desk/src/otp/core.ts b/functions-desk/src/otp/core.ts
+new file mode 100644
+index 0000000..11c3572
+--- /dev/null
++++ b/functions-desk/src/otp/core.ts
+@@ -0,0 +1,109 @@
++/**
++ * One implementation of the OTP rules shared by access sessions, per-action OTPs and support confirmation codes:
++ * sha256(otp:id) storage, constant-time compare, at most 5 attempts, expiry. Plus a rolling-window rate limiter kept in
++ * `desk_counters` (server-only), so limits hold across instances without extra indexes.
++ */
++import { createHash, timingSafeEqual } from "node:crypto";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++
++export const OTP_TTL_MS = 5 * 60_000;
++export const SESSION_TTL_MS = 60 * 60_000;
++export const MAX_OTP_ATTEMPTS = 5;
++export const ACCESS_REQUESTS_PER_HOUR = 3;
++export const OTP_MESSAGES_PER_ENTITY_PER_DAY = 10;
++const HOUR_MS = 60 * 60_000;
++const DAY_MS = 24 * HOUR_MS;
++
++export const isOtpShape = (v: unknown): v is string => typeof v === "string" && /^\d{6}$/.test(v.trim());
++
++/** Only the hash is stored: sha256("<otp>:<id>"). */
++export const hashOtp = (otp: string, id: string): string => createHash("sha256").update(`${otp}:${id}`).digest("hex");
++
++export function otpMatches(storedHashHex: string | undefined, otp: string, id: string): boolean {
++  if (!storedHashHex || !/^[0-9a-f]{64}$/.test(storedHashHex)) return false;
++  const a = Buffer.from(storedHashHex, "hex");
++  const b = Buffer.from(hashOtp(otp, id), "hex");
++  return a.length === b.length && timingSafeEqual(a, b);
++}
++
++export type AttemptResult =
++  | { kind: "ok"; attempts: number }
++  | { kind: "wrong"; attempts: number; locked: boolean }
++  | { kind: "expired" }
++  | { kind: "locked" };
++
++/** Pure decision for one OTP attempt. A correct code on the 5th try still counts. */
++export function evaluateOtpAttempt(
++  state: { hash?: string; attempts: number; expiresAt: number }, otp: string, id: string, now: number,
++): AttemptResult {
++  if (state.attempts >= MAX_OTP_ATTEMPTS) return { kind: "locked" };
++  if (state.expiresAt <= now) return { kind: "expired" };
++  const attempts = state.attempts + 1;
++  if (otpMatches(state.hash, otp, id)) return { kind: "ok", attempts };
++  return { kind: "wrong", attempts, locked: attempts >= MAX_OTP_ATTEMPTS };
++}
++
++export function wrongCodeMessage(r: Extract<AttemptResult, { kind: "wrong" }>, what: string): string {
++  return r.locked
++    ? `Too many wrong codes. Request a new ${what}.`
++    : `That code is not correct. ${MAX_OTP_ATTEMPTS - r.attempts} ${MAX_OTP_ATTEMPTS - r.attempts === 1 ? "try" : "tries"} left.`;
++}
++
++// ------------------------------------------------------------------ rate limiting
++export interface RateRule { key: string; limit: number; windowMs: number; message: (retryAfterMs: number) => string }
++export interface RateTaken { release(): Promise<void> }
++
++const rateDocId = (key: string): string => `rl_${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
++const minutes = (ms: number): number => Math.max(1, Math.ceil(ms / 60_000));
++
++/** Rolling-window slot: true and recorded, or false with how long until a slot frees up. */
++async function takeOne(rule: RateRule, now: number): Promise<{ ok: true; stamp: number } | { ok: false; retryAfterMs: number }> {
++  const ref = col("counters").doc(rateDocId(rule.key));
++  return db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const stamps = ((snap.data()?.stamps as number[] | undefined) ?? []).filter((t) => t > now - rule.windowMs);
++    if (stamps.length >= rule.limit) return { ok: false as const, retryAfterMs: Math.min(...stamps) + rule.windowMs - now };
++    stamps.push(now);
++    tx.set(ref, { stamps, updatedAt: now });
++    return { ok: true as const, stamp: now };
++  });
++}
++
++async function releaseOne(rule: RateRule, stamp: number): Promise<void> {
++  const ref = col("counters").doc(rateDocId(rule.key));
++  await db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const stamps = (snap.data()?.stamps as number[] | undefined) ?? [];
++    const i = stamps.indexOf(stamp);
++    if (i < 0) return;
++    stamps.splice(i, 1);
++    tx.set(ref, { stamps, updatedAt: Date.now() });
++  });
++}
++
++/** Takes a slot in every rule or none (a later refusal releases the earlier slots). */
++export async function takeRates(rules: readonly RateRule[], now: number): Promise<RateTaken> {
++  const taken: { rule: RateRule; stamp: number }[] = [];
++  const release = async () => { for (const t of taken) await releaseOne(t.rule, t.stamp).catch(() => undefined); };
++  for (const rule of rules) {
++    const r = await takeOne(rule, now);
++    if (!r.ok) {
++      await release();
++      throw new DeskError("failed_precondition", rule.message(r.retryAfterMs));
++    }
++    taken.push({ rule, stamp: r.stamp });
++  }
++  return { release };
++}
++
++/** The per-entity daily cap on codes sent to a customer admin (access OTPs, action OTPs and support codes share it). */
++export const entityDailyRule = (entityKey: string): RateRule => ({
++  key: `otp-day:${entityKey}`, limit: OTP_MESSAGES_PER_ENTITY_PER_DAY, windowMs: DAY_MS,
++  message: () => "Too many codes have been sent to this customer today. Please try again tomorrow.",
++});
++
++export const accessHourRule = (uid: string, entityKey: string): RateRule => ({
++  key: `access-hour:${uid}:${entityKey}`, limit: ACCESS_REQUESTS_PER_HOUR, windowMs: HOUR_MS,
++  message: (ms) => `You have asked this customer for access too many times. Try again in ${minutes(ms)} minute${minutes(ms) === 1 ? "" : "s"}.`,
++});
+diff --git a/functions-desk/src/otp/handlers.ts b/functions-desk/src/otp/handlers.ts
+new file mode 100644
+index 0000000..8eda006
+--- /dev/null
++++ b/functions-desk/src/otp/handlers.ts
+@@ -0,0 +1,119 @@
++import type {
++  OtpAction, RequestActionOtpOut, VerifyActionOtpOut,
++} from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { OTP_ACTIONS, requireSession } from "../kernel/session.js";
++import type { ActionOtpDoc, SessionDoc } from "../types.js";
++import { record } from "../connectors/input.js";
++import type { Deps } from "../connectors/deps.js";
++import {
++  adminPhoneE164, assertEntityKey, lookupEntity, NOT_AUTHORISED_MESSAGE,
++} from "../connectors/entities.js";
++import {
++  entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, takeRates, wrongCodeMessage,
++} from "./core.js";
++import { ACTION_SCOPE, actionSmsText, checkActionSummary } from "./messages.js";
++
++function parseAction(v: unknown): OtpAction {
++  if (typeof v !== "string" || !OTP_ACTIONS.has(v as OtpAction)) throw new DeskError("invalid_argument", "Unknown action");
++  return v as OtpAction;
++}
++
++/** Active session whose scopes include the action -> a fresh OTP SMSed to the customer, repeating the summary. */
++export async function requestActionOtp(deps: Deps, uid: string, raw: unknown): Promise<RequestActionOtpOut> {
++  const d = record(raw);
++  const sessionId = typeof d.sessionId === "string" ? d.sessionId : "";
++  if (!sessionId) throw new DeskError("invalid_argument", "Session is required");
++  const action = parseAction(d.action);
++  const check = checkActionSummary(action, d.summary);
++  if (!check.ok) throw new DeskError("invalid_argument", check.message);
++  const summary = d.summary as string;
++
++  const agent = await requireActiveAgent(uid);
++  const ctx = await requireSession({ sessionId, uid, scope: ACTION_SCOPE[action] });
++  if (action === "rent_stk" && ctx.product !== "pms") {
++    throw new DeskError("failed_precondition", "Rent STK is only available for Plot Yangu accounts");
++  }
++
++  // Re-check with the product now: the customer may have removed this desk since the session opened.
++  const { code } = assertEntityKey(ctx.entityKey);
++  const cfg = await deps.getConfig();
++  const lookup = await lookupEntity(deps, cfg, agent, ctx.product, code);
++  if (!lookup.authorised) throw new DeskError("permission_denied", NOT_AUTHORISED_MESSAGE);
++  const adminPhone = adminPhoneE164(lookup.info);
++
++  const taken = await takeRates([entityDailyRule(ctx.entityKey)], deps.now());
++  const ref = col("actionOtps").doc();
++  const otp = deps.randomOtp();
++  const now = deps.now();
++  const doc: ActionOtpDoc = {
++    actionId: ref.id, sessionId, agentId: uid, action, summary,
++    otpHash: hashOtp(otp, ref.id), otpAttempts: 0, otpExpiresAt: now + OTP_TTL_MS, createdAt: now,
++  };
++  await ref.create(doc);
++  try {
++    await deps.sendSms(adminPhone, actionSmsText(agent.name, agent.agentCode, summary, otp));
++  } catch {
++    await ref.delete().catch(() => undefined);
++    await taken.release();
++    throw new DeskError("internal", "We could not send the confirmation code to the customer. Please try again.");
++  }
++  await audit({ action: "action_otp_requested", agentId: uid, entityKey: ctx.entityKey, sessionId, meta: { otpAction: action, actionId: ref.id } });
++  return { actionId: ref.id };
++}
++
++type VerifyOutcome =
++  | { kind: "ok"; sessionId: string; entityKey: string; otpAction: OtpAction } | { kind: "missing" } | { kind: "foreign" } | { kind: "used" } | { kind: "expired" }
++  | { kind: "locked" } | { kind: "session" } | { kind: "wrong"; attempts: number; locked: boolean };
++
++/** At most 5 attempts, expiry, constant-time compare. A verified OTP stays single-use: requireSession consumes it. */
++export async function verifyActionOtp(deps: Deps, uid: string, raw: unknown): Promise<VerifyActionOtpOut> {
++  const d = record(raw);
++  const actionId = typeof d.actionId === "string" ? d.actionId : "";
++  if (!actionId) throw new DeskError("invalid_argument", "Action is required");
++  if (!isOtpShape(d.otp)) throw new DeskError("invalid_argument", "Enter the 6-digit code");
++  const otp = (d.otp as string).trim();
++  const now = deps.now();
++  const aRef = col("actionOtps").doc(actionId);
++
++  const out = await db().runTransaction(async (tx): Promise<VerifyOutcome> => {
++    const aSnap = await tx.get(aRef);
++    if (!aSnap.exists) return { kind: "missing" };
++    const a = aSnap.data() as ActionOtpDoc;
++    if (a.agentId !== uid) return { kind: "foreign" };
++    if (a.consumedAt) return { kind: "used" };
++    const sSnap = await tx.get(col("sessions").doc(a.sessionId));
++    const s = sSnap.exists ? (sSnap.data() as SessionDoc) : undefined;
++    if (!s || s.agentId !== uid || s.status !== "active" || s.expiresAt <= now) return { kind: "session" };
++    const ok: VerifyOutcome = { kind: "ok", sessionId: a.sessionId, entityKey: s.entityKey, otpAction: a.action };
++    if (a.verifiedAt) return ok; // double submit: already verified, still unconsumed
++    const r = evaluateOtpAttempt({ hash: a.otpHash, attempts: a.otpAttempts, expiresAt: a.otpExpiresAt }, otp, actionId, now);
++    if (r.kind === "locked") return { kind: "locked" };
++    if (r.kind === "expired") return { kind: "expired" };
++    if (r.kind === "wrong") {
++      // "ended": a code that has used its attempts can never verify, so also expire it.
++      tx.update(aRef, r.locked ? { otpAttempts: r.attempts, otpExpiresAt: now } : { otpAttempts: r.attempts });
++      return r;
++    }
++    tx.update(aRef, { otpAttempts: r.attempts, verifiedAt: now });
++    return ok;
++  });
++
++  switch (out.kind) {
++    case "ok": {
++      await audit({ action: "action_otp_verified", agentId: uid, entityKey: out.entityKey, sessionId: out.sessionId, meta: { otpAction: out.otpAction, actionId } });
++      return { ok: true };
++    }
++    case "missing": throw new DeskError("otp_required", "Confirm this action with the customer's OTP first");
++    case "foreign": throw new DeskError("permission_denied", "This code was issued to another agent");
++    case "used": throw new DeskError("otp_required", "This code was already used. Request a new one.");
++    case "session": throw new DeskError("session_invalid", "The session has ended. Start a new session.");
++    case "expired": throw new DeskError("otp_invalid", "This code has expired. Request a new one.");
++    case "locked": throw new DeskError("otp_invalid", "Too many wrong codes. Request a new confirmation code.");
++    case "wrong": throw new DeskError("otp_invalid", wrongCodeMessage(out, "confirmation code"));
++  }
++  throw new DeskError("internal", "Unexpected verification state");
++}
+diff --git a/functions-desk/src/otp/index.ts b/functions-desk/src/otp/index.ts
+new file mode 100644
+index 0000000..bbe94a1
+--- /dev/null
++++ b/functions-desk/src/otp/index.ts
+@@ -0,0 +1,15 @@
++import type { RequestActionOtpIn, RequestActionOtpOut, VerifyActionOtpIn, VerifyActionOtpOut } from "../contract.js";
++import { deskCallable } from "../connectors/common.js";
++import { defaultDeps } from "../connectors/deps.js";
++import { HP_SECRETS } from "../kernel/sms.js";
++import { requestActionOtp, verifyActionOtp } from "./handlers.js";
++
++export const desk_requestActionOtp = deskCallable<RequestActionOtpIn, RequestActionOtpOut>(
++  { secrets: HP_SECRETS, timeoutSeconds: 120 },
++  (uid, data) => requestActionOtp(defaultDeps(), uid, data),
++);
++
++export const desk_verifyActionOtp = deskCallable<VerifyActionOtpIn, VerifyActionOtpOut>(
++  {},
++  (uid, data) => verifyActionOtp(defaultDeps(), uid, data),
++);
+diff --git a/functions-desk/src/otp/messages.ts b/functions-desk/src/otp/messages.ts
+new file mode 100644
+index 0000000..e3be847
+--- /dev/null
++++ b/functions-desk/src/otp/messages.ts
+@@ -0,0 +1,62 @@
++import {
++  EXPORT_KINDS, summaryBulkSms, summaryExport, summaryRentStk, type OtpAction, type Scope,
++} from "../contract.js";
++import { cleanSmsText, SMS_MAX_LENGTH } from "../kernel/sms.js";
++
++export const RENT_STK_MAX_TENANTS = 200;
++export const BULK_SMS_MAX_RECIPIENTS = 1_000_000;
++
++/** Which session scope an action OTP needs. */
++export const ACTION_SCOPE: Record<OtpAction, Scope> = { bulk_sms: "bulk_sms", rent_stk: "rent_stk", export: "export" };
++
++export type SummaryCheck = { ok: true } | { ok: false; message: string };
++
++/**
++ * The summary is what the customer reads in their SMS, so it must be EXACTLY what the contract builders produce.
++ * We parse the variable part and rebuild the string; anything that doesn't round-trip is refused. Pure.
++ */
++export function checkActionSummary(action: OtpAction, summary: unknown): SummaryCheck {
++  const bad: SummaryCheck = { ok: false, message: "The confirmation text does not match the action" };
++  if (typeof summary !== "string") return bad;
++  if (action === "bulk_sms") {
++    const m = /^SMS to (\d{1,7}) recipients$/.exec(summary);
++    const n = m ? Number(m[1]) : 0;
++    return n >= 1 && n <= BULK_SMS_MAX_RECIPIENTS && summary === summaryBulkSms(n) ? { ok: true } : bad;
++  }
++  if (action === "rent_stk") {
++    const m = /^Rent STK to (\d{1,3}) tenants$/.exec(summary);
++    const n = m ? Number(m[1]) : 0;
++    return n >= 1 && n <= RENT_STK_MAX_TENANTS && summary === summaryRentStk(n) ? { ok: true } : bad;
++  }
++  const m = /^Export (\S+)$/.exec(summary);
++  const kind = m ? m[1] : "";
++  return (EXPORT_KINDS as readonly string[]).includes(kind) && summary === summaryExport(kind) ? { ok: true } : bad;
++}
++
++const clip = (s: string, n: number): string => {
++  const t = cleanSmsText(s);
++  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}.` : t;
++};
++
++/** Keeps the code and fixed wording intact: only the names are shortened so the provider's length cap can never cut the OTP. */
++function bounded(build: (agentName: string, entityName: string) => string, agentName: string, entityName: string): string {
++  let a = 40; let e = 50;
++  for (;;) {
++    const msg = build(clip(agentName, a), clip(entityName, e));
++    if (msg.length <= SMS_MAX_LENGTH || (a <= 8 && e <= 8)) return msg;
++    a = Math.max(8, a - 8); e = Math.max(8, e - 8);
++  }
++}
++
++export const accessSmsText = (agentName: string, agentCode: string, entityName: string, otp: string): string =>
++  bounded((a, e) => `Samuhia Desk: ${a} (${agentCode}) asks to access ${e}. Code ${otp}, valid 5 min. Share it ONLY if you asked for help.`,
++    agentName, entityName);
++
++/** Repeats the summary so the customer sees exactly what they are approving. */
++export const actionSmsText = (agentName: string, agentCode: string, summary: string, otp: string): string =>
++  `Samuhia Desk: ${clip(agentName, 40)} (${agentCode}) asks to: ${summary}. Code ${otp}, valid 5 min. Share it ONLY if you asked for help.`;
++
++/** Support confirmation. Deliberately says nothing about money or rewards. */
++export const supportSmsText = (agentName: string, agentCode: string, entityName: string, category: string, code: string): string =>
++  bounded((a, e) => `Samuhia Desk: ${a} (${agentCode}) logged a ${category} support visit for ${e}. Confirmation code ${code}, valid 24 h. Share it ONLY if you received help.`,
++    agentName, entityName);
+diff --git a/functions-desk/src/otp/otp.emu.test.ts b/functions-desk/src/otp/otp.emu.test.ts
+new file mode 100644
+index 0000000..0df6d0d
+--- /dev/null
++++ b/functions-desk/src/otp/otp.emu.test.ts
+@@ -0,0 +1,77 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { summaryBulkSms, summaryExport } from "../contract.js";
++import { col } from "../db.js";
++import { requireSession } from "../kernel/session.js";
++import { requestActionOtp, verifyActionOtp } from "./handlers.js";
++import { clearChama, entityInfo, harness, lastOtp, openSession, rejects, seedAgent, type Harness } from "../connectors/harness.test.js";
++
++const opts = { skip: !emulatorEnabled };
++const KEY = "chama:SMC-0001";
++let h: Harness; let sid: string;
++beforeEach(async () => {
++  if (!emulatorEnabled) return;
++  await clearFirestore(); await clearChama(); h = harness();
++  await seedAgent("1"); await seedAgent("2");
++  sid = await openSession(h, "1", KEY, ["read", "bulk_sms", "export"]);
++});
++
++test("request SMS repeats the summary and stores only a hash", opts, async () => {
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(25) });
++  const m = h.sms[h.sms.length - 1].message;
++  assert.ok(m.includes("SMS to 25 recipients") && m.includes("valid 5 min"));
++  const a = (await col("actionOtps").doc(r.actionId).get()).data()!;
++  assert.ok(a.otpHash && !JSON.stringify(a).includes(lastOtp(h)));
++  assert.ok(Math.abs(a.otpExpiresAt - (a.createdAt + 5 * 60_000)) < 1000);
++  assert.equal(a.sessionId, sid); assert.equal(a.agentId, "1"); assert.equal(a.action, "bulk_sms");
++});
++test("verify then requireSession consumes it exactly once", opts, async () => {
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "export", summary: summaryExport("members") });
++  assert.deepEqual(await verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) }), { ok: true });
++  assert.deepEqual(await verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) }), { ok: true }); // double submit
++  await requireSession({ sessionId: sid, uid: "1", scope: "export", action: "export", actionId: r.actionId });
++  await rejects(requireSession({ sessionId: sid, uid: "1", scope: "export", action: "export", actionId: r.actionId }), "otp_required");
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) }), "otp_required", /already used/);
++});
++test("the summary must equal the contract builder's output", opts, async () => {
++  for (const [action, summary] of [["bulk_sms", "SMS to 0 recipients"], ["bulk_sms", "send everything"], ["export", "Export secrets"], ["rent_stk", summaryBulkSms(2)]] as const) {
++    await rejects(requestActionOtp(h.deps, "1", { sessionId: sid, action, summary }), "invalid_argument");
++  }
++  assert.equal((await col("actionOtps").get()).size, 0);
++});
++test("the session must include the action's scope and belong to the agent", opts, async () => {
++  const readOnly = await openSession(h, "1", "chama:SMC-0002", ["read"]);
++  await rejects(requestActionOtp(h.deps, "1", { sessionId: readOnly, action: "bulk_sms", summary: summaryBulkSms(2) }), "permission_denied");
++  await rejects(requestActionOtp(h.deps, "2", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(2) }), "permission_denied");
++  await rejects(requestActionOtp(h.deps, "1", { sessionId: sid, action: "refund", summary: "x" }), "invalid_argument");
++});
++test("an authorisation removed by the customer stops new action OTPs", opts, async () => {
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  await rejects(requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(2) }), "permission_denied");
++});
++test("wrong codes: 5 attempts then dead, even for the right code", opts, async () => {
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(3) });
++  const good = lastOtp(h); const bad = good === "000000" ? "111111" : "000000";
++  for (let i = 0; i < 4; i++) await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: bad }), "otp_invalid", /not correct/);
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: bad }), "otp_invalid", /Too many/);
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: good }), "otp_invalid");
++});
++test("expired, foreign, unknown and malformed", opts, async () => {
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(3) });
++  await rejects(verifyActionOtp(h.deps, "2", { actionId: r.actionId, otp: lastOtp(h) }), "permission_denied");
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: "nope", otp: "123456" }), "otp_required");
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: "abc" }), "invalid_argument");
++  await col("actionOtps").doc(r.actionId).update({ otpExpiresAt: Date.now() - 1 });
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) }), "otp_invalid", /expired/);
++});
++test("an ended session invalidates its pending action OTP", opts, async () => {
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(3) });
++  await col("sessions").doc(sid).update({ status: "ended" });
++  await rejects(verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) }), "session_invalid");
++});
++test("SMS failure deletes the OTP and says so", opts, async () => {
++  h.state.smsFails = true;
++  await rejects(requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(3) }), "internal", /could not send/);
++  assert.equal((await col("actionOtps").get()).size, 0);
++});
+diff --git a/functions-desk/src/otp/otp.test.ts b/functions-desk/src/otp/otp.test.ts
+new file mode 100644
+index 0000000..db7e48b
+--- /dev/null
++++ b/functions-desk/src/otp/otp.test.ts
+@@ -0,0 +1,67 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { evaluateOtpAttempt, hashOtp, isOtpShape, otpMatches, wrongCodeMessage } from "./core.js";
++import { accessSmsText, actionSmsText, checkActionSummary, supportSmsText } from "./messages.js";
++import { summaryBulkSms, summaryExport, summaryRentStk, EXPORT_KINDS } from "../contract.js";
++import { SMS_MAX_LENGTH } from "../kernel/sms.js";
++import { randomOtp } from "../connectors/deps.js";
++
++const NOW = 1_700_000_000_000;
++const state = (o = {}) => ({ hash: hashOtp("123456", "id1"), attempts: 0, expiresAt: NOW + 1000, ...o });
++
++test("otp shape is exactly six digits", () => {
++  assert.ok(isOtpShape("012345")); assert.ok(!isOtpShape("12345")); assert.ok(!isOtpShape("1234567")); assert.ok(!isOtpShape(123456)); assert.ok(!isOtpShape("12345a"));
++});
++test("randomOtp is six digits", () => { for (let i = 0; i < 200; i++) assert.match(randomOtp(), /^\d{6}$/); });
++test("hash binds the id and matches in constant time", () => {
++  assert.ok(otpMatches(hashOtp("123456", "id1"), "123456", "id1"));
++  assert.ok(!otpMatches(hashOtp("123456", "id1"), "123456", "id2"));
++  assert.ok(!otpMatches(hashOtp("123456", "id1"), "654321", "id1"));
++  assert.ok(!otpMatches(undefined, "123456", "id1"));
++  assert.ok(!otpMatches("short", "123456", "id1"));
++});
++test("correct code succeeds and counts the attempt", () => assert.deepEqual(evaluateOtpAttempt(state(), "123456", "id1", NOW), { kind: "ok", attempts: 1 }));
++test("wrong code counts; the 5th wrong locks", () => {
++  assert.deepEqual(evaluateOtpAttempt(state(), "000000", "id1", NOW), { kind: "wrong", attempts: 1, locked: false });
++  assert.deepEqual(evaluateOtpAttempt(state({ attempts: 4 }), "000000", "id1", NOW), { kind: "wrong", attempts: 5, locked: true });
++});
++test("a correct code on the 5th try still works; after 5 it is locked", () => {
++  assert.equal(evaluateOtpAttempt(state({ attempts: 4 }), "123456", "id1", NOW).kind, "ok");
++  assert.equal(evaluateOtpAttempt(state({ attempts: 5 }), "123456", "id1", NOW).kind, "locked");
++});
++test("expired code is refused", () => assert.equal(evaluateOtpAttempt(state({ expiresAt: NOW }), "123456", "id1", NOW).kind, "expired"));
++test("wrong-code message counts tries left", () => {
++  assert.match(wrongCodeMessage({ kind: "wrong", attempts: 4, locked: false }, "access code"), /1 try left/);
++  assert.match(wrongCodeMessage({ kind: "wrong", attempts: 5, locked: true }, "access code"), /new access code/);
++});
++
++test("action summaries must equal the contract builders exactly", () => {
++  assert.ok(checkActionSummary("bulk_sms", summaryBulkSms(25)).ok);
++  assert.ok(checkActionSummary("rent_stk", summaryRentStk(200)).ok);
++  for (const k of EXPORT_KINDS) assert.ok(checkActionSummary("export", summaryExport(k)).ok);
++  assert.ok(!checkActionSummary("bulk_sms", "SMS to 007 recipients").ok);
++  assert.ok(!checkActionSummary("bulk_sms", "SMS to 0 recipients").ok);
++  assert.ok(!checkActionSummary("bulk_sms", summaryBulkSms(5) + " ").ok);
++  assert.ok(!checkActionSummary("rent_stk", summaryRentStk(201)).ok);
++  assert.ok(!checkActionSummary("rent_stk", summaryBulkSms(5)).ok);
++  assert.ok(!checkActionSummary("export", "Export everything").ok);
++  assert.ok(!checkActionSummary("export", 5).ok);
++});
++
++test("access SMS has the agreed wording and the code survives very long names", () => {
++  const m = accessSmsText("Jane W", "COG-0001", "Umoja Chama", "482913");
++  assert.equal(m, "Samuhia Desk: Jane W (COG-0001) asks to access Umoja Chama. Code 482913, valid 5 min. Share it ONLY if you asked for help.");
++  const long = accessSmsText("A".repeat(80), "COG-12345", "B".repeat(400), "482913");
++  assert.ok(long.length <= SMS_MAX_LENGTH);
++  assert.ok(long.includes("Code 482913, valid 5 min. Share it ONLY if you asked for help."));
++});
++test("action SMS repeats the summary", () => {
++  const m = actionSmsText("Jane", "COG-0001", summaryBulkSms(25), "111222");
++  assert.ok(m.includes(summaryBulkSms(25)) && m.includes("Code 111222"));
++  assert.ok(m.length <= SMS_MAX_LENGTH);
++});
++test("support SMS never mentions rewards or money", () => {
++  const m = supportSmsText("Jane", "COG-0001", "Umoja Chama", "training", "333444");
++  assert.ok(m.includes("333444"));
++  assert.doesNotMatch(m, /reward|bonus|commission|earn|pay|KES|ksh/i);
++});
+diff --git a/functions-desk/src/sessions/access.ts b/functions-desk/src/sessions/access.ts
+new file mode 100644
+index 0000000..99ff77e
+--- /dev/null
++++ b/functions-desk/src/sessions/access.ts
+@@ -0,0 +1,171 @@
++import {
++  DESK_TOP_CODE, type EndSessionOut, type EntityKey, type RequestAccessOut, type VerifyAccessOut,
++} from "../contract.js";
++import { FieldValue } from "firebase-admin/firestore";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { maskPhone } from "../paystack/phone.js";
++import type { AgentDoc, CustomerDoc, SessionDoc } from "../types.js";
++import type { Deps } from "../connectors/deps.js";
++import { writeDeskOwner } from "../connectors/deskOwner.js";
++import {
++  adminPhoneE164, assertEntityKey, customerDocId, isSameNumber, lookupEntity, NOT_AUTHORISED_MESSAGE,
++} from "../connectors/entities.js";
++import { record } from "../connectors/input.js";
++import {
++  accessHourRule, entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, SESSION_TTL_MS, takeRates, wrongCodeMessage,
++} from "../otp/core.js";
++import { accessSmsText } from "../otp/messages.js";
++import { validateScopes } from "./pure.js";
++
++export async function requestAccess(deps: Deps, uid: string, raw: unknown): Promise<RequestAccessOut> {
++  const d = record(raw);
++  const agent = await requireActiveAgent(uid);
++  const entity = assertEntityKey(typeof d.entityKey === "string" ? d.entityKey : "");
++  const scopes = validateScopes(d.scopes);
++
++  const cfg = await deps.getConfig();
++  const lookup = await lookupEntity(deps, cfg, agent, entity.product, entity.code);
++  if (!lookup.authorised) throw new DeskError("permission_denied", NOT_AUTHORISED_MESSAGE);
++  const adminPhone = adminPhoneE164(lookup.info);
++  if (isSameNumber(agent.phone, adminPhone)) {
++    throw new DeskError("permission_denied", "You cannot open a session on an account you administer yourself");
++  }
++
++  const taken = await takeRates([accessHourRule(uid, entity.entityKey), entityDailyRule(entity.entityKey)], deps.now());
++
++  // Older unverified codes for this desk and customer stop being usable.
++  const stale = await col("sessions").where("agentId", "==", uid).where("entityKey", "==", entity.entityKey).where("status", "==", "pending").get();
++  if (!stale.empty) {
++    const batch = db().batch();
++    for (const s of stale.docs) batch.update(s.ref, { status: "ended" });
++    await batch.commit();
++  }
++
++  const ref = col("sessions").doc();
++  const otp = deps.randomOtp();
++  const now = deps.now();
++  const doc: SessionDoc = {
++    sessionId: ref.id, agentId: uid, entityKey: entity.entityKey, scopes, status: "pending",
++    otpHash: hashOtp(otp, ref.id), otpAttempts: 0, otpExpiresAt: now + OTP_TTL_MS, expiresAt: now + OTP_TTL_MS, createdAt: now,
++  };
++  await ref.create(doc);
++  try {
++    await deps.sendSms(adminPhone, accessSmsText(agent.name, agent.agentCode, lookup.info.displayName, otp));
++  } catch {
++    await ref.delete().catch(() => undefined);
++    await taken.release();
++    throw new DeskError("internal", "We could not send the access code to the customer. Please try again.");
++  }
++  await audit({ action: "access_requested", agentId: uid, entityKey: entity.entityKey, sessionId: ref.id, meta: { scopes } });
++  return { sessionId: ref.id, otpSentTo: maskPhone(adminPhone) };
++}
++
++type VerifyOutcome =
++  | { kind: "ok"; expiresAt: number; claimed: boolean; already: boolean; entityKey: EntityKey }
++  | { kind: "missing" } | { kind: "foreign" } | { kind: "agent" } | { kind: "inactive" }
++  | { kind: "expired" } | { kind: "locked" } | { kind: "wrong"; attempts: number; locked: boolean };
++
++export async function verifyAccess(deps: Deps, uid: string, raw: unknown): Promise<VerifyAccessOut> {
++  const d = record(raw);
++  const sessionId = typeof d.sessionId === "string" ? d.sessionId : "";
++  if (!sessionId) throw new DeskError("invalid_argument", "Session is required");
++  if (!isOtpShape(d.otp)) throw new DeskError("invalid_argument", "Enter the 6-digit code");
++  const otp = (d.otp as string).trim();
++  const now = deps.now();
++  const sRef = col("sessions").doc(sessionId);
++
++  const out = await db().runTransaction(async (tx): Promise<VerifyOutcome> => {
++    const sSnap = await tx.get(sRef);
++    if (!sSnap.exists) return { kind: "missing" };
++    const s = sSnap.data() as SessionDoc;
++    if (s.agentId !== uid) return { kind: "foreign" };
++    const aSnap = await tx.get(col("agents").doc(uid));
++    const agent = aSnap.exists ? (aSnap.data() as AgentDoc) : undefined;
++    if (!agent || agent.status !== "active") return { kind: "agent" };
++    const cRef = col("customers").doc(customerDocId(s.entityKey));
++    const cSnap = await tx.get(cRef); // every read happens before the first write
++    if (s.status === "active" && s.otpVerifiedAt && s.expiresAt > now) {
++      return { kind: "ok", expiresAt: s.expiresAt, claimed: false, already: true, entityKey: s.entityKey };
++    }
++    if (s.status !== "pending") return { kind: "inactive" };
++
++    const r = evaluateOtpAttempt({ hash: s.otpHash, attempts: s.otpAttempts, expiresAt: s.otpExpiresAt }, otp, sessionId, now);
++    if (r.kind === "locked") { tx.update(sRef, { status: "ended" }); return { kind: "locked" }; }
++    if (r.kind === "expired") { tx.update(sRef, { status: "expired" }); return { kind: "expired" }; }
++    if (r.kind === "wrong") {
++      tx.update(sRef, r.locked ? { otpAttempts: r.attempts, status: "ended" } : { otpAttempts: r.attempts });
++      return r;
++    }
++
++    const expiresAt = now + SESSION_TTL_MS;
++    tx.update(sRef, { status: "active", otpVerifiedAt: now, expiresAt, otpAttempts: r.attempts, otpHash: FieldValue.delete() });
++
++    // Ownership claim, same transaction: first verified desk wins, an existing owner is never replaced, COG-0000 never claims.
++    let claimed = false;
++    if (!cSnap.exists && agent.agentCode !== DESK_TOP_CODE) {
++      const customer: CustomerDoc = {
++        entityKey: s.entityKey, product: assertEntityKey(s.entityKey).product, ownerAgentId: uid, attributedAt: now,
++        selfOwned: false, firstPurchaseUsed: false, paidPeriods: [],
++      };
++      tx.create(cRef, customer);
++      claimed = true;
++    }
++    return { kind: "ok", expiresAt, claimed, already: false, entityKey: s.entityKey };
++  });
++
++  switch (out.kind) {
++    case "ok": break;
++    case "missing": throw new DeskError("session_invalid", "Session not found");
++    case "foreign": throw new DeskError("permission_denied", "This session belongs to another agent");
++    case "agent": throw new DeskError("permission_denied", "Your desk account is not active");
++    case "inactive": throw new DeskError("session_invalid", "This session is no longer waiting for a code. Request access again.");
++    case "expired": throw new DeskError("otp_invalid", "This code has expired. Request access again.");
++    case "locked": throw new DeskError("otp_invalid", "Too many wrong codes. Request access again.");
++    case "wrong": throw new DeskError("otp_invalid", wrongCodeMessage(out, "access code"));
++  }
++
++  if (!out.already) {
++    await audit({ action: "access_verified", agentId: uid, entityKey: out.entityKey, sessionId, meta: { claimed: out.claimed } });
++    if (out.claimed) {
++      await audit({ action: "ownership_claimed", agentId: uid, entityKey: out.entityKey, sessionId });
++      const { product, code } = assertEntityKey(out.entityKey);
++      if (product === "chama") await pushDeskOwner(deps, uid, code, sessionId, out.entityKey);
++    }
++  }
++  return { expiresAt: out.expiresAt };
++}
++
++/** Ownership is already committed; a failed write must not fail the verification. desk_syncPayoutAccounts retries it. */
++async function pushDeskOwner(deps: Deps, uid: string, chamaCode: string, sessionId: string, entityKey: EntityKey): Promise<void> {
++  let reason: string | undefined;
++  try {
++    const agent = (await col("agents").doc(uid).get()).data() as AgentDoc;
++    const r = await writeDeskOwner(deps, await deps.getConfig(), agent, chamaCode);
++    if (!r.written) reason = r.reason;
++  } catch (err) {
++    reason = err instanceof DeskError ? err.message : "The MyChama update failed";
++  }
++  if (reason) await audit({ action: "desk_owner_pending", agentId: uid, entityKey, sessionId, meta: { reason } });
++}
++
++export async function endSession(deps: Deps, uid: string, raw: unknown): Promise<EndSessionOut> {
++  const d = record(raw);
++  const sessionId = typeof d.sessionId === "string" ? d.sessionId : "";
++  if (!sessionId) throw new DeskError("invalid_argument", "Session is required");
++  const ref = col("sessions").doc(sessionId);
++  const out = await db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    if (!snap.exists) return { kind: "missing" as const };
++    const s = snap.data() as SessionDoc;
++    if (s.agentId !== uid) return { kind: "foreign" as const };
++    if (s.status === "pending" || s.status === "active") { tx.update(ref, { status: "ended", endedAt: deps.now() }); return { kind: "ended" as const, entityKey: s.entityKey }; }
++    return { kind: "already" as const };
++  });
++  if (out.kind === "missing") throw new DeskError("session_invalid", "Session not found");
++  if (out.kind === "foreign") throw new DeskError("permission_denied", "This session belongs to another agent");
++  if (out.kind === "ended") await audit({ action: "session_ended", agentId: uid, entityKey: out.entityKey, sessionId });
++  return { ok: true };
++}
+diff --git a/functions-desk/src/sessions/index.ts b/functions-desk/src/sessions/index.ts
+new file mode 100644
+index 0000000..1480674
+--- /dev/null
++++ b/functions-desk/src/sessions/index.ts
+@@ -0,0 +1,25 @@
++import type {
++  EndSessionIn, EndSessionOut, InitiateRentStkIn, InitiateRentStkOut, RequestAccessIn, RequestAccessOut, VerifyAccessIn, VerifyAccessOut,
++} from "../contract.js";
++import { deskCallable } from "../connectors/common.js";
++import { defaultDeps } from "../connectors/deps.js";
++import { HP_SECRETS } from "../kernel/sms.js";
++import { endSession, requestAccess, verifyAccess } from "./access.js";
++import { initiateRentStk } from "./rent.js";
++
++export const desk_requestAccess = deskCallable<RequestAccessIn, RequestAccessOut>(
++  { secrets: HP_SECRETS, timeoutSeconds: 120 },
++  (uid, data) => requestAccess(defaultDeps(), uid, data),
++);
++export const desk_verifyAccess = deskCallable<VerifyAccessIn, VerifyAccessOut>(
++  { timeoutSeconds: 90 },
++  (uid, data) => verifyAccess(defaultDeps(), uid, data),
++);
++export const desk_endSession = deskCallable<EndSessionIn, EndSessionOut>(
++  {},
++  (uid, data) => endSession(defaultDeps(), uid, data),
++);
++export const desk_initiateRentStk = deskCallable<InitiateRentStkIn, InitiateRentStkOut>(
++  {},
++  (uid, data) => initiateRentStk(defaultDeps(), uid, data),
++);
+diff --git a/functions-desk/src/sessions/pure.test.ts b/functions-desk/src/sessions/pure.test.ts
+new file mode 100644
+index 0000000..af0bef6
+--- /dev/null
++++ b/functions-desk/src/sessions/pure.test.ts
+@@ -0,0 +1,19 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { validateScopes, validateTenantIds } from "./pure.js";
++
++test("scopes: non-empty subset, deduplicated", () => {
++  assert.deepEqual(validateScopes(["import", "read", "read"]), ["read", "import"]);
++  assert.throws(() => validateScopes([])); assert.throws(() => validateScopes(undefined)); assert.throws(() => validateScopes(["read", "root"]));
++  assert.throws(() => validateScopes([1]));
++});
++test("tenant ids: 1–max, trimmed, unique", () => {
++  assert.deepEqual(validateTenantIds([" t1 ", "t2"], 200), ["t1", "t2"]);
++  assert.throws(() => validateTenantIds([], 200));
++  assert.throws(() => validateTenantIds(["a", "a"], 200));
++  assert.throws(() => validateTenantIds(["a", " a"], 200));
++  assert.throws(() => validateTenantIds(["a/b"], 200));
++  assert.throws(() => validateTenantIds([""], 200));
++  assert.throws(() => validateTenantIds(Array.from({ length: 201 }, (_, i) => `t${i}`), 200));
++  assert.equal(validateTenantIds(Array.from({ length: 200 }, (_, i) => `t${i}`), 200).length, 200);
++});
+diff --git a/functions-desk/src/sessions/pure.ts b/functions-desk/src/sessions/pure.ts
+new file mode 100644
+index 0000000..610d08e
+--- /dev/null
++++ b/functions-desk/src/sessions/pure.ts
+@@ -0,0 +1,35 @@
++import type { Scope } from "../contract.js";
++import { DeskError } from "../errors.js";
++
++/** Record keyed by Scope so adding a scope to the contract fails the build here until it is handled. */
++const SCOPE_SET: Record<Scope, true> = {
++  read: true, import: true, manual_entry: true, schedule: true, bulk_sms: true, report: true, export: true, rent_stk: true,
++};
++export const ALL_SCOPES = Object.keys(SCOPE_SET) as Scope[];
++
++/** A non-empty subset of Scope, deduplicated, in contract order. Pure. */
++export function validateScopes(v: unknown): Scope[] {
++  if (!Array.isArray(v) || v.length === 0) throw new DeskError("invalid_argument", "Choose at least one thing you need access to");
++  const wanted = new Set<string>();
++  for (const s of v) {
++    if (typeof s !== "string" || !(s in SCOPE_SET)) throw new DeskError("invalid_argument", "Unknown access type requested");
++    wanted.add(s);
++  }
++  return ALL_SCOPES.filter((s) => wanted.has(s));
++}
++
++/** Tenant ids for a rent batch: 1–200, trimmed, unique. Duplicates are refused (never silently dropped) so the count the customer approved stays true. */
++export function validateTenantIds(v: unknown, max: number): string[] {
++  if (!Array.isArray(v) || v.length === 0) throw new DeskError("invalid_argument", "Select at least one tenant");
++  if (v.length > max) throw new DeskError("invalid_argument", `You can send rent requests to at most ${max} tenants at a time`);
++  const seen = new Set<string>();
++  const ids: string[] = [];
++  for (const raw of v) {
++    const id = typeof raw === "string" ? raw.trim() : "";
++    if (!id || id.length > 128 || id.includes("/")) throw new DeskError("invalid_argument", "A tenant id is not valid");
++    if (seen.has(id)) throw new DeskError("invalid_argument", "The same tenant was selected more than once");
++    seen.add(id);
++    ids.push(id);
++  }
++  return ids;
++}
+diff --git a/functions-desk/src/sessions/rent.emu.test.ts b/functions-desk/src/sessions/rent.emu.test.ts
+new file mode 100644
+index 0000000..a9a03cf
+--- /dev/null
++++ b/functions-desk/src/sessions/rent.emu.test.ts
+@@ -0,0 +1,63 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { summaryBulkSms, summaryRentStk } from "../contract.js";
++import { col } from "../db.js";
++import { initiateRentStk } from "./rent.js";
++import { requestActionOtp, verifyActionOtp } from "../otp/handlers.js";
++import { clearChama, harness, lastOtp, openSession, rejects, seedAgent, type Harness } from "../connectors/harness.test.js";
++
++const opts = { skip: !emulatorEnabled };
++const PMS = "pms:PYL-0001";
++let h: Harness;
++beforeEach(async () => { if (!emulatorEnabled) return; await clearFirestore(); await clearChama(); h = harness(); await seedAgent("1"); });
++
++async function approved(sessionId: string, n: number): Promise<string> {
++  const r = await requestActionOtp(h.deps, "1", { sessionId, action: "rent_stk", summary: summaryRentStk(n) });
++  await verifyActionOtp(h.deps, "1", { actionId: r.actionId, otp: lastOtp(h) });
++  return r.actionId;
++}
++const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
++
++test("approved batch is written as requested and the OTP is consumed", opts, async () => {
++  const sid = await openSession(h, "1", PMS, ["read", "rent_stk"]);
++  const actionId = await approved(sid, 3);
++  const out = await initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ids(3) });
++  assert.equal(out.count, 3);
++  const b = (await col("rentBatches").doc(out.batchId).get()).data();
++  assert.equal(b?.status, "requested"); assert.deepEqual(b?.tenantIds, ids(3)); assert.equal(b?.entityKey, PMS); assert.equal(b?.agentId, "1");
++  assert.ok((await col("actionOtps").doc(actionId).get()).data()?.consumedAt);
++  assert.equal((await col("audit").where("action", "==", "rent_stk_requested").get()).size, 1);
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ids(3) }), "otp_required");
++  assert.equal((await col("rentBatches").get()).size, 1);
++});
++test("count must match the approved summary, and a mismatch does not burn the OTP", opts, async () => {
++  const sid = await openSession(h, "1", PMS, ["rent_stk"]);
++  const actionId = await approved(sid, 3);
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ids(4) }), "invalid_argument", /does not match/);
++  assert.equal((await col("actionOtps").doc(actionId).get()).data()?.consumedAt, undefined);
++  await initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ids(3) });
++});
++test("validation: empty, duplicates, over 200, missing confirmation", opts, async () => {
++  const sid = await openSession(h, "1", PMS, ["rent_stk"]);
++  const actionId = await approved(sid, 2);
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: [] }), "invalid_argument");
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ["a", "a"] }), "invalid_argument");
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId, tenantIds: ids(201) }), "invalid_argument");
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId: "nope", tenantIds: ids(2) }), "otp_required");
++  assert.equal((await col("rentBatches").get()).size, 0);
++});
++test("an OTP approved for another action, an unverified OTP and a session without the scope are refused", opts, async () => {
++  const sid = await openSession(h, "1", PMS, ["rent_stk", "bulk_sms"]);
++  const other = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "bulk_sms", summary: summaryBulkSms(2) });
++  await verifyActionOtp(h.deps, "1", { actionId: other.actionId, otp: lastOtp(h) });
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId: other.actionId, tenantIds: ids(2) }), "invalid_argument");
++  const r = await requestActionOtp(h.deps, "1", { sessionId: sid, action: "rent_stk", summary: summaryRentStk(2) });
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: sid, actionId: r.actionId, tenantIds: ids(2) }), "otp_required");
++  const readOnly = await openSession(h, "1", PMS, ["read"]);
++  await rejects(initiateRentStk(h.deps, "1", { sessionId: readOnly, actionId: r.actionId, tenantIds: ids(2) }), "permission_denied");
++});
++test("rent STK is only for Plot Yangu", opts, async () => {
++  const sid = await openSession(h, "1", "chama:SMC-0001", ["rent_stk"]);
++  await rejects(requestActionOtp(h.deps, "1", { sessionId: sid, action: "rent_stk", summary: summaryRentStk(2) }), "failed_precondition");
++});
+diff --git a/functions-desk/src/sessions/rent.ts b/functions-desk/src/sessions/rent.ts
+new file mode 100644
+index 0000000..868006e
+--- /dev/null
++++ b/functions-desk/src/sessions/rent.ts
+@@ -0,0 +1,53 @@
++import { summaryRentStk, type InitiateRentStkOut } from "../contract.js";
++import { col } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { requireSession } from "../kernel/session.js";
++import type { ActionOtpDoc, RentBatchDoc, SessionDoc } from "../types.js";
++import type { Deps } from "../connectors/deps.js";
++import { assertEntityKey } from "../connectors/entities.js";
++import { record } from "../connectors/input.js";
++import { RENT_STK_MAX_TENANTS } from "../otp/messages.js";
++import { validateTenantIds } from "./pure.js";
++
++/**
++ * Writes the batch as `requested`; PAY executes it (it owns rent invoices and landlord subaccounts). The per-action OTP must
++ * be one the customer approved for exactly this many tenants, and it is consumed here, so a batch can be requested once per OTP.
++ */
++export async function initiateRentStk(deps: Deps, uid: string, raw: unknown): Promise<InitiateRentStkOut> {
++  const d = record(raw);
++  const sessionId = typeof d.sessionId === "string" ? d.sessionId : "";
++  const actionId = typeof d.actionId === "string" ? d.actionId : "";
++  if (!sessionId || !actionId) throw new DeskError("invalid_argument", "Session and confirmation are required");
++  const tenantIds = validateTenantIds(d.tenantIds, RENT_STK_MAX_TENANTS);
++  await requireActiveAgent(uid);
++
++  // Checks that must not burn the one-time OTP: right product, and the OTP's summary is for exactly this batch size.
++  const [sSnap, aSnap] = await Promise.all([col("sessions").doc(sessionId).get(), col("actionOtps").doc(actionId).get()]);
++  const session = sSnap.exists ? (sSnap.data() as SessionDoc) : undefined;
++  if (!session) throw new DeskError("session_invalid", "Session not found");
++  if (assertEntityKey(session.entityKey).product !== "pms") throw new DeskError("failed_precondition", "Rent STK is only available for Plot Yangu accounts");
++  const action = aSnap.exists ? (aSnap.data() as ActionOtpDoc) : undefined;
++  if (!action) throw new DeskError("otp_required", "Confirm this action with the customer's OTP first");
++  if (action.summary !== summaryRentStk(tenantIds.length)) {
++    throw new DeskError("invalid_argument", "The confirmed request does not match the tenants selected. Ask the customer to confirm again.");
++  }
++
++  // Authoritative gate (active session, scope, verified fresh unused OTP) and the one-time consumption.
++  const ctx = await requireSession({ sessionId, uid, scope: "rent_stk", action: "rent_stk", actionId });
++
++  const now = deps.now();
++  const batchId = `rb_${actionId}`;
++  const batch: RentBatchDoc & { count: number } = {
++    batchId, agentId: uid, sessionId, entityKey: ctx.entityKey, tenantIds, status: "requested", results: [],
++    count: tenantIds.length, createdAt: now, updatedAt: now,
++  };
++  try {
++    await col("rentBatches").doc(batchId).create(batch);
++  } catch (err) {
++    if ((err as { code?: number }).code !== 6) throw err; // already exists: same OTP, same batch
++  }
++  await audit({ action: "rent_stk_requested", agentId: uid, entityKey: ctx.entityKey, sessionId, meta: { batchId, count: tenantIds.length } });
++  return { batchId, count: tenantIds.length };
++}
+diff --git a/functions-desk/src/sessions/sessions.emu.test.ts b/functions-desk/src/sessions/sessions.emu.test.ts
+new file mode 100644
+index 0000000..2536cde
+--- /dev/null
++++ b/functions-desk/src/sessions/sessions.emu.test.ts
+@@ -0,0 +1,151 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { col } from "../db.js";
++import { requestAccess, verifyAccess, endSession } from "./access.js";
++import { ADMIN_PHONE, clearChama, entityInfo, harness, lastOtp, openSession, rejects, seedAgent, type Harness } from "../connectors/harness.test.js";
++import { hashOtp } from "../otp/core.js";
++import type { CustomerDoc, SessionDoc } from "../types.js";
++
++const opts = { skip: !emulatorEnabled };
++const KEY = "chama:SMC-0001";
++let h: Harness;
++beforeEach(async () => {
++  if (!emulatorEnabled) return;
++  await clearFirestore(); await clearChama(); h = harness();
++  await seedAgent("1"); await seedAgent("2"); await seedAgent("0", { agentCode: "COG-0000", rank: "lead" });
++});
++const session = async (id: string) => (await col("sessions").doc(id).get()).data() as SessionDoc;
++const customer = async (key = KEY) => (await col("customers").doc(key).get()).data() as CustomerDoc | undefined;
++
++test("request sends the agreed SMS, stores only a hash and a 5-minute expiry", opts, async () => {
++  const before = Date.now();
++  const r = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read", "import"] });
++  assert.equal(h.sms.length, 1); assert.equal(h.sms[0].to, "+254722000111");
++  assert.match(h.sms[0].message, /^Samuhia Desk: Agent 1 \(COG-0001\) asks to access Umoja Chama\. Code \d{6}, valid 5 min\. Share it ONLY if you asked for help\.$/);
++  assert.equal(r.otpSentTo.includes("0111") || r.otpSentTo.includes("111"), true);
++  assert.ok(!r.otpSentTo.includes("722000"));
++  const s = await session(r.sessionId);
++  assert.equal(s.status, "pending"); assert.deepEqual(s.scopes, ["read", "import"]);
++  assert.equal(s.otpHash, hashOtp(lastOtp(h), r.sessionId));
++  assert.ok(s.otpExpiresAt >= before + 5 * 60_000 - 1000 && s.otpExpiresAt <= Date.now() + 5 * 60_000);
++  assert.ok(!JSON.stringify(s).includes(lastOtp(h)));
++});
++test("verify activates for 60 minutes and claims ownership once", opts, async () => {
++  const id = await openSession(h, "1", KEY, ["read"]);
++  const s = await session(id);
++  assert.equal(s.status, "active"); assert.ok(s.otpVerifiedAt); assert.equal(s.otpHash, undefined);
++  assert.ok(Math.abs(s.expiresAt - (s.otpVerifiedAt! + 60 * 60_000)) < 1000);
++  const c = await customer();
++  assert.equal(c?.ownerAgentId, "1"); assert.equal(c?.selfOwned, false); assert.equal(c?.firstPurchaseUsed, false); assert.deepEqual(c?.paidPeriods, []);
++  const first = c!.attributedAt;
++  await openSession(h, "2", KEY, ["read"]);
++  const again = await customer();
++  assert.equal(again?.ownerAgentId, "1"); assert.equal(again?.attributedAt, first);
++});
++test("COG-0000 never claims ownership", opts, async () => {
++  await openSession(h, "0", KEY, ["read"]);
++  assert.equal(await customer(), undefined);
++});
++test("COG-0000 is authorised even when the product says no", opts, async () => {
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  await requestAccess(h.deps, "0", { entityKey: KEY, scopes: ["read"] });
++  assert.equal(h.sms.length, 1);
++});
++test("a verified chama claim writes deskOwner into the Chama project", opts, async () => {
++  await h.chama.collection("chamas").doc("c1").set({ code: "SMC-0001", name: "Umoja" });
++  await openSession(h, "1", KEY, ["read"]);
++  const owner = (await h.chama.collection("chamas").doc("c1").get()).data()?.deskOwner;
++  assert.equal(owner?.agentCode, "COG-0001"); assert.equal(owner?.rank, "clerk"); assert.equal(owner?.subaccountCode, "ACCT_main_1");
++});
++test("other products need nothing written", opts, async () => {
++  await openSession(h, "1", "pms:PYL-0001", ["read"]);
++  assert.equal((await customer("pms:PYL-0001"))?.ownerAgentId, "1");
++  assert.equal(h.chama && (await h.chama.collection("chamas").get()).size, 0);
++});
++test("a failed deskOwner write does not fail verification and leaves an audit trail", opts, async () => {
++  await openSession(h, "1", KEY, ["read"]); // no chama doc exists
++  assert.equal((await customer())?.ownerAgentId, "1");
++  assert.equal((await col("audit").where("action", "==", "desk_owner_pending").get()).size, 1);
++});
++test("refusals: desk not authorised, bad key, bad scopes, inactive agent", opts, async () => {
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] }), "permission_denied", /Settings → Support Agents/);
++  h.state.delegate = () => entityInfo();
++  await rejects(requestAccess(h.deps, "1", { entityKey: "chama:nope", scopes: ["read"] }), "invalid_argument");
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: [] }), "invalid_argument");
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["root"] }), "invalid_argument");
++  await col("agents").doc("2").update({ status: "suspended" });
++  await rejects(requestAccess(h.deps, "2", { entityKey: KEY, scopes: ["read"] }), "permission_denied");
++  assert.equal(h.sms.length, 0);
++});
++test("self-owned: agent phone equal to admin phone is refused", opts, async () => {
++  await col("agents").doc("1").update({ phone: "+254" + ADMIN_PHONE.slice(1) });
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] }), "permission_denied");
++  assert.equal(h.sms.length, 0);
++});
++test("at most 3 requests per desk and entity per hour", opts, async () => {
++  for (let i = 0; i < 3; i++) await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] }), "failed_precondition", /too many times/);
++  await requestAccess(h.deps, "2", { entityKey: KEY, scopes: ["read"] }); // other desk unaffected
++});
++test("at most 10 OTP messages per entity per day", opts, async () => {
++  const ids = Array.from({ length: 5 }, (_, i) => String(10 + i));
++  for (const id of ids) await seedAgent(id);
++  let sent = 0;
++  for (const id of ids) for (let i = 0; i < 3; i++) { try { await requestAccess(h.deps, id, { entityKey: KEY, scopes: ["read"] }); sent++; } catch { break; } }
++  assert.equal(sent, 10);
++  await rejects(requestAccess(h.deps, "2", { entityKey: KEY, scopes: ["read"] }), "failed_precondition", /today/);
++});
++test("an SMS failure deletes the session, says so and frees the rate slot", opts, async () => {
++  h.state.smsFails = true;
++  await rejects(requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] }), "internal", /could not send/);
++  assert.equal((await col("sessions").get()).size, 0);
++  h.state.smsFails = false;
++  for (let i = 0; i < 3; i++) await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++});
++test("a new request ends older pending sessions for the same desk and entity", opts, async () => {
++  const a = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  const oldOtp = lastOtp(h);
++  await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  await rejects(verifyAccess(h.deps, "1", { sessionId: a.sessionId, otp: oldOtp }), "session_invalid");
++});
++test("wrong codes: counted, 5th ends the session even for the right code", opts, async () => {
++  const r = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  const good = lastOtp(h); const bad = good === "000000" ? "111111" : "000000";
++  await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: bad }), "otp_invalid", /4 tries left/);
++  for (let i = 0; i < 3; i++) await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: bad }), "otp_invalid");
++  await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: bad }), "otp_invalid", /Too many/);
++  assert.equal((await session(r.sessionId)).status, "ended");
++  await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: good }), "session_invalid");
++  assert.equal(await customer(), undefined);
++});
++test("expired code is refused and the session expires", opts, async () => {
++  const r = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  await col("sessions").doc(r.sessionId).update({ otpExpiresAt: Date.now() - 1 });
++  await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: lastOtp(h) }), "otp_invalid", /expired/);
++  assert.equal((await session(r.sessionId)).status, "expired");
++});
++test("another agent cannot verify or end my session; malformed codes are refused", opts, async () => {
++  const r = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  await rejects(verifyAccess(h.deps, "2", { sessionId: r.sessionId, otp: lastOtp(h) }), "permission_denied");
++  await rejects(endSession(h.deps, "2", { sessionId: r.sessionId }), "permission_denied");
++  await rejects(verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp: "12" }), "invalid_argument");
++  await rejects(verifyAccess(h.deps, "1", { sessionId: "nope", otp: "123456" }), "session_invalid");
++});
++test("verify twice is harmless (idempotent) and does not claim twice", opts, async () => {
++  const r = await requestAccess(h.deps, "1", { entityKey: KEY, scopes: ["read"] });
++  const otp = lastOtp(h);
++  const a = await verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp });
++  const b = await verifyAccess(h.deps, "1", { sessionId: r.sessionId, otp });
++  assert.equal(a.expiresAt, b.expiresAt);
++  assert.equal((await col("audit").where("action", "==", "ownership_claimed").get()).size, 1);
++});
++test("end session is idempotent and audited once", opts, async () => {
++  const id = await openSession(h, "1", KEY, ["read"]);
++  assert.deepEqual(await endSession(h.deps, "1", { sessionId: id }), { ok: true });
++  assert.deepEqual(await endSession(h.deps, "1", { sessionId: id }), { ok: true });
++  assert.equal((await session(id)).status, "ended");
++  assert.equal((await col("audit").where("action", "==", "session_ended").get()).size, 1);
++  await rejects(endSession(h.deps, "1", { sessionId: "missing" }), "session_invalid");
++});
+diff --git a/functions-desk/src/support/handlers.ts b/functions-desk/src/support/handlers.ts
+new file mode 100644
+index 0000000..07bbfc3
+--- /dev/null
++++ b/functions-desk/src/support/handlers.ts
+@@ -0,0 +1,95 @@
++import {
++  SUPPORT_CATEGORIES, type ConfirmSupportOut, type LogSupportOut, type SupportCategory,
++} from "../contract.js";
++import { col, db } from "../db.js";
++import { DeskError } from "../errors.js";
++import { audit } from "../kernel/audit.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { maskPhone } from "../paystack/phone.js";
++import type { SupportDoc } from "../types.js";
++import type { Deps } from "../connectors/deps.js";
++import {
++  adminPhoneE164, assertEntityKey, isSameNumber, lookupEntity, NOT_AUTHORISED_MESSAGE,
++} from "../connectors/entities.js";
++import { record, text } from "../connectors/input.js";
++import { entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, MAX_OTP_ATTEMPTS, takeRates, wrongCodeMessage } from "../otp/core.js";
++import { supportSmsText } from "../otp/messages.js";
++
++export const SUPPORT_CODE_TTL_MS = 24 * 60 * 60_000;
++
++/** Logs a support visit and SMSes a 6-digit confirmation code to the customer admin. */
++export async function logSupport(deps: Deps, uid: string, raw: unknown): Promise<LogSupportOut> {
++  const d = record(raw);
++  const agent = await requireActiveAgent(uid);
++  const entity = assertEntityKey(typeof d.entityKey === "string" ? d.entityKey : "");
++  if (typeof d.category !== "string" || !(SUPPORT_CATEGORIES as readonly string[]).includes(d.category)) {
++    throw new DeskError("invalid_argument", "Choose a support category");
++  }
++  const category = d.category as SupportCategory;
++  const notes = text(d.notes, "Notes", 5, 1000);
++
++  const cfg = await deps.getConfig();
++  const lookup = await lookupEntity(deps, cfg, agent, entity.product, entity.code);
++  if (!lookup.authorised) throw new DeskError("permission_denied", NOT_AUTHORISED_MESSAGE);
++  const adminPhone = adminPhoneE164(lookup.info);
++  if (isSameNumber(agent.phone, adminPhone)) {
++    throw new DeskError("permission_denied", "You cannot log support for an account you administer yourself");
++  }
++
++  const taken = await takeRates([entityDailyRule(entity.entityKey)], deps.now());
++  const ref = col("support").doc();
++  const code = deps.randomOtp();
++  const now = deps.now();
++  const doc: SupportDoc = {
++    id: ref.id, agentId: uid, entityKey: entity.entityKey, category, notes,
++    codeHash: hashOtp(code, ref.id), codeAttempts: 0, codeExpiresAt: now + SUPPORT_CODE_TTL_MS, createdAt: now,
++  };
++  await ref.create(doc);
++  try {
++    await deps.sendSms(adminPhone, supportSmsText(agent.name, agent.agentCode, lookup.info.displayName, category, code));
++  } catch {
++    await ref.delete().catch(() => undefined);
++    await taken.release();
++    throw new DeskError("internal", "We could not send the confirmation code to the customer. Please try again.");
++  }
++  await audit({ action: "support_logged", agentId: uid, entityKey: entity.entityKey, meta: { id: ref.id, category } });
++  return { id: ref.id, codeSentTo: maskPhone(adminPhone) };
++}
++
++type Outcome =
++  | { kind: "ok"; entityKey: string; already: boolean } | { kind: "missing" } | { kind: "expired" } | { kind: "locked" }
++  | { kind: "wrong"; attempts: number; locked: boolean };
++
++export async function confirmSupport(deps: Deps, uid: string, raw: unknown): Promise<ConfirmSupportOut> {
++  const d = record(raw);
++  const id = typeof d.id === "string" ? d.id : "";
++  if (!id) throw new DeskError("invalid_argument", "Support record is required");
++  if (!isOtpShape(d.code)) throw new DeskError("invalid_argument", "Enter the 6-digit code");
++  const code = (d.code as string).trim();
++  const now = deps.now();
++  const ref = col("support").doc(id);
++
++  const out = await db().runTransaction(async (tx): Promise<Outcome> => {
++    const snap = await tx.get(ref);
++    if (!snap.exists) return { kind: "missing" };
++    const s = snap.data() as SupportDoc;
++    if (s.agentId !== uid) return { kind: "missing" }; // never reveal another desk's record
++    if (s.customerConfirmedAt) return { kind: "ok", entityKey: s.entityKey, already: true };
++    const r = evaluateOtpAttempt({ hash: s.codeHash, attempts: s.codeAttempts, expiresAt: s.codeExpiresAt }, code, id, now);
++    if (r.kind === "locked") return { kind: "locked" };
++    if (r.kind === "expired") return { kind: "expired" };
++    if (r.kind === "wrong") { tx.update(ref, { codeAttempts: r.attempts }); return r; }
++    tx.update(ref, { codeAttempts: r.attempts, customerConfirmedAt: now });
++    return { kind: "ok", entityKey: s.entityKey, already: false };
++  });
++
++  switch (out.kind) {
++    case "ok":
++      if (!out.already) await audit({ action: "support_confirmed", agentId: uid, entityKey: out.entityKey, meta: { id } });
++      return { ok: true };
++    case "missing": throw new DeskError("not_found", "Support record not found");
++    case "expired": throw new DeskError("otp_invalid", "This code has expired.");
++    case "locked": throw new DeskError("otp_invalid", `Too many wrong codes (${MAX_OTP_ATTEMPTS} allowed). This confirmation can no longer be completed.`);
++    case "wrong": throw new DeskError("otp_invalid", wrongCodeMessage(out, "support record"));
++  }
++}
+diff --git a/functions-desk/src/support/index.ts b/functions-desk/src/support/index.ts
+new file mode 100644
+index 0000000..949797b
+--- /dev/null
++++ b/functions-desk/src/support/index.ts
+@@ -0,0 +1,14 @@
++import type { ConfirmSupportIn, ConfirmSupportOut, LogSupportIn, LogSupportOut } from "../contract.js";
++import { deskCallable } from "../connectors/common.js";
++import { defaultDeps } from "../connectors/deps.js";
++import { HP_SECRETS } from "../kernel/sms.js";
++import { confirmSupport, logSupport } from "./handlers.js";
++
++export const desk_logSupport = deskCallable<LogSupportIn, LogSupportOut>(
++  { secrets: HP_SECRETS, timeoutSeconds: 120 },
++  (uid, data) => logSupport(defaultDeps(), uid, data),
++);
++export const desk_confirmSupport = deskCallable<ConfirmSupportIn, ConfirmSupportOut>(
++  {},
++  (uid, data) => confirmSupport(defaultDeps(), uid, data),
++);
+diff --git a/functions-desk/src/support/support.emu.test.ts b/functions-desk/src/support/support.emu.test.ts
+new file mode 100644
+index 0000000..8960022
+--- /dev/null
++++ b/functions-desk/src/support/support.emu.test.ts
+@@ -0,0 +1,69 @@
++import { test, beforeEach } from "node:test";
++import assert from "node:assert/strict";
++import { SUPPORT_CATEGORIES } from "../contract.js";
++import { emulatorEnabled, clearFirestore } from "../testing/emulator.js";
++import { col } from "../db.js";
++import { confirmSupport, logSupport } from "./handlers.js";
++import { ADMIN_PHONE, clearChama, entityInfo, harness, lastOtp, rejects, seedAgent, type Harness } from "../connectors/harness.test.js";
++import { hashOtp } from "../otp/core.js";
++
++const opts = { skip: !emulatorEnabled };
++const KEY = "chama:SMC-0001";
++const CAT = SUPPORT_CATEGORIES[0];
++let h: Harness;
++beforeEach(async () => { if (!emulatorEnabled) return; await clearFirestore(); await clearChama(); h = harness(); await seedAgent("1"); await seedAgent("2"); });
++const log = (uid = "1", o = {}) => logSupport(h.deps, uid, { entityKey: KEY, category: CAT, notes: "Helped add members", ...o });
++
++test("log creates the record and SMSes a hashed 24h code with no mention of rewards", opts, async () => {
++  const r = await log();
++  const s = (await col("support").doc(r.id).get()).data()!;
++  assert.equal(s.agentId, "1"); assert.equal(s.category, CAT); assert.equal(s.codeHash, hashOtp(lastOtp(h), r.id));
++  assert.ok(Math.abs(s.codeExpiresAt - (s.createdAt + 24 * 3_600_000)) < 1000); assert.equal(s.codeAttempts, 0);
++  assert.equal(h.sms[0].to, "+254722000111");
++  assert.doesNotMatch(h.sms[0].message, /reward|bonus|commission|earn|pay|KES/i);
++  assert.ok(!r.codeSentTo.includes("722000"));
++});
++test("confirm with the right code sets customerConfirmedAt once", opts, async () => {
++  const r = await log();
++  assert.deepEqual(await confirmSupport(h.deps, "1", { id: r.id, code: lastOtp(h) }), { ok: true });
++  const at = (await col("support").doc(r.id).get()).data()?.customerConfirmedAt;
++  assert.ok(at);
++  await confirmSupport(h.deps, "1", { id: r.id, code: lastOtp(h) });
++  assert.equal((await col("support").doc(r.id).get()).data()?.customerConfirmedAt, at);
++  assert.equal((await col("audit").where("action", "==", "support_confirmed").get()).size, 1);
++});
++test("wrong codes: 5 attempts then locked for good", opts, async () => {
++  const r = await log(); const good = lastOtp(h); const bad = good === "000000" ? "111111" : "000000";
++  for (let i = 0; i < 5; i++) await rejects(confirmSupport(h.deps, "1", { id: r.id, code: bad }), "otp_invalid");
++  await rejects(confirmSupport(h.deps, "1", { id: r.id, code: good }), "otp_invalid");
++  assert.equal((await col("support").doc(r.id).get()).data()?.customerConfirmedAt, undefined);
++});
++test("expired, other desk's record, unknown id", opts, async () => {
++  const r = await log();
++  await rejects(confirmSupport(h.deps, "2", { id: r.id, code: lastOtp(h) }), "not_found");
++  await rejects(confirmSupport(h.deps, "1", { id: "nope", code: "123456" }), "not_found");
++  await col("support").doc(r.id).update({ codeExpiresAt: Date.now() - 1 });
++  await rejects(confirmSupport(h.deps, "1", { id: r.id, code: lastOtp(h) }), "otp_invalid", /expired/);
++});
++test("desk must be authorised; self-owned refused; inputs validated", opts, async () => {
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  await rejects(log(), "permission_denied", /Support Agents/);
++  h.state.delegate = () => entityInfo();
++  await col("agents").doc("2").update({ phone: "+254" + ADMIN_PHONE.slice(1) });
++  await rejects(log("2"), "permission_denied");
++  await rejects(log("1", { category: "free-money" }), "invalid_argument");
++  await rejects(log("1", { notes: "hi" }), "invalid_argument");
++  await rejects(log("1", { notes: "x".repeat(1001) }), "invalid_argument");
++  assert.equal((await col("support").get()).size, 0); assert.equal(h.sms.length, 0);
++});
++test("COG-0000 is authorised everywhere", opts, async () => {
++  await seedAgent("0", { agentCode: "COG-0000" });
++  h.state.delegate = () => entityInfo({ agentAuthorised: false });
++  await log("0");
++  assert.equal(h.sms.length, 1);
++});
++test("SMS failure deletes the record and says so", opts, async () => {
++  h.state.smsFails = true;
++  await rejects(log(), "internal", /could not send/);
++  assert.equal((await col("support").get()).size, 0);
++});
+-- 
+2.43.0
+

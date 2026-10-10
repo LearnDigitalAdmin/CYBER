@@ -4,7 +4,6 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
-import { defineSecret } from 'firebase-functions/params';
 import * as logger from 'firebase-functions/logger';
 import sharp from 'sharp';
 import axios from 'axios';
@@ -18,7 +17,6 @@ import * as os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 
 if (getApps().length === 0) {
@@ -471,7 +469,7 @@ export const convertImagesToPdf = onCall(
 
       // Upload to Storage
       const dateStr = new Date().toISOString();
-      const pdfStoragePath = `users/${userId}/conversions/${jobId}/converted/${jobId} - COGVANA CYBER CONVERTER ${dateStr}.pdf`;
+      const pdfStoragePath = `users/${userId}/conversions/${jobId}/converted/${jobId} - SAMUHIA DESK CONVERTER ${dateStr}.pdf`;
       await bucket.upload(finalPdfPath, {
         destination: pdfStoragePath,
         metadata: {
@@ -958,27 +956,6 @@ export const healthCheck = onRequest(
 );
 
 
-interface MovieDataRequest {
-  title: string;
-  year: number;
-  type: 'movie' | 'series';
-}
-
-interface MovieDataResponse {
-  success: boolean;
-  data?: {
-    title: string;
-    year: number;
-    type: 'movie' | 'series';
-    description: string;
-    category: string;
-    rating?: string;
-    seasons?: Array<{ season: number; episodes: number }>;
-    trailer?: string;
-  };
-  message?: string;
-}
-
 // Generate complete HTML template
 function generateHTML(numberOfTenants: number): string {
   // Generate tenant pages HTML
@@ -993,8 +970,8 @@ function generateHTML(numberOfTenants: number): string {
             </div>
             <div class="header-contact">
                 <div>📞 0791286165</div>
-                <div>✉ info@cogvana.co.ke</div>
-                <div>🌐 www.cogvana.co.ke</div>
+                <div>✉ info@samuhia.co.ke</div>
+                <div>🌐 samuhia.co.ke</div>
             </div>
         </div>
 
@@ -1101,7 +1078,7 @@ function generateHTML(numberOfTenants: number): string {
 
         <div class="footer">
             <div class="footer-left">
-                Plot Yangu © 2025 | Cogvana Corporation | Page ${tenantNum + 1}
+                Plot Yangu © 2025 | Samuhia Corporation | Page ${tenantNum + 1}
             </div>
             <div class="footer-right">
                 <div class="footer-office">For office use only:</div>
@@ -1193,8 +1170,8 @@ function generateHTML(numberOfTenants: number): string {
             </div>
             <div class="header-contact">
                 <div>📞 0791286165</div>
-                <div>✉ info@cogvana.co.ke</div>
-                <div>🌐 www.cogvana.co.ke</div>
+                <div>✉ info@samuhia.co.ke</div>
+                <div>🌐 samuhia.co.ke</div>
             </div>
         </div>
 
@@ -1307,7 +1284,7 @@ function generateHTML(numberOfTenants: number): string {
 
         <div class="footer">
             <div class="footer-left">
-                Plot Yangu © 2025 | Cogvana Corporation | Page 1
+                Plot Yangu © 2025 | Samuhia Corporation | Page 1
             </div>
             <div class="footer-right">
                 <div class="footer-office">For authorized agent use only:</div>
@@ -1328,8 +1305,8 @@ function generateHTML(numberOfTenants: number): string {
             </div>
             <div class="header-contact">
                 <div>📞 0791286165</div>
-                <div>✉ info@cogvana.co.ke</div>
-                <div>🌐 www.cogvana.co.ke</div>
+                <div>✉ info@samuhia.co.ke</div>
+                <div>🌐 samuhia.co.ke</div>
             </div>
         </div>
 
@@ -1377,7 +1354,7 @@ function generateHTML(numberOfTenants: number): string {
 
         <div class="footer">
             <div class="footer-left">
-                Plot Yangu © 2025 | Cogvana Corporation | Page ${numberOfTenants + 2}
+                Plot Yangu © 2025 | Samuhia Corporation | Page ${numberOfTenants + 2}
             </div>
             <div class="footer-right">
                 <div class="footer-office">For office use only:</div>
@@ -1396,8 +1373,8 @@ function generateHTML(numberOfTenants: number): string {
             </div>
             <div class="header-contact">
                 <div>📞 0791286165</div>
-                <div>✉ info@cogvana.co.ke</div>
-                <div>🌐 www.cogvana.co.ke</div>
+                <div>✉ info@samuhia.co.ke</div>
+                <div>🌐 samuhia.co.ke</div>
             </div>
         </div>
 
@@ -1435,12 +1412,12 @@ function generateHTML(numberOfTenants: number): string {
                 <div class="contact-card">
                     <div class="contact-icon">✉️</div>
                     <div class="contact-label">Email Support</div>
-                    <div class="contact-value">info@cogvana.co.ke</div>
+                    <div class="contact-value">info@samuhia.co.ke</div>
                 </div>
                 <div class="contact-card">
                     <div class="contact-icon">🌐</div>
                     <div class="contact-label">Website</div>
-                    <div class="contact-value">cogvana.co.ke</div>
+                    <div class="contact-value">samuhia.co.ke</div>
                 </div>
             </div>
 
@@ -1456,7 +1433,7 @@ function generateHTML(numberOfTenants: number): string {
 
         <div class="footer">
             <div class="footer-left">
-                Plot Yangu © 2025 | Cogvana Corporation | Page ${numberOfTenants + 3}
+                Plot Yangu © 2025 | Samuhia Corporation | Page ${numberOfTenants + 3}
             </div>
             <div class="footer-right">
                 <div class="footer-office">Form Version: 2025.1</div>
@@ -1474,8 +1451,8 @@ function generateHTML(numberOfTenants: number): string {
             </div>
             <div class="header-contact">
                 <div>📞 0791286165</div>
-                <div>✉ info@cogvana.co.ke</div>
-                <div>🌐 www.cogvana.co.ke</div>
+                <div>✉ info@samuhia.co.ke</div>
+                <div>🌐 samuhia.co.ke</div>
             </div>
         </div>
 
@@ -1537,7 +1514,7 @@ function generateHTML(numberOfTenants: number): string {
 
             <div style="font-size: 10px; color: #334155; line-height: 1.7; margin-bottom: 14px;">
                 <strong>Contact for Privacy Concerns:</strong> If you have any questions or concerns about how your data is handled, 
-                please contact our Data Protection Officer at info@cogvana.co.ke or call 0791286165.
+                please contact our Data Protection Officer at info@samuhia.co.ke or call 0791286165.
             </div>
 
             <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 14px; border-radius: 8px; border: 2px solid #0891b2; margin-top: 20px;">
@@ -1550,7 +1527,7 @@ function generateHTML(numberOfTenants: number): string {
 
         <div class="footer">
             <div class="footer-left">
-                Plot Yangu © 2025 | Cogvana Corporation | Final Page
+                Plot Yangu © 2025 | Samuhia Corporation | Final Page
             </div>
             <div class="footer-right">
                 <div class="footer-office">Form Version: 2025.1</div>
@@ -1670,185 +1647,6 @@ export const generateRegistrationForm = onCall(
   }
 );
 
-
-
-const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');//
-
-export const generateMovieData = onCall<MovieDataRequest, Promise<MovieDataResponse>>(
-  {
-    region: 'africa-south1',
-    maxInstances: 10,
-    timeoutSeconds: 60,
-    memory: '256MiB',
-    secrets: [GEMINI_API_KEY],
-  },
-  async (request) => {
-    try {
-      // Validate input
-      const { title, type } = request.data;
-      
-      if (!title || !type) {
-        throw new HttpsError(
-          'invalid-argument',
-          'Missing required fields: title, year, and type are required'
-        );
-      }
-
-      // if (year < 1900 || year > new Date().getFullYear() + 5) {
-      //   throw new HttpsError('invalid-argument', 'Invalid year provided');
-      // }
-
-      if (!['movie', 'series'].includes(type)) {
-        throw new HttpsError('invalid-argument', 'Type must be either "movie" or "series"');
-      }
-
-      // Prepare prompt for Gemini
-      const prompt = type === 'movie'
-        ? `You are a movie database API. Provide detailed information about the movie "${title}" released in .... year (find the correct release year).
-
-Return a JSON object with the following structure (no markdown, just raw JSON):
-{
-  "title": "Official movie title",
-  "year": the correct year for the movie release,
-  "type": "movie",
-  "description": "A comprehensive 2-3 sentence plot summary",
-  "category": "Main genre (e.g., Action, Drama, Sci-Fi, Comedy, Horror)",
-  "rating": "IMDb or Rotten Tomatoes rating if available (e.g., 8.5/10 or 95%)",
-  "trailer": "find the actual YouTube trailer video ID if available (11 characters), not random videos, the actual trailers"
-}
-
-If you cannot find exact information, provide best estimates based on similar titles, but ensure the description is relevant to the title and year provided.`
-        : `You are a TV series database API. Provide detailed information about the series "${title}" that premiered in .... year (find the correct release year).
-
-Return a JSON object with the following structure (no markdown, just raw JSON):
-{
-  "title": "Official series title",
-  "year": the correct year for the show release,
-  "type": "series",
-  "description": "A comprehensive 2-3 sentence series overview",
-  "category": "Main genre (e.g., Drama, Thriller, Comedy, Fantasy)",
-  "rating": "IMDb rating if available (e.g., 8.7/10)",
-  "seasons": [
-    {"season": 1, "episodes": 10},
-    {"season": 2, "episodes": 13}
-  ],
-  "trailer": "find the actual YouTube trailer video ID if available (11 characters), not random videos, the actual trailers"
-}
-
-Include all available seasons with their episode counts. If you cannot find exact information, provide reasonable estimates based on the title and year.`;
-
-      // Call Gemini API
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY.value());
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-
-      // Parse JSON response
-      let movieData;
-      try {
-        // Remove markdown code blocks if present
-        const cleanText = text
-          .replace(/```json\n?/g, '')
-          .replace(/```\n?/g, '')
-          .trim();
-        
-        movieData = JSON.parse(cleanText);
-      } catch (parseError) {
-        console.error('Failed to parse AI response:', text);
-        throw new HttpsError(
-          'internal',
-          'Failed to parse AI response. Please try again.'
-        );
-      }
-
-      // Validate response structure
-      if (!movieData.title || !movieData.description || !movieData.category) {
-        throw new HttpsError(
-          'internal',
-          'AI response missing required fields'
-        );
-      }
-
-      // Ensure correct type
-      movieData.type = type;
-      //movieData.year = year;
-
-      // Validate seasons for series
-      if (type === 'series') {
-        if (!movieData.seasons || !Array.isArray(movieData.seasons) || movieData.seasons.length === 0) {
-          // Provide default seasons if not available
-          movieData.seasons = [
-            { season: 1, episodes: 10 }
-          ];
-        }
-      }
-
-      return {
-        success: true,
-        data: movieData
-      };
-
-    } catch (error: any) {
-      console.error('Error generating movie data:', error);
-
-      if (error instanceof HttpsError) {
-        throw error;
-      }
-
-      // Handle Gemini API errors
-      if (error.message?.includes('API key')) {
-        throw new HttpsError(
-          'internal',
-          'AI service configuration error. Please contact support.'
-        );
-      }
-
-      if (error.message?.includes('quota')) {
-        throw new HttpsError(
-          'resource-exhausted',
-          'AI service temporarily unavailable. Please try again later.'
-        );
-      }
-
-      throw new HttpsError(
-        'internal',
-        'Failed to generate content data. Please try again.'
-      );
-    }
-  }
-);
-
-
-import { generateShopForm } from './handlers/shop.forms.handler';
-
-
-exports.shopFormGenerator = onRequest(
-  {
-    memory: "1GiB",
-    timeoutSeconds: 120,
-    cors: true, 
-  },
-  async (req, res) => {
-    try {
-      // Set CORS headers explicitly
-      res.set('Access-Control-Allow-Origin', '*');
-      res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.set('Access-Control-Allow-Headers', 'Content-Type');
-
-      // Handle preflight requests
-      if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-      }
-
-      await generateShopForm(req, res);
-    } catch (error) {
-      console.error('Shop form generator error:', error);
-      res.status(500).json({ error: 'Failed to generate form' });
-    }
-  }
-);
 
 
 import { handleIncomingMessage } from './webhooks/whatsapp-webhook';

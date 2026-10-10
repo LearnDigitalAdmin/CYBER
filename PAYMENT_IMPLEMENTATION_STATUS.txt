@@ -53,7 +53,7 @@ HANDLERS (Total: 765 lines of code):
      - 6-step navigatable flow
      - Bilingual (English + Swahili)
      - 3 payment methods (M-Pesa/Airtel/Bank)
-     - WhatsApp to Cogvana admin
+     - WhatsApp to Samuhia admin
      - Shop ID included in message
      - Non-blocking error handling
 
@@ -89,7 +89,7 @@ WHY THIS APPROACH:
 
 PAYLOAD STRUCTURE:
   {
-    email: "stk-push-{shopId}@cogvana.co.ke",
+    email: "stk-push-{shopId}@samuhia.co.ke",
     amount: amountInCents,
     currency: "KES",
     mobile_money: {
@@ -131,12 +131,12 @@ Step 5: Prepare WhatsApp Message
   - Payment method and account information
   - SHOP ID (for admin identification)
   ↓
-Step 6: Send WhatsApp to Cogvana
+Step 6: Send WhatsApp to Samuhia
   Destination: +254791286165
   Format: Structured, easy to copy/paste
   ↓
 Step 7: Confirmation
-  "Setup request sent to Cogvana admin!"
+  "Setup request sent to Samuhia admin!"
   Request saved to: paymentSetupRequests/{requestId}
 
 DATA SAVED:
@@ -204,7 +204,7 @@ DATA SAVED:
 
 WHEN SHOP SUBMITS SETUP REQUEST (Option 6):
   1. Shop owner submits payment details via WhatsApp
-  2. System sends WhatsApp to Cogvana (+254791286165)
+  2. System sends WhatsApp to Samuhia (+254791286165)
   3. Message includes Shop ID for easy identification
 
 ADMIN ACTION - Create Split Code:
@@ -302,7 +302,7 @@ Option 6 (Setup Payment Account):
   [ ] Enter all required details
   [ ] Review confirmation
   [ ] Receive WhatsApp prompt
-  [ ] Click WhatsApp link to Cogvana
+  [ ] Click WhatsApp link to Samuhia
   [ ] Message arrives with Shop ID
   [ ] Request saved to paymentSetupRequests
   [ ] Can approve with split code
@@ -377,7 +377,7 @@ Both Option 6 (Setup Payment Account) and Option 7 (Charge Customer) are:
 The implementation follows all user requirements:
   ✅ Multi-step navigatable contexts
   ✅ Payment method collection (M-Pesa/Airtel/Bank)
-  ✅ WhatsApp to Cogvana admin with Shop ID
+  ✅ WhatsApp to Samuhia admin with Shop ID
   ✅ Paystack STK push for Safaricom/Airtel
   ✅ Transaction tracking and status management
   ✅ Webhook integration hooks

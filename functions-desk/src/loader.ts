@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /** Folders that hold shared code, not deployable areas. */
-export const RESERVED_DIRS: ReadonlySet<string> = new Set(["kernel", "paystack", "__tests__"]);
+export const RESERVED_DIRS: ReadonlySet<string> = new Set(["kernel", "paystack", "testing", "__tests__"]);
 const MAX_DEPTH = 3;
 
 /**

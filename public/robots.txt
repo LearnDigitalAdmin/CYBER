@@ -1,5 +1,5 @@
-# Robots.txt for Cogvana Cyber
-# https://cyber.cogvana.co.ke/robots.txt
+# Robots.txt for Samuhia Desk
+# https://cyber.samuhia.co.ke/robots.txt
 
 # Allow all crawlers
 User-agent: *
@@ -34,7 +34,7 @@ Allow: /signin
 Allow: /signup
 
 # Sitemap location
-Sitemap: https://cyber.cogvana.co.ke/sitemap.xml
+Sitemap: https://cyber.samuhia.co.ke/sitemap.xml
 
 # Crawl delay (optional, adjust if needed)
 Crawl-delay: 1

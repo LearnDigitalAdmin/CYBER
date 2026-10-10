@@ -27,3 +27,18 @@ test("split validation protects the platform's remainder", () => {
   assert.throws(() => validateSplit([{ subaccount: "bad", sharePct: 10 }]));
   assert.throws(() => validateSplit([{ subaccount: "ACCT_a", sharePct: 0 }]));
 });
+
+import { buildSubaccountBody } from "./subaccount.js";
+test("subaccount body mirrors PAY's setupAccount and validates inputs", () => {
+  const body = buildSubaccountBody({
+    businessName: " Wanjiru Desk ", settlementBank: "063", accountNumber: "0123 4567 89", contactName: "Wanjiru",
+    contactEmail: "w@samuhia.co.ke", contactPhone: "0712345678", metadata: { deskCode: "COG-0007" },
+  });
+  assert.equal(body.business_name, "Wanjiru Desk");
+  assert.equal(body.account_number, "0123456789");
+  assert.equal(body.percentage_charge, 0);
+  assert.equal(body.primary_contact_phone, "+254712345678");
+  assert.throws(() => buildSubaccountBody({ businessName: "", settlementBank: "063", accountNumber: "123456", contactName: "x", contactEmail: "a@b.co", contactPhone: "0712345678" }));
+  assert.throws(() => buildSubaccountBody({ businessName: "x", settlementBank: "063", accountNumber: "12", contactName: "x", contactEmail: "a@b.co", contactPhone: "0712345678" }));
+  assert.throws(() => buildSubaccountBody({ businessName: "x", settlementBank: "063", accountNumber: "123456", contactName: "x", contactEmail: "nope", contactPhone: "0712345678" }));
+});

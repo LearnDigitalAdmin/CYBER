@@ -535,7 +535,7 @@ SELLER INPUT:
 │ POST https://api.paystack.co/charge                     │
 │                                                         │
 │ {                                                       │
-│   email: "stk-push-{shopId}@cogvana.co.ke",           │
+│   email: "stk-push-{shopId}@samuhia.co.ke",           │
 │   amount: 50000,              // In cents               │
 │   currency: "KES",                                      │
 │   mobile_money: {                                       │

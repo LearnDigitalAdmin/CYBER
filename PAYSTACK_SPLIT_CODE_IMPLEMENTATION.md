@@ -204,7 +204,7 @@ User selects Option 6
 → Enters: Paybill 123456, Account ABC12345
 → Confirms
 → Request saved to paymentSetupRequests/{id}
-→ Cogvana admin gets WhatsApp notification
+→ Samuhia admin gets WhatsApp notification
 ```
 
 ### Step 2: Admin - Create Paystack Split Code

@@ -11,7 +11,7 @@ import { AuthProvider } from "./context/authContext";
 import "./index.css";
 
 /**
- * Root entry point of Cogvana Cyber PWA.
+ * Root entry point of Samuhia Desk PWA.
  * Wraps routes with Firebase context, framer-motion transitions,
  * and handles splash/loading before routes mount.
  */
@@ -24,7 +24,7 @@ const App: React.FC = () => {
   //   return () => clearTimeout(timer);
   // }, []);
 
-  //if (isLoading) return <Loader message="Loading Cogvana Cyber..." />;
+  //if (isLoading) return <Loader message="Loading Samuhia Desk..." />;
 
   return (
     <BrowserRouter>

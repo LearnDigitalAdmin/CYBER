@@ -2,19 +2,22 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { Home, MoreHorizontal } from "lucide-react";
-import { DESK_MODULES } from "./registry";
+import { DESK_MODULES, visibleModules } from "./registry";
+import { useAgent } from "./useAgent";
 import { Modal } from "../ui";
 import { cn } from "../ui/cn";
 
 const linkBase = "flex min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium";
-const items = [{ to: "/desk", label: "Home", icon: Home, end: true },
-  ...DESK_MODULES.map((m) => ({ to: `/desk/${m.path}`, label: m.label, icon: m.icon, end: false }))];
-const bottom = [items[0], ...DESK_MODULES.filter((m) => m.primary).slice(0, 3)
-  .map((m) => ({ to: `/desk/${m.path}`, label: m.label, icon: m.icon, end: false }))];
+const toItem = (m: (typeof DESK_MODULES)[number]) => ({ to: `/desk/${m.path}`, label: m.label, icon: m.icon, end: false });
+const HOME = { to: "/desk", label: "Home", icon: Home, end: true };
 
 /** Sidebar from md up; bottom tab bar (Home + up to 3 + More) on phones. */
 export default function Frame({ children }: { children: ReactNode }) {
   const [more, setMore] = useState(false);
+  const agent = useAgent();
+  const mods = visibleModules(DESK_MODULES, agent?.agentCode);
+  const items = [HOME, ...mods.map(toItem)];
+  const bottom = [HOME, ...mods.filter((m) => m.primary).slice(0, 3).map(toItem)];
   return (
     <div className="flex min-h-screen min-w-0 bg-gray-50">
       <aside className="hidden w-60 shrink-0 border-r border-gray-200 bg-white p-3 md:block">

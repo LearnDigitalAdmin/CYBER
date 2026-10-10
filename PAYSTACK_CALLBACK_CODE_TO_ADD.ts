@@ -73,7 +73,7 @@ if (event.event === "charge.success") {
 ⏱️ Time: ${new Date().toISOString()}
 🎫 Transaction ID: ${reference}
 
-Thank you for using Cogvana!`;
+Thank you for using Samuhia!`;
 
     // ===== SEND NOTIFICATION TO SHOP OWNER =====
     try {

@@ -10,10 +10,10 @@ export default function HomePage() {
     return (
       <>
         <SEO 
-          title="Cogvana Cyber - Digital Workforce Platform for Kenya | Cyber Café Management"
-          description="Empower your cyber café or freelance business in Kenya. Manage Plot Yangu properties, process M-Pesa payments, sell products, and earn commissions. Free registration, no hidden fees."
-          keywords="cyber café Kenya, digital business Kenya, Plot Yangu agent, M-Pesa payment terminal, property management Kenya, freelance platform Kenya, cyber business management, digital workspace Kenya"
-          canonicalUrl="https://cyber.cogvana.co.ke/"
+          title="Samuhia Desk - Support Desk for Chamas, Schools and Landlords in Kenya"
+          description="Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do."
+          keywords="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, property management Kenya"
+          canonicalUrl="https://cyber.samuhia.co.ke/"
         />
         
         <div className="relative h-screen w-screen overflow-hidden bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white flex flex-col justify-center items-center">
@@ -49,7 +49,7 @@ export default function HomePage() {
               animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 1 }}
             >
-              Welcome to <span className="text-cyan-400">Cogvana Cyber</span>
+              Welcome to <span className="text-cyan-400">Samuhia Desk</span>
             </motion.h1>
             
             <motion.p
@@ -58,7 +58,7 @@ export default function HomePage() {
               animate={{ opacity: 1 }}
               transition={{ delay: 0.6, duration: 1 }}
             >
-              Empowering digital freelancers, landlords, and agents to connect, grow, and earn through smart automation.
+              A desk for agents who help chamas, schools and landlords get set up and stay on track, and earn from the service they give.
             </motion.p>
             
             <motion.div
@@ -70,14 +70,14 @@ export default function HomePage() {
               <button 
                 onClick={() => navigate('/explore')} 
                 className="px-6 py-3 text-lg rounded-full bg-cyan-500 hover:bg-cyan-400 text-black shadow-lg shadow-cyan-500/30 font-semibold transition-all"
-                aria-label="Explore Cogvana Cyber features and services"
+                aria-label="Explore Samuhia Desk features and services"
               >
                 Explore
               </button>
               <button 
                 onClick={() => navigate('/signin')} 
                 className="px-6 py-3 text-lg rounded-full bg-transparent border-2 border-cyan-500 text-cyan-400 hover:bg-cyan-500 hover:text-black transition-all font-semibold"
-                aria-label="Sign in to your Cogvana Cyber account"
+                aria-label="Sign in to your Samuhia Desk account"
               >
                 Sign In
               </button>
@@ -109,10 +109,10 @@ export default function HomePage() {
           
           {/* Footer */}
           <footer className="absolute bottom-6 w-full text-center text-sm text-gray-500 px-4">
-            <p className="mb-1">© {new Date().getFullYear()} Cogvana Cyber. All rights reserved.</p>
+            <p className="mb-1">© {new Date().getFullYear()} Samuhia Desk. All rights reserved.</p>
             <nav className="space-x-4" aria-label="Footer navigation">
-              <a href="https://payments.cogvana.co.ke/contact" className="hover:text-cyan-400 transition-colors" rel="noopener noreferrer" target="_blank">Contact Us</a>
-              <a href="https://cogvana.co.ke/terms" className="hover:text-cyan-400 transition-colors" rel="noopener noreferrer" target="_blank">Terms of Use</a>
+              <a href="https://payments.samuhia.co.ke/contact" className="hover:text-cyan-400 transition-colors" rel="noopener noreferrer" target="_blank">Contact Us</a>
+              <a href="https://samuhia.co.ke/terms" className="hover:text-cyan-400 transition-colors" rel="noopener noreferrer" target="_blank">Terms of Use</a>
             </nav>
           </footer>
         </div>

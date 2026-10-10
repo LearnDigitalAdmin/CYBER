@@ -62,7 +62,7 @@ https://storage.googleapis.com/{your-bucket-name}/reports/{shopId}/{period}/{rep
 
 **Example:**
 ```
-https://storage.googleapis.com/cogvana-reports/reports/MjmBV0twUGzfjDUqpj4u/weekly/1762944276459-25cbv38.pdf
+https://storage.googleapis.com/samuhia-reports/reports/MjmBV0twUGzfjDUqpj4u/weekly/1762944276459-25cbv38.pdf
 ```
 
 ### Security Considerations

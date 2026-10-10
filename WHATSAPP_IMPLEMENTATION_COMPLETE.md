@@ -352,8 +352,8 @@ See `DEPLOYMENT_CHECKLIST.md` for detailed instructions
 ## Contact Information
 
 - **Support Phone**: +254791286165
-- **Support Email**: info@cogvana.co.ke
-- **Website**: www.cogvana.co.ke
+- **Support Email**: info@samuhia.co.ke
+- **Website**: samuhia.co.ke
 - **Support Hours**: 9 AM - 5 PM (Weekdays)
 
 ## Files Changed

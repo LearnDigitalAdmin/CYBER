@@ -4,6 +4,8 @@ import { DeskError } from "../errors.js";
 
 /** Same project secret CYBER and PAY already use. Bind it with `secrets: [PAYSTACK_SECRET_KEY]` on each function. */
 export const PAYSTACK_SECRET_KEY = defineSecret("PAYSTACK_SECRET_KEY");
+/** MyChama's own Paystack account (the new key). Already in this project; only the payout-account sync binds it. */
+export const MYCHAMA_PAYSTACK_SECRET_KEY = defineSecret("MYCHAMA_PAYSTACK_SECRET_KEY");
 
 function http(): AxiosInstance {
   return axios.create({

@@ -1,0 +1,927 @@
+From b1ddfaedb4736520b3a6dbe8307b1c3990a01f34 Mon Sep 17 00:00:00 2001
+From: desk-b <desk-b@local>
+Date: Sat, 10 Oct 2026 15:57:16 +0000
+Subject: [PATCH 2/4] =?UTF-8?q?desk(W1-B):=20charge=20+=20ledger=20?=
+ =?UTF-8?q?=E2=80=94=20desk=5FchargeTicket,=20desk=5FonCyberTransaction,?=
+ =?UTF-8?q?=20desk=5FreconcileTickets,=20desk=5FgetEarnings?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ functions-desk/src/charge/chargeTicket.ts | 275 ++++++++++++++++++++++
+ functions-desk/src/charge/index.ts        |  12 +
+ functions-desk/src/ledger/earnings.ts     |  78 ++++++
+ functions-desk/src/ledger/index.ts        |  37 +++
+ functions-desk/src/ledger/plan.test.ts    |  69 ++++++
+ functions-desk/src/ledger/plan.ts         |  43 ++++
+ functions-desk/src/ledger/reconcile.ts    | 109 +++++++++
+ functions-desk/src/ledger/settle.ts       | 135 +++++++++++
+ functions-desk/src/ledger/trigger.ts      |  57 +++++
+ functions-desk/src/ledger/txLedger.ts     |  16 ++
+ 10 files changed, 831 insertions(+)
+ create mode 100644 functions-desk/src/charge/chargeTicket.ts
+ create mode 100644 functions-desk/src/charge/index.ts
+ create mode 100644 functions-desk/src/ledger/earnings.ts
+ create mode 100644 functions-desk/src/ledger/index.ts
+ create mode 100644 functions-desk/src/ledger/plan.test.ts
+ create mode 100644 functions-desk/src/ledger/plan.ts
+ create mode 100644 functions-desk/src/ledger/reconcile.ts
+ create mode 100644 functions-desk/src/ledger/settle.ts
+ create mode 100644 functions-desk/src/ledger/trigger.ts
+ create mode 100644 functions-desk/src/ledger/txLedger.ts
+
+diff --git a/functions-desk/src/charge/chargeTicket.ts b/functions-desk/src/charge/chargeTicket.ts
+new file mode 100644
+index 0000000..71eae94
+--- /dev/null
++++ b/functions-desk/src/charge/chargeTicket.ts
+@@ -0,0 +1,275 @@
++/**
++ * desk_chargeTicket — start (or, after 120 s, repeat) the M-Pesa STK push for a desk service ticket.
++ *
++ * Order of work (nothing before step 5 changes ticket state, so a refusal never leaves a half-reserved ticket):
++ *  1. caller owns the ticket; it is a draft (or an awaiting_payment ticket being re-prompted); the session is still valid
++ *  2. re-prompt only: >= 120 s since the last request, attempts left, and Paystack says NO attempt succeeded
++ *  3. bulk_reminder only: recount recipients with the product (dry run) and find the customer's fresh, verified bulk_sms OTP
++ *     whose stored summary equals summaryBulkSms(recount)
++ *  4. the agent's main-account subaccount and the 97.5% split code
++ *  5. transaction: draft -> awaiting_payment (attempt++, new reference). Never two live STKs on one ticket.
++ *  6. bulk_reminder only: consume that OTP (one use); if it fails the reservation is undone
++ *  7. write cyber-transactions/{reference} (PAY's exact shape), THEN call Paystack. A refusal returns the ticket to draft.
++ */
++import { FieldValue } from "firebase-admin/firestore";
++import type { ChargeTicketIn, ChargeTicketOut } from "../contract.js";
++import { summaryBulkSms } from "../contract.js";
++import { col, db } from "../db.js";
++import { parseEntityKey } from "../entity.js";
++import { DeskError } from "../errors.js";
++import { getAgentPayment, requireActiveAgent } from "../kernel/agents.js";
++import { audit } from "../kernel/audit.js";
++import { ACTION_OTP_FRESH_MS, requireSession } from "../kernel/session.js";
++import { servicePlan } from "../money.js";
++import { maskPhone, normalizeKenyaPhone } from "../paystack/phone.js";
++import { settleTicketReference } from "../ledger/settle.js";
++import { measureBulkReminder } from "../tickets/bulk.js";
++import { SERVICE_SCOPE, type DeskTicket } from "../tickets/model.js";
++import type { ActionOtpDoc } from "../types.js";
++import { buildChargeMetadata, buildCyberTransaction, CYBER_TRANSACTIONS } from "./cyberTransaction.js";
++import { DEAD_PAYSTACK_STATUSES, isReferenceNotFound, resolveDeps, type DeskDeps, type ResolvedDeps } from "./port.js";
++import { buildDeskReference } from "./reference.js";
++
++/** A second STK on the same ticket is allowed only this long after the previous one was sent. */
++export const REPROMPT_AFTER_MS = 120_000;
++export const MAX_CHARGE_ATTEMPTS = 5;
++
++const refuse = (m: string) => new DeskError("failed_precondition", m);
++
++export function parseChargeInput(data: unknown): { ticketId: string; phone: string } {
++  if (typeof data !== "object" || data === null) throw new DeskError("invalid_argument", "Invalid request");
++  const { ticketId, phone } = data as Partial<ChargeTicketIn>;
++  if (typeof ticketId !== "string" || !/^[A-Za-z0-9]{1,128}$/.test(ticketId)) throw new DeskError("invalid_argument", "Invalid ticket");
++  if (typeof phone !== "string" || phone.length < 9 || phone.length > 20) throw new DeskError("invalid_argument", "Enter a valid Kenyan phone number");
++  return { ticketId, phone };
++}
++
++const ticketBlockMessage = (s: DeskTicket["status"]): string => {
++  switch (s) {
++    case "paid": case "committed": return "This ticket is already paid";
++    case "failed": return "This payment did not go through. Create a new quote to try again";
++    case "expired": return "This ticket expired. Create a new quote to try again";
++    default: return "This ticket cannot be charged";
++  }
++};
++
++/** Re-prompt gate: waited 120 s, attempts left, and Paystack confirms none of the earlier attempts succeeded. */
++async function assertCanReprompt(t: DeskTicket, d: ResolvedDeps): Promise<void> {
++  const waited = d.now() - (t.chargeStartedAt ?? t.updatedAt);
++  if (waited < REPROMPT_AFTER_MS) {
++    throw refuse(`A payment request was just sent. Wait ${Math.ceil((REPROMPT_AFTER_MS - waited) / 1000)} more seconds before sending another.`);
++  }
++  if ((t.attempts ?? 0) >= MAX_CHARGE_ATTEMPTS) throw refuse("Too many payment requests for this ticket. Create a new quote to try again");
++  const refs = [...(t.attemptRefs ?? (t.paystackRef ? [t.paystackRef] : []))].slice(-MAX_CHARGE_ATTEMPTS).reverse();
++  for (const ref of refs) {
++    let status: string;
++    let verified;
++    try {
++      verified = await d.port.verifyTransaction(ref);
++      status = verified.status;
++    } catch (err) {
++      if (isReferenceNotFound(err)) continue; // Paystack never saw it: nothing live
++      throw refuse("We could not confirm the previous payment request yet. Please try again in a moment.");
++    }
++    if (status === "success") {
++      await settleTicketReference({ ticketId: t.ticketId, reference: ref, source: "reprompt", verified }, d);
++      throw refuse("The customer's payment was already received, so no new request was sent. Check the ticket status.");
++    }
++  }
++}
++
++/** bulk_reminder: the verified, unused, fresh bulk_sms OTP for this session whose stored summary matches the recount. */
++async function findBulkOtp(t: DeskTicket, uid: string, expectedSummary: string, now: number): Promise<string> {
++  const snap = await col("actionOtps").where("sessionId", "==", t.sessionId).where("agentId", "==", uid).where("action", "==", "bulk_sms").get();
++  const usable = snap.docs.map((s) => s.data() as ActionOtpDoc)
++    .filter((o) => o.verifiedAt && !o.consumedAt && now - o.verifiedAt <= ACTION_OTP_FRESH_MS)
++    .sort((a, b) => (b.verifiedAt ?? 0) - (a.verifiedAt ?? 0));
++  if (usable.length === 0) throw new DeskError("otp_required", "Confirm this bulk SMS with the customer's OTP first");
++  const match = usable.find((o) => o.summary === expectedSummary);
++  if (!match) {
++    throw new DeskError("otp_required",
++      `The customer confirmed "${usable[0].summary}", but this reminder now reaches a different number of people (${expectedSummary}). Request a new quote and confirm again.`);
++  }
++  return match.actionId;
++}
++
++interface Reservation { reference: string; attempt: number; prev: Pick<DeskTicket, "status" | "attempts" | "attemptRefs" | "paystackRef" | "chargeStartedAt" | "updatedAt" | "failureReason" | "sharePct" | "splitCode"> }
++
++async function reserve(ticketId: string, expected: DeskTicket, plan: { sharePct: number; splitCode: string }, d: ResolvedDeps): Promise<Reservation> {
++  const ref = col("tickets").doc(ticketId);
++  return db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const cur = snap.data() as DeskTicket | undefined;
++    if (!snap.exists || !cur) throw new DeskError("not_found", "Ticket not found");
++    if (cur.status !== expected.status || (cur.attempts ?? 0) !== (expected.attempts ?? 0) || cur.paystackRef !== expected.paystackRef)
++      throw refuse("This ticket was just updated by another request. Refresh and try again.");
++    const attempt = (cur.attempts ?? 0) + 1;
++    if (attempt > MAX_CHARGE_ATTEMPTS) throw refuse("Too many payment requests for this ticket. Create a new quote to try again");
++    const reference = buildDeskReference(ticketId, attempt);
++    const now = d.now();
++    tx.update(ref, {
++      status: "awaiting_payment", attempts: attempt, paystackRef: reference,
++      attemptRefs: [...(cur.attemptRefs ?? []), reference], chargeStartedAt: now, updatedAt: now,
++      splitCode: plan.splitCode, sharePct: plan.sharePct, failureReason: FieldValue.delete(),
++    });
++    return {
++      reference, attempt,
++      prev: {
++        status: cur.status, attempts: cur.attempts, attemptRefs: cur.attemptRefs, paystackRef: cur.paystackRef,
++        chargeStartedAt: cur.chargeStartedAt, updatedAt: cur.updatedAt, failureReason: cur.failureReason,
++        sharePct: cur.sharePct, splitCode: cur.splitCode,
++      },
++    };
++  });
++}
++
++const orDelete = <T>(v: T | undefined) => (v === undefined ? FieldValue.delete() : v);
++
++/** Undo a reservation that never reached Paystack (the OTP step failed). The ticket goes back exactly as it was. */
++async function undoReservation(ticketId: string, r: Reservation, d: ResolvedDeps): Promise<void> {
++  const ref = col("tickets").doc(ticketId);
++  await db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const cur = snap.data() as DeskTicket | undefined;
++    if (!cur || cur.paystackRef !== r.reference || cur.status !== "awaiting_payment") return;
++    const p = r.prev;
++    tx.update(ref, {
++      status: p.status, attempts: orDelete(p.attempts), attemptRefs: orDelete(p.attemptRefs), paystackRef: orDelete(p.paystackRef),
++      chargeStartedAt: orDelete(p.chargeStartedAt), sharePct: orDelete(p.sharePct), splitCode: orDelete(p.splitCode),
++      failureReason: orDelete(p.failureReason), updatedAt: d.now(),
++    });
++  });
++}
++
++/** Paystack refused the charge (or reported it failed): the ticket returns to draft with the reason and the attempt is closed. */
++async function returnToDraft(ticketId: string, reference: string, reason: string, d: ResolvedDeps): Promise<boolean> {
++  const ref = col("tickets").doc(ticketId);
++  const reverted = await db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const cur = snap.data() as DeskTicket | undefined;
++    if (!cur || cur.paystackRef !== reference || cur.status !== "awaiting_payment") return false;
++    tx.update(ref, { status: "draft", failureReason: reason, paystackRef: FieldValue.delete(), updatedAt: d.now() });
++    return true;
++  });
++  await db().collection(CYBER_TRANSACTIONS).doc(reference).update({ status: "failed", failureReason: reason, failedAt: FieldValue.serverTimestamp() }).catch(() => undefined);
++  return reverted;
++}
++
++export async function chargeTicket(uid: string, data: unknown, deps: DeskDeps = {}): Promise<ChargeTicketOut> {
++  const d = resolveDeps(deps);
++  const input = parseChargeInput(data);
++  const agent = await requireActiveAgent(uid);
++  const phoneE164 = normalizeKenyaPhone(input.phone);
++
++  // 1. ownership, state, session
++  const ticketRef = col("tickets").doc(input.ticketId);
++  const snap = await ticketRef.get();
++  if (!snap.exists) throw new DeskError("not_found", "Ticket not found");
++  const t = snap.data() as DeskTicket;
++  if (t.agentId !== uid) throw new DeskError("permission_denied", "This ticket belongs to another agent");
++  if (t.status !== "draft" && t.status !== "awaiting_payment") throw refuse(ticketBlockMessage(t.status));
++  if (!Number.isSafeInteger(t.amountMinor) || t.amountMinor <= 0) throw new DeskError("internal", "This ticket has no valid amount");
++  const scope = SERVICE_SCOPE[t.serviceType];
++  const ctx = await requireSession({ sessionId: t.sessionId, uid, scope });
++  const cfg = await d.config();
++
++  // 2. re-prompt gate
++  const reprompt = t.status === "awaiting_payment";
++  if (reprompt) await assertCanReprompt(t, d);
++
++  // 3. bulk reminder: recompute recipients server-side and find the OTP that describes exactly this send
++  let bulkOtpId: string | undefined;
++  if (t.serviceType === "bulk_reminder" && !reprompt) {
++    const m = await measureBulkReminder({
++      cfg, product: ctx.product, entityKey: ctx.entityKey, agentCode: agent.agentCode,
++      audience: String(t.params.audience), message: String(t.params.message), delegate: d.delegate,
++    });
++    bulkOtpId = await findBulkOtp(t, uid, summaryBulkSms(m.recipients), d.now());
++  }
++
++  // 4. payout subaccount (desk services always charge in the MAIN Paystack account) and the split
++  const pay = await getAgentPayment(uid, "main", cfg);
++  const plan = servicePlan(cfg);
++  const splitCode = await d.port.getOrCreateSplitCode([{ subaccount: pay.subaccountCode, sharePct: plan.agentSharePct }], "service");
++
++  // 5. reserve
++  const reservation = await reserve(input.ticketId, t, { sharePct: plan.agentSharePct, splitCode }, d);
++  const { reference } = reservation;
++
++  // 6. consume the bulk OTP
++  if (bulkOtpId) {
++    try {
++      await requireSession({ sessionId: t.sessionId, uid, scope, action: "bulk_sms", actionId: bulkOtpId });
++    } catch (err) {
++      await undoReservation(input.ticketId, reservation, d);
++      throw err;
++    }
++  }
++
++  // 7. the transaction record first (PAY's webhook needs it to exist), then Paystack
++  const facts = { pay, ticket: { ...t, sharePct: plan.agentSharePct }, reference, phoneE164, splitCode, commissionRate: cfg.platformCutPct };
++  const txRef = db().collection(CYBER_TRANSACTIONS).doc(reference);
++  try {
++    await txRef.create(buildCyberTransaction(facts));
++  } catch (err) {
++    await returnToDraft(input.ticketId, reference, "Could not record the payment request. Please try again.", d);
++    throw err;
++  }
++
++  let started;
++  try {
++    started = await d.port.chargeMpesa({
++      amountMinor: t.amountMinor, phoneE164, reference, email: pay.email, splitCode, metadata: buildChargeMetadata(facts),
++    });
++  } catch (err) {
++    const reason = err instanceof DeskError ? err.message : "Paystack declined the request";
++    // The call failed, but the request may still have reached Paystack. Only a reference Paystack confirms is dead
++    // (or has never seen) can be released; otherwise an STK may be live and the ticket must stay awaiting_payment.
++    let dead = false;
++    try {
++      const v = await d.port.verifyTransaction(reference);
++      dead = DEAD_PAYSTACK_STATUSES.has(v.status);
++    } catch (verifyErr) {
++      dead = isReferenceNotFound(verifyErr);
++    }
++    if (dead) {
++      await returnToDraft(input.ticketId, reference, reason, d);
++      await audit({ action: "ticket_charge_refused", agentId: uid, entityKey: t.entityKey, sessionId: t.sessionId, meta: { ticketId: t.ticketId, reference, reason } });
++      throw err;
++    }
++    await audit({ action: "ticket_charge_unconfirmed", agentId: uid, entityKey: t.entityKey, sessionId: t.sessionId, meta: { ticketId: t.ticketId, reference, reason } });
++    throw refuse("We could not confirm whether the M-Pesa request was sent. Wait two minutes, then check the ticket or send it again.");
++  }
++
++  if (started.status === "failed") {
++    const reason = started.displayText?.trim() || "The M-Pesa request failed";
++    await returnToDraft(input.ticketId, reference, reason, d);
++    await audit({ action: "ticket_charge_refused", agentId: uid, entityKey: t.entityKey, sessionId: t.sessionId, meta: { ticketId: t.ticketId, reference, reason } });
++    throw new DeskError("payment_failed", reason);
++  }
++
++  // record Paystack's answer, but never overwrite a status the webhook may already have moved past "pending"
++  await db().runTransaction(async (tx) => {
++    const s = await tx.get(txRef);
++    if (!s.exists) return;
++    const cur = s.data() as { status?: string };
++    const patch: Record<string, unknown> = {};
++    if (started.displayText !== undefined) patch.displayText = started.displayText;
++    if (started.accountReference !== undefined) patch.accountReference = started.accountReference;
++    if (cur.status === "pending") patch.status = started.status || "pending";
++    if (Object.keys(patch).length) tx.update(txRef, patch);
++  });
++  // a re-prompt supersedes the previous attempt's record (status untouched: only the live attempt may fail the ticket)
++  if (reprompt && t.paystackRef) {
++    await db().collection(CYBER_TRANSACTIONS).doc(t.paystackRef).update({ supersededBy: reference }).catch(() => undefined);
++  }
++  await audit({
++    action: reprompt ? "ticket_charge_reprompted" : "ticket_charge_started", agentId: uid, entityKey: t.entityKey, sessionId: t.sessionId,
++    meta: {
++      ticketId: t.ticketId, reference, attempt: reservation.attempt, amountMinor: t.amountMinor, phone: maskPhone(phoneE164),
++      sharePct: plan.agentSharePct, ...(bulkOtpId ? { otpActionId: bulkOtpId } : {}),
++      product: parseEntityKey(t.entityKey).product,
++    },
++  });
++  return { reference, status: "awaiting_payment" };
++}
+diff --git a/functions-desk/src/charge/index.ts b/functions-desk/src/charge/index.ts
+new file mode 100644
+index 0000000..fe29f4b
+--- /dev/null
++++ b/functions-desk/src/charge/index.ts
+@@ -0,0 +1,12 @@
++import { onCall } from "firebase-functions/v2/https";
++import type { ChargeTicketIn, ChargeTicketOut } from "../contract.js";
++import { DESK_REGION } from "../contract.js";
++import { PAYSTACK_SECRET_KEY } from "../paystack/client.js";
++import { deskCallable } from "./callable.js";
++import { chargeTicket } from "./chargeTicket.js";
++
++/** STK push for the caller's own draft ticket, charged in the MAIN Paystack account with the 97.5% agent split. */
++export const desk_chargeTicket = onCall<ChargeTicketIn, Promise<ChargeTicketOut>>(
++  { region: DESK_REGION, cors: true, timeoutSeconds: 90, secrets: [PAYSTACK_SECRET_KEY] },
++  deskCallable((uid, data) => chargeTicket(uid, data)),
++);
+diff --git a/functions-desk/src/ledger/earnings.ts b/functions-desk/src/ledger/earnings.ts
+new file mode 100644
+index 0000000..fd6ae98
+--- /dev/null
++++ b/functions-desk/src/ledger/earnings.ts
+@@ -0,0 +1,78 @@
++import type { EarningsByProduct, GetEarningsOut, GetEarningsIn } from "../contract.js";
++import { col } from "../db.js";
++import { DeskError } from "../errors.js";
++import { requireActiveAgent } from "../kernel/agents.js";
++import { countQualifyingAccounts, summariseBonusRows } from "../bonus/qualify.js";
++import { resolveDeps, type DeskDeps } from "../charge/port.js";
++import type { LedgerDoc } from "../types.js";
++
++export const MAX_EARNINGS_RANGE_MS = 400 * 86_400_000;
++const PAGE = 1000;
++const MAX_ROWS = 50_000;
++
++export interface Totals { settledMinor: number; payableMinor: number; paidMinor: number; byProduct: EarningsByProduct[] }
++
++/**
++ * Sums ledger rows by status and by earning stream. Void rows count nowhere. `processing` money (a payout transfer created but not
++ * yet confirmed) is still unpaid, so it is part of payableMinor. Reversals are negative settled rows and net out the stream they
++ * reverse (by product when the row has one, otherwise the service stream).
++ */
++export function aggregateEarnings(rows: readonly Pick<LedgerDoc, "kind" | "status" | "amountMinor" | "product">[]): Totals {
++  let settledMinor = 0, payableMinor = 0, paidMinor = 0;
++  const by = new Map<EarningsByProduct["product"], number>();
++  for (const r of rows) {
++    if (r.status === "void") continue;
++    if (r.status === "settled") settledMinor += r.amountMinor;
++    else if (r.status === "payable" || r.status === "processing") payableMinor += r.amountMinor;
++    else if (r.status === "paid") paidMinor += r.amountMinor;
++    const stream: EarningsByProduct["product"] =
++      r.kind === "bonus" ? "bonus" : r.kind === "support" ? "support" : r.kind === "service" ? "service" : (r.product ?? "service");
++    by.set(stream, (by.get(stream) ?? 0) + r.amountMinor);
++  }
++  const order: EarningsByProduct["product"][] = ["service", "chama", "school", "pms", "bonus", "support"];
++  return {
++    settledMinor, payableMinor, paidMinor,
++    byProduct: order.filter((k) => by.has(k)).map((k) => ({ product: k, amountMinor: by.get(k) as number })),
++  };
++}
++
++export function parseEarningsInput(data: unknown): GetEarningsIn {
++  const { from, to } = (typeof data === "object" && data !== null ? data : {}) as Partial<GetEarningsIn>;
++  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || (from as number) < 0 || (to as number) < (from as number))
++    throw new DeskError("invalid_argument", "Choose a valid date range");
++  if ((to as number) - (from as number) > MAX_EARNINGS_RANGE_MS) throw new DeskError("invalid_argument", "Choose a range of at most 13 months");
++  return { from: from as number, to: to as number };
++}
++
++/** desk_getEarnings: the caller's own ledger for a range (by createdAt) plus live milestone progress. */
++export async function getEarnings(uid: string, data: unknown, deps: DeskDeps = {}): Promise<GetEarningsOut> {
++  const d = resolveDeps(deps);
++  const { from, to } = parseEarningsInput(data);
++  await requireActiveAgent(uid);
++  const cfg = await d.config();
++
++  const rows: LedgerDoc[] = [];
++  let last: FirebaseFirestore.QueryDocumentSnapshot | undefined;
++  for (;;) {
++    let q = col("ledger").where("agentId", "==", uid).where("createdAt", ">=", from).where("createdAt", "<=", to)
++      .orderBy("createdAt", "desc").limit(PAGE);
++    if (last) q = q.startAfter(last);
++    const page = await q.get();
++    for (const doc of page.docs) rows.push(doc.data() as LedgerDoc);
++    if (page.size < PAGE) break;
++    last = page.docs[page.docs.length - 1];
++    if (rows.length >= MAX_ROWS) throw new DeskError("invalid_argument", "That range has too many entries. Choose a shorter range.");
++  }
++  const totals = aggregateEarnings(rows);
++
++  const bonusSnap = await col("ledger").where("agentId", "==", uid).where("kind", "==", "bonus").get();
++  const history = summariseBonusRows(bonusSnap.docs.map((x) => x.data() as LedgerDoc));
++  const qualifyingAccounts = await countQualifyingAccounts(uid, cfg);
++  return {
++    settledMinor: totals.settledMinor, payableMinor: totals.payableMinor, paidMinor: totals.paidMinor,
++    byProduct: totals.byProduct,
++    bonusProgress: {
++      qualifyingAccounts, blocksPaid: history.nonVoidBlocks, bankedMinor: history.bankedMinor, capMinor: cfg.milestone.lifetimeCapMinor,
++    },
++  };
++}
+diff --git a/functions-desk/src/ledger/index.ts b/functions-desk/src/ledger/index.ts
+new file mode 100644
+index 0000000..0a6cc79
+--- /dev/null
++++ b/functions-desk/src/ledger/index.ts
+@@ -0,0 +1,37 @@
++import { onCall } from "firebase-functions/v2/https";
++import { onDocumentWritten } from "firebase-functions/v2/firestore";
++import { onSchedule } from "firebase-functions/v2/scheduler";
++import type { GetEarningsIn, GetEarningsOut } from "../contract.js";
++import { DESK_REGION } from "../contract.js";
++import { deskCallable } from "../charge/callable.js";
++import { CYBER_TRANSACTIONS } from "../charge/cyberTransaction.js";
++import { PAYSTACK_SECRET_KEY } from "../paystack/client.js";
++import { getEarnings } from "./earnings.js";
++import { reconcileTickets } from "./reconcile.js";
++import { handleCyberTransactionChange, type CyberTxData } from "./trigger.js";
++
++/**
++ * Fires on every write of a desk charge's cyber-transactions document (PAY's webhook moves its status). Re-verifies with Paystack,
++ * then sets the ticket paid and writes exactly one service ledger row; failed/abandoned attempts fail the ticket.
++ * Retried by the platform on transient errors; every step is idempotent.
++ */
++export const desk_onCyberTransaction = onDocumentWritten(
++  { document: `${CYBER_TRANSACTIONS}/{reference}`, region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], retry: true, timeoutSeconds: 120 },
++  async (event) => {
++    const before = event.data?.before?.data() as CyberTxData | undefined;
++    const after = event.data?.after?.data() as CyberTxData | undefined;
++    await handleCyberTransactionChange(event.params.reference, before, after);
++  },
++);
++
++/** Every 5 minutes: verifies awaiting tickets (recovers a missed webhook), expires dead ones and 24 h-old drafts. ≤ 100 per run. */
++export const desk_reconcileTickets = onSchedule(
++  { schedule: "every 5 minutes", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 300, memory: "512MiB" },
++  async () => { await reconcileTickets(); },
++);
++
++/** The caller's earnings for a range by status and stream, plus milestone-bonus progress. */
++export const desk_getEarnings = onCall<GetEarningsIn, Promise<GetEarningsOut>>(
++  { region: DESK_REGION, cors: true, timeoutSeconds: 60 },
++  deskCallable((uid, data) => getEarnings(uid, data)),
++);
+diff --git a/functions-desk/src/ledger/plan.test.ts b/functions-desk/src/ledger/plan.test.ts
+new file mode 100644
+index 0000000..2049048
+--- /dev/null
++++ b/functions-desk/src/ledger/plan.test.ts
+@@ -0,0 +1,69 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { DEFAULT_DESK_CONFIG } from "../config.js";
++import { DEAD_PAYSTACK_STATUSES } from "../charge/port.js";
++import { aggregateEarnings } from "./earnings.js";
++import { decideTicket, planSettlement } from "./plan.js";
++import { shouldProcessTransactionChange } from "./trigger.js";
++
++const cfg = DEFAULT_DESK_CONFIG;
++
++test("settlement uses Paystack's real fee and the stored share: agent 97.5% of (gross - fee)", () => {
++  const p = planSettlement({ amountMinor: 20000, sharePct: 97.5 }, { amountMinor: 20000, feesMinor: 300, currency: "KES" }, cfg);
++  assert.ok(p.ok);
++  if (p.ok) { assert.equal(p.agentMinor, 19207); assert.equal(p.platformMinor, 493); assert.equal(p.agentMinor + p.platformMinor, 19700); assert.equal(p.feeMinor, 300); }
++});
++test("share defaults to the configured service plan when the ticket has none", () => {
++  const p = planSettlement({ amountMinor: 10000 }, { amountMinor: 10000, feesMinor: 0 }, cfg);
++  assert.ok(p.ok && p.sharePct === 97.5 && p.agentMinor === 9750);
++});
++test("amount or currency mismatch -> not ok, never settles", () => {
++  assert.deepEqual(planSettlement({ amountMinor: 20000 }, { amountMinor: 19999, feesMinor: 0 }, cfg), { ok: false, reason: "amount mismatch" });
++  assert.deepEqual(planSettlement({ amountMinor: 20000 }, { amountMinor: 20000, feesMinor: 0, currency: "NGN" }, cfg), { ok: false, reason: "amount mismatch" });
++});
++test("an impossible fee is an error, not a settlement", () => {
++  assert.throws(() => planSettlement({ amountMinor: 100 }, { amountMinor: 100, feesMinor: 101 }, cfg), /invalid fee/);
++});
++
++test("reconciler decisions: any success settles; latest dead fails; pending ages into expiry", () => {
++  const D = DEAD_PAYSTACK_STATUSES;
++  assert.deepEqual(decideTicket([{ ref: "a", status: "pending" }, { ref: "b", status: "failed" }], 0, D), { action: "fail", reason: "Payment was not completed" });
++  assert.deepEqual(decideTicket([{ ref: "a", status: "success" }, { ref: "b", status: "failed" }], 0, D), { action: "settle", ref: "a" });
++  assert.deepEqual(decideTicket([{ ref: "a", status: "failed", reason: " Insufficient funds " }], 0, D), { action: "fail", reason: "Insufficient funds" });
++  assert.deepEqual(decideTicket([{ ref: "a", status: "pending" }], 14 * 60_000, D), { action: "wait" });
++  assert.deepEqual(decideTicket([{ ref: "a", status: "pending" }], 15 * 60_000, D), { action: "expire" });
++  assert.deepEqual(decideTicket([{ ref: "a", status: "not_found" }], 16 * 60_000, D), { action: "expire" });
++});
++
++test("trigger filter: desk charges only; success always, failure only on change", () => {
++  const ref = "CYBER_DSK_T1_1";
++  assert.equal(shouldProcessTransactionChange("CYBER_u1_123", undefined, { status: "success", deskTicketId: "T1" }), false);
++  assert.equal(shouldProcessTransactionChange(ref, undefined, { status: "success" }), false);
++  assert.equal(shouldProcessTransactionChange(ref, { status: "pending" }, { status: "success", deskTicketId: "T1" }), true);
++  assert.equal(shouldProcessTransactionChange(ref, { status: "success", deskTicketId: "T1" }, { status: "success", deskTicketId: "T1" }), true);
++  assert.equal(shouldProcessTransactionChange(ref, { status: "pending", deskTicketId: "T1" }, { status: "failed", deskTicketId: "T1" }), true);
++  assert.equal(shouldProcessTransactionChange(ref, { status: "failed", deskTicketId: "T1" }, { status: "failed", deskTicketId: "T1" }), false);
++  assert.equal(shouldProcessTransactionChange(ref, undefined, { status: "pay_offline", deskTicketId: "T1" }), false);
++  assert.equal(shouldProcessTransactionChange(ref, { status: "success", deskTicketId: "T1" }, undefined), false);
++});
++
++test("earnings: by status and stream; void ignored; processing counts as unpaid; reversals net out", () => {
++  const t = aggregateEarnings([
++    { kind: "service", status: "settled", amountMinor: 19000 },
++    { kind: "commission", status: "settled", amountMinor: 5000, product: "chama" },
++    { kind: "reversal", status: "settled", amountMinor: -5000, product: "chama" },
++    { kind: "reversal", status: "settled", amountMinor: -1000 },
++    { kind: "bonus", status: "payable", amountMinor: 200000 },
++    { kind: "bonus", status: "processing", amountMinor: 200000 },
++    { kind: "bonus", status: "paid", amountMinor: 200000 },
++    { kind: "bonus", status: "void", amountMinor: 200000 },
++    { kind: "support", status: "payable", amountMinor: 3000 },
++  ]);
++  assert.equal(t.settledMinor, 18000);
++  assert.equal(t.payableMinor, 403000);
++  assert.equal(t.paidMinor, 200000);
++  assert.deepEqual(t.byProduct, [
++    { product: "service", amountMinor: 18000 }, { product: "chama", amountMinor: 0 },
++    { product: "bonus", amountMinor: 600000 }, { product: "support", amountMinor: 3000 },
++  ]);
++});
+diff --git a/functions-desk/src/ledger/plan.ts b/functions-desk/src/ledger/plan.ts
+new file mode 100644
+index 0000000..d01dd49
+--- /dev/null
++++ b/functions-desk/src/ledger/plan.ts
+@@ -0,0 +1,43 @@
++/** Pure settlement planning for a desk service ticket, from Paystack's VERIFIED figures (never from the webhook document). */
++import type { DeskConfig } from "../config.js";
++import { DeskError } from "../errors.js";
++import { servicePlan, settledAmounts } from "../money.js";
++import type { DeskTicket } from "../tickets/model.js";
++
++export const AMOUNT_MISMATCH = "amount mismatch";
++
++export interface VerifiedFigures { amountMinor: number; feesMinor: number; currency?: string }
++export type SettlementPlan =
++  | { ok: true; grossMinor: number; feeMinor: number; agentMinor: number; platformMinor: number; sharePct: number }
++  | { ok: false; reason: typeof AMOUNT_MISMATCH };
++
++export function planSettlement(t: Pick<DeskTicket, "amountMinor" | "sharePct">, v: VerifiedFigures, cfg: DeskConfig): SettlementPlan {
++  if (v.amountMinor !== t.amountMinor || (v.currency !== undefined && v.currency.toUpperCase() !== "KES"))
++    return { ok: false, reason: AMOUNT_MISMATCH };
++  if (!Number.isSafeInteger(v.feesMinor) || v.feesMinor < 0 || v.feesMinor > v.amountMinor)
++    throw new DeskError("internal", "Paystack reported an invalid fee for this payment");
++  const sharePct = t.sharePct ?? servicePlan(cfg).agentSharePct;
++  const s = settledAmounts({ grossMinor: v.amountMinor, feeMinor: v.feesMinor, agentSharePct: sharePct });
++  return { ok: true, grossMinor: v.amountMinor, feeMinor: v.feesMinor, agentMinor: s.agentMinor, platformMinor: s.platformMinor, sharePct };
++}
++
++export type AttemptStatus = { ref: string; status: string; reason?: string };
++export type TicketDecision =
++  | { action: "settle"; ref: string }
++  | { action: "fail"; reason: string }
++  | { action: "expire" }
++  | { action: "wait" };
++
++export const PENDING_EXPIRY_MS = 15 * 60_000;
++
++/**
++ * What the reconciler does with an awaiting_payment ticket. `attempts` is ordered oldest -> newest and holds Paystack's
++ * verified status per reference ("not_found" when Paystack has never seen it). A success on ANY attempt settles the ticket
++ * (money first); otherwise the latest attempt decides.
++ */
++export function decideTicket(attempts: readonly AttemptStatus[], ageMs: number, deadStatuses: ReadonlySet<string>): TicketDecision {
++  for (let i = attempts.length - 1; i >= 0; i--) if (attempts[i].status === "success") return { action: "settle", ref: attempts[i].ref };
++  const latest = attempts[attempts.length - 1];
++  if (latest && deadStatuses.has(latest.status)) return { action: "fail", reason: latest.reason?.trim() || "Payment was not completed" };
++  return ageMs >= PENDING_EXPIRY_MS ? { action: "expire" } : { action: "wait" };
++}
+diff --git a/functions-desk/src/ledger/reconcile.ts b/functions-desk/src/ledger/reconcile.ts
+new file mode 100644
+index 0000000..864eb5d
+--- /dev/null
++++ b/functions-desk/src/ledger/reconcile.ts
+@@ -0,0 +1,109 @@
++/**
++ * desk_reconcileTickets — recovers what the webhook trigger missed and clears what can never complete. At most 100 tickets per run.
++ *   awaiting_payment older than 3 min : verify with Paystack -> paid (same settle path) / failed; pending > 15 min -> expired
++ *   draft older than 24 h             : expired (its saved draft chunks are deleted)
++ */
++import * as logger from "firebase-functions/logger";
++import { DEAD_PAYSTACK_STATUSES, isReferenceNotFound, resolveDeps, type DeskDeps } from "../charge/port.js";
++import { MAX_CHARGE_ATTEMPTS } from "../charge/chargeTicket.js";
++import { col, db } from "../db.js";
++import { audit } from "../kernel/audit.js";
++import { isSettled, type DeskTicket } from "../tickets/model.js";
++import { decideTicket, type AttemptStatus } from "./plan.js";
++import { failTicketAttempt, settleTicketReference } from "./settle.js";
++
++export const RECONCILE_MAX_PER_RUN = 100;
++export const AWAITING_MIN_AGE_MS = 3 * 60_000;
++export const DRAFT_MAX_AGE_MS = 24 * 3_600_000;
++
++export interface ReconcileSummary { checked: number; paid: number; failed: number; expired: number; draftsExpired: number; waiting: number; errors: number }
++
++async function expireTicket(ticketId: string, expected: "awaiting_payment" | "draft", reason: string, d: ReturnType<typeof resolveDeps>): Promise<DeskTicket | undefined> {
++  const ref = col("tickets").doc(ticketId);
++  const cutoff = d.now() - (expected === "draft" ? DRAFT_MAX_AGE_MS : AWAITING_MIN_AGE_MS);
++  return db().runTransaction(async (tx) => {
++    const snap = await tx.get(ref);
++    const t = snap.data() as DeskTicket | undefined;
++    if (!t || t.status !== expected || t.updatedAt >= cutoff) return undefined;
++    tx.update(ref, { status: "expired", failureReason: reason, updatedAt: d.now() });
++    return t;
++  });
++}
++
++async function deleteDraftChunks(ticketId: string): Promise<void> {
++  const chunks = await col("tickets").doc(ticketId).collection("draft").get();
++  if (chunks.empty) return;
++  const batch = db().batch();
++  for (const c of chunks.docs) batch.delete(c.ref);
++  await batch.commit();
++}
++
++async function reconcileAwaiting(t: DeskTicket, d: ReturnType<typeof resolveDeps>, s: ReconcileSummary): Promise<void> {
++  const refs = [...(t.attemptRefs ?? (t.paystackRef ? [t.paystackRef] : []))].slice(-MAX_CHARGE_ATTEMPTS);
++  const attempts: AttemptStatus[] = [];
++  let unreadable = false;
++  for (const ref of refs) {
++    try {
++      const v = await d.port.verifyTransaction(ref);
++      const reason = typeof v.raw.gateway_response === "string" ? v.raw.gateway_response : undefined;
++      attempts.push({ ref, status: v.status, reason });
++      if (v.status === "success") {
++        const out = await settleTicketReference({ ticketId: t.ticketId, reference: ref, source: "reconciler", verified: v }, d);
++        if (out.kind === "paid" || out.kind === "mismatch") { s[out.kind === "paid" ? "paid" : "failed"]++; return; }
++        return;
++      }
++    } catch (err) {
++      if (isReferenceNotFound(err)) attempts.push({ ref, status: "not_found" });
++      else { unreadable = true; logger.warn("reconcile: could not verify", { ticketId: t.ticketId, ref }); }
++    }
++  }
++  if (unreadable) { s.errors++; return; } // never expire or fail on a transient Paystack error
++  const age = d.now() - (t.chargeStartedAt ?? t.updatedAt);
++  const decision = decideTicket(attempts, age, DEAD_PAYSTACK_STATUSES);
++  if (decision.action === "fail") {
++    const live = t.paystackRef;
++    if (live && (await failTicketAttempt({ ticketId: t.ticketId, reference: live, reason: decision.reason, source: "reconciler" }, d))) s.failed++;
++  } else if (decision.action === "expire") {
++    const done = await expireTicket(t.ticketId, "awaiting_payment", "Payment was not completed in time", d);
++    if (done) {
++      s.expired++;
++      await audit({ action: "ticket_expired", agentId: done.agentId, entityKey: done.entityKey, meta: { ticketId: done.ticketId, was: "awaiting_payment", source: "reconciler" } });
++    }
++  } else {
++    s.waiting++;
++  }
++}
++
++export async function reconcileTickets(deps: DeskDeps = {}): Promise<ReconcileSummary> {
++  const d = resolveDeps(deps);
++  const s: ReconcileSummary = { checked: 0, paid: 0, failed: 0, expired: 0, draftsExpired: 0, waiting: 0, errors: 0 };
++  let budget = RECONCILE_MAX_PER_RUN;
++
++  const awaiting = await col("tickets").where("status", "==", "awaiting_payment")
++    .where("updatedAt", "<", d.now() - AWAITING_MIN_AGE_MS).orderBy("updatedAt", "asc").limit(budget).get();
++  for (const doc of awaiting.docs) {
++    budget--; s.checked++;
++    const t = doc.data() as DeskTicket;
++    try { if (!isSettled(t.status)) await reconcileAwaiting(t, d, s); }
++    catch (err) { s.errors++; logger.error("reconcile: ticket failed", { ticketId: t.ticketId, err }); }
++  }
++
++  if (budget > 0) {
++    const drafts = await col("tickets").where("status", "==", "draft")
++      .where("updatedAt", "<", d.now() - DRAFT_MAX_AGE_MS).orderBy("updatedAt", "asc").limit(budget).get();
++    for (const doc of drafts.docs) {
++      s.checked++;
++      const t = doc.data() as DeskTicket;
++      try {
++        const done = await expireTicket(t.ticketId, "draft", "Draft expired after 24 hours", d);
++        if (done) {
++          await deleteDraftChunks(t.ticketId);
++          s.draftsExpired++;
++          await audit({ action: "ticket_expired", agentId: done.agentId, entityKey: done.entityKey, meta: { ticketId: done.ticketId, was: "draft", source: "reconciler" } });
++        }
++      } catch (err) { s.errors++; logger.error("reconcile: draft expiry failed", { ticketId: t.ticketId, err }); }
++    }
++  }
++  logger.info("desk_reconcileTickets", s);
++  return s;
++}
+diff --git a/functions-desk/src/ledger/settle.ts b/functions-desk/src/ledger/settle.ts
+new file mode 100644
+index 0000000..10d82f6
+--- /dev/null
++++ b/functions-desk/src/ledger/settle.ts
+@@ -0,0 +1,135 @@
++/**
++ * The single code path that turns a CONFIRMED Paystack payment into a paid desk ticket. Used by the webhook trigger, the
++ * reconciler and the re-prompt check, so all three behave identically:
++ *   - Paystack is asked (verifyTransaction); the cyber-transactions document is never trusted on its own.
++ *   - success + amount equal to the ticket -> one transaction sets the ticket paid and writes ONE service ledger row.
++ *   - a replay changes nothing; a second payment on an already-paid ticket is flagged for refund, never double-counted.
++ *   - amount mismatch -> ticket failed ("amount mismatch"), audited, no ledger row.
++ */
++import { FieldValue } from "firebase-admin/firestore";
++import { parseDeskReference } from "../charge/reference.js";
++import { resolveDeps, type DeskDeps } from "../charge/port.js";
++import { col, db } from "../db.js";
++import { audit } from "../kernel/audit.js";
++import type { VerifiedTransaction } from "../paystack/client.js";
++import { isSettled, type DeskTicket } from "../tickets/model.js";
++import { AMOUNT_MISMATCH, planSettlement } from "./plan.js";
++import { buildLedgerDoc, ledgerRef } from "./txLedger.js";
++import { ledgerEntryId } from "../kernel/ledger.js";
++
++export type SettleSource = "webhook" | "reconciler" | "reprompt";
++export type SettleOutcome =
++  | { kind: "paid"; changed: boolean }
++  | { kind: "duplicate"; changed: boolean }
++  | { kind: "mismatch"; changed: boolean }
++  | { kind: "not_success"; status: string }
++  | { kind: "missing_ticket" }
++  | { kind: "wrong_ticket" };
++
++export async function settleTicketReference(
++  args: { ticketId: string; reference: string; source: SettleSource; verified?: VerifiedTransaction },
++  deps: DeskDeps = {},
++): Promise<SettleOutcome> {
++  const d = resolveDeps(deps);
++  const { ticketId, reference, source } = args;
++  const ticketRef = col("tickets").doc(ticketId);
++
++  const parsed = parseDeskReference(reference);
++  if (!parsed || parsed.ticketId !== ticketId) {
++    await audit({ action: "ticket_reference_rejected", meta: { ticketId, reference, source } });
++    return { kind: "wrong_ticket" };
++  }
++  const pre = await ticketRef.get();
++  if (!pre.exists) {
++    await audit({ action: "ticket_settle_orphan", meta: { ticketId, reference, source } });
++    return { kind: "missing_ticket" };
++  }
++  const first = pre.data() as DeskTicket;
++  if (isSettled(first.status) && first.paystackRef === reference) return { kind: "paid", changed: false };
++
++  const v = args.verified ?? await d.port.verifyTransaction(reference);
++  if (v.status !== "success") return { kind: "not_success", status: v.status };
++
++  const cfg = await d.config();
++  const currency = typeof v.raw.currency === "string" ? v.raw.currency : undefined;
++  const plan = planSettlement(first, { amountMinor: v.amountMinor, feesMinor: v.feesMinor, currency }, cfg);
++  const now = d.now();
++
++  const result = await db().runTransaction(async (tx): Promise<SettleOutcome> => {
++    const snap = await tx.get(ticketRef);
++    if (!snap.exists) return { kind: "missing_ticket" };
++    const t = snap.data() as DeskTicket;
++    const lRef = ledgerRef(ledgerEntryId(["service", ticketId]));
++    const lSnap = await tx.get(lRef);
++
++    if (isSettled(t.status)) {
++      if (t.paystackRef === reference) return { kind: "paid", changed: false };
++      // A different reference already paid this ticket and this one succeeded too: the customer paid twice.
++      if ((t.duplicateRefs ?? []).includes(reference)) return { kind: "duplicate", changed: false };
++      tx.update(ticketRef, { duplicateRefs: FieldValue.arrayUnion(reference), updatedAt: now });
++      return { kind: "duplicate", changed: true };
++    }
++    if (!plan.ok) {
++      if (t.status === "failed" && t.failureReason === AMOUNT_MISMATCH && t.paystackRef === reference) return { kind: "mismatch", changed: false };
++      tx.update(ticketRef, { status: "failed", failureReason: AMOUNT_MISMATCH, paystackRef: reference, updatedAt: now });
++      return { kind: "mismatch", changed: true };
++    }
++    tx.update(ticketRef, {
++      status: "paid", paystackRef: reference, grossMinor: plan.grossMinor, feeMinor: plan.feeMinor,
++      agentMinor: plan.agentMinor, platformMinor: plan.platformMinor, sharePct: plan.sharePct,
++      paidAt: now, updatedAt: now, failureReason: FieldValue.delete(),
++    });
++    if (!lSnap.exists) {
++      tx.create(lRef, buildLedgerDoc({
++        agentId: t.agentId, kind: "service", amountMinor: plan.agentMinor, status: "settled",
++        entityKey: t.entityKey, paystackRef: reference, sourceId: ticketId,
++        grossMinor: plan.grossMinor, feeMinor: plan.feeMinor, sharePct: plan.sharePct, rule: "service",
++        note: `Desk service: ${t.serviceType}`, idempotencyParts: ["service", ticketId],
++      }, now));
++    }
++    return { kind: "paid", changed: true };
++  });
++
++  if (result.kind === "paid" && result.changed) {
++    await audit({
++      action: "ticket_paid", agentId: first.agentId, entityKey: first.entityKey, sessionId: first.sessionId,
++      meta: { ticketId, reference, source, grossMinor: plan.ok ? plan.grossMinor : undefined, feeMinor: plan.ok ? plan.feeMinor : undefined,
++        agentMinor: plan.ok ? plan.agentMinor : undefined, platformMinor: plan.ok ? plan.platformMinor : undefined },
++    });
++  } else if (result.kind === "mismatch" && result.changed) {
++    await audit({
++      action: "ticket_amount_mismatch", agentId: first.agentId, entityKey: first.entityKey,
++      meta: { ticketId, reference, source, expectedMinor: first.amountMinor, receivedMinor: v.amountMinor, currency: currency ?? null },
++    });
++  } else if (result.kind === "duplicate" && result.changed) {
++    await audit({
++      action: "ticket_duplicate_payment", agentId: first.agentId, entityKey: first.entityKey,
++      meta: { ticketId, reference, source, amountMinor: v.amountMinor, note: "The ticket was already paid; this payment needs a manual refund" },
++    });
++  }
++  return result;
++}
++
++/** A confirmed-dead attempt (failed / abandoned / reversed) fails the ticket, but only while that attempt is the live one. */
++export async function failTicketAttempt(
++  args: { ticketId: string; reference: string; reason: string; source: SettleSource },
++  deps: DeskDeps = {},
++): Promise<boolean> {
++  const d = resolveDeps(deps);
++  const ticketRef = col("tickets").doc(args.ticketId);
++  const now = d.now();
++  const changed = await db().runTransaction(async (tx) => {
++    const snap = await tx.get(ticketRef);
++    if (!snap.exists) return undefined;
++    const t = snap.data() as DeskTicket;
++    if (t.status !== "awaiting_payment" || t.paystackRef !== args.reference) return undefined;
++    tx.update(ticketRef, { status: "failed", failureReason: args.reason, updatedAt: now });
++    return t;
++  });
++  if (!changed) return false;
++  await audit({
++    action: "ticket_payment_failed", agentId: changed.agentId, entityKey: changed.entityKey,
++    meta: { ticketId: args.ticketId, reference: args.reference, reason: args.reason, source: args.source },
++  });
++  return true;
++}
+diff --git a/functions-desk/src/ledger/trigger.ts b/functions-desk/src/ledger/trigger.ts
+new file mode 100644
+index 0000000..77dd34c
+--- /dev/null
++++ b/functions-desk/src/ledger/trigger.ts
+@@ -0,0 +1,57 @@
++/** desk_onCyberTransaction logic: a PAY webhook (or desk) moved a desk charge's cyber-transactions document. */
++import * as logger from "firebase-functions/logger";
++import { parseDeskReference } from "../charge/reference.js";
++import { DEAD_PAYSTACK_STATUSES, isReferenceNotFound, resolveDeps, type DeskDeps } from "../charge/port.js";
++import { DESK_REF_PREFIX } from "../contract.js";
++import { audit } from "../kernel/audit.js";
++import { failTicketAttempt, settleTicketReference } from "./settle.js";
++
++export interface CyberTxData { status?: unknown; deskTicketId?: unknown }
++const FAILURE_STATUSES: ReadonlySet<string> = new Set(["failed", "abandoned"]);
++
++/**
++ * Desk charges only. Success is re-examined on every write (settlement is idempotent, so a replayed webhook is harmless and
++ * a missed first invocation is recoverable); failure only when the status actually changed to it.
++ */
++export function shouldProcessTransactionChange(reference: string, before: CyberTxData | undefined, after: CyberTxData | undefined): boolean {
++  if (!after || !reference.startsWith(DESK_REF_PREFIX)) return false;
++  if (typeof after.deskTicketId !== "string" || after.deskTicketId.length === 0) return false;
++  const status = String(after.status ?? "");
++  if (status === "success") return true;
++  return FAILURE_STATUSES.has(status) && before?.status !== after.status;
++}
++
++export async function handleCyberTransactionChange(
++  reference: string, before: CyberTxData | undefined, after: CyberTxData | undefined, deps: DeskDeps = {},
++): Promise<string> {
++  if (!shouldProcessTransactionChange(reference, before, after)) return "ignored";
++  const d = resolveDeps(deps);
++  const ticketId = String(after!.deskTicketId);
++  const parsed = parseDeskReference(reference);
++  if (!parsed || parsed.ticketId !== ticketId) {
++    await audit({ action: "ticket_reference_rejected", meta: { ticketId, reference, source: "webhook" } });
++    return "rejected";
++  }
++  let verified;
++  try {
++    verified = await d.port.verifyTransaction(reference);
++  } catch (err) {
++    if (isReferenceNotFound(err)) {
++      // the document claims a payment Paystack has never seen: record it, do not retry forever
++      await audit({ action: "cyber_tx_unverifiable", meta: { ticketId, reference, claimed: String(after!.status) } });
++      return "unverifiable";
++    }
++    throw err; // transient: the platform retries this invocation
++  }
++  if (verified.status === "success") {
++    const out = await settleTicketReference({ ticketId, reference, source: "webhook", verified }, d);
++    return out.kind;
++  }
++  if (DEAD_PAYSTACK_STATUSES.has(verified.status)) {
++    const reason = typeof verified.raw.gateway_response === "string" && verified.raw.gateway_response.trim()
++      ? verified.raw.gateway_response.trim() : "Payment was not completed";
++    return (await failTicketAttempt({ ticketId, reference, reason, source: "webhook" }, d)) ? "failed" : "stale";
++  }
++  logger.info("desk charge not final at Paystack yet; the reconciler will settle it", { ticketId, reference, status: verified.status });
++  return "pending";
++}
+diff --git a/functions-desk/src/ledger/txLedger.ts b/functions-desk/src/ledger/txLedger.ts
+new file mode 100644
+index 0000000..7d897ae
+--- /dev/null
++++ b/functions-desk/src/ledger/txLedger.ts
+@@ -0,0 +1,16 @@
++/**
++ * The kernel's appendLedger() writes with its own standalone create(), so it cannot join a transaction. Settling a ticket
++ * must set the ticket paid AND write its ledger row atomically, so this builds the identical document (same deterministic
++ * id from ledgerEntryId, same undefined-stripping) for use inside a transaction.
++ */
++import { col } from "../db.js";
++import { ledgerEntryId, type NewLedgerEntry } from "../kernel/ledger.js";
++import type { LedgerDoc } from "../types.js";
++
++export function buildLedgerDoc(e: NewLedgerEntry, now: number): LedgerDoc {
++  const { idempotencyParts, ...rest } = e;
++  const doc: LedgerDoc = { ...rest, entryId: ledgerEntryId(idempotencyParts), createdAt: now };
++  for (const k of Object.keys(doc) as (keyof LedgerDoc)[]) if (doc[k] === undefined) delete doc[k];
++  return doc;
++}
++export const ledgerRef = (entryId: string) => col("ledger").doc(entryId);
+-- 
+2.43.0
+

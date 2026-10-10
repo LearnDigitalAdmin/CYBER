@@ -71,12 +71,12 @@ const SignupPage: React.FC = () => {
     }
 
     if (currentStep === 3 && form.type === "Cyber") {
-      if (!form.shopName.trim()) newErrors.push("Shop name is required for Cyber Café");
-      if (!form.shopPhone.trim()) newErrors.push("Shop phone is required for Cyber Café");
+      if (!form.shopName.trim()) newErrors.push("Shop name is required for Desk Agent");
+      if (!form.shopPhone.trim()) newErrors.push("Shop phone is required for Desk Agent");
       if (!form.shopPhone.match(/^\+254\d{9}$/)) newErrors.push("Shop phone must be in format +254XXXXXXXXX");
-      if (!form.shopEmail.trim()) newErrors.push("Shop email is required for Cyber Café");
+      if (!form.shopEmail.trim()) newErrors.push("Shop email is required for Desk Agent");
       if (!form.shopEmail.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) newErrors.push("Valid shop email is required");
-      if (!form.shopLocation.trim()) newErrors.push("Shop location is required for Cyber Café");
+      if (!form.shopLocation.trim()) newErrors.push("Shop location is required for Desk Agent");
     }
 
     if (currentStep === 4) {
@@ -85,7 +85,7 @@ const SignupPage: React.FC = () => {
       if (!idFile) newErrors.push("National ID upload is required");
       if (!kraFile) newErrors.push("KRA PIN certificate is required");
       if (kraFile && kraFile.type !== 'application/pdf') newErrors.push("KRA PIN certificate must be a PDF file");
-      if (form.type === "Cyber" && !shopFile) newErrors.push("Shop front photo is required for Cyber Café");
+      if (form.type === "Cyber" && !shopFile) newErrors.push("Shop front photo is required for Desk Agent");
       if (shopFile && !shopFile.type.startsWith('image/')) newErrors.push("Shop photo must be an image file");
     }
 
@@ -257,7 +257,7 @@ const SignupPage: React.FC = () => {
                   required
                 >
                   <option value="Freelancer">Freelancer</option>
-                  <option value="Cyber">Cyber Café</option>
+                  <option value="Cyber">Desk Agent</option>
                 </select>
 
                 <div className="flex items-center bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus-within:border-blue-500 transition-colors">
@@ -378,14 +378,14 @@ const SignupPage: React.FC = () => {
                 className="space-y-4"
               >
                 <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <Building className="w-5 h-5" /> Cyber Café Information
+                  <Building className="w-5 h-5" /> Desk Agent Information
                 </h2>
 
                 <div className="flex items-center bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus-within:border-blue-500 transition-colors">
                   <Building className="w-5 h-5 text-gray-400 mr-3" />
                   <input
                     name="shopName"
-                    placeholder="Cyber Café Name *"
+                    placeholder="Desk or Business Name *"
                     value={form.shopName}
                     onChange={handleChange}
                     className="bg-transparent flex-1 outline-none"

@@ -21,7 +21,7 @@ WHAT'S IMPLEMENTED
    ├─ Multi-step navigatable context
    ├─ Collects: M-Pesa/Airtel/Bank details
    ├─ Saves setup request to Firestore
-   ├─ ✅ SENDS WHATSAPP TO COGVANA ADMIN (+254791286165)
+   ├─ ✅ SENDS WHATSAPP TO SAMUHIA ADMIN (+254791286165)
    ├─ Includes Shop ID prominently
    └─ Updated: handlers/payment.setup.handler.ts
 
@@ -91,7 +91,7 @@ USER FLOW
 SETUP PAYMENT ACCOUNT:
   My Shop (4) → Setup Account (6)
   → Choose Method → Enter Details
-  → Confirm → ✅ Cogvana gets WhatsApp
+  → Confirm → ✅ Samuhia gets WhatsApp
   → Admin approves → Stores Paystack sub-account ID
 
 CHARGE CUSTOMER:
@@ -115,7 +115,7 @@ KEY FEATURES
 TEST CHECKLIST
 ==============
 □ View My Shop Menu - see options 6 & 7
-□ Setup Payment Account - verify WhatsApp sent to Cogvana
+□ Setup Payment Account - verify WhatsApp sent to Samuhia
 □ Check Firestore - request saved in paymentSetupRequests
 □ Approve setup - add paystackSubaccountId to shop.paymentAccount
 □ Charge customer - verify transaction in shops/{shopId}/transactions

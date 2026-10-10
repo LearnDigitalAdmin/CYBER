@@ -298,9 +298,9 @@ function generateInvoiceHTML(
         <div class="header">
           <div class="company-info">
             <h1>PLOT YANGU</h1>
-            <p>by Cogvana Biz</p>
+            <p>by Samuhia Biz</p>
             <p style="font-size: 11px; margin-top: 8px;">
-              📧 Email: info@cogvana.co.ke<br>
+              📧 Email: info@samuhia.co.ke<br>
               📱 Tel: 0791286165
             </p>
           </div>
@@ -417,13 +417,13 @@ function generateInvoiceHTML(
         <!-- Footer -->
         <div class="footer">
           <hr style="border: none; border-top: 1px solid #ddd; margin: 15px 0;">
-          <p style="font-weight: bold; color: #1976d2; margin-bottom: 8px;">Processed by Cogvana Biz WhatsApp Platform</p>
+          <p style="font-weight: bold; color: #1976d2; margin-bottom: 8px;">Processed by Samuhia Biz WhatsApp Platform</p>
           <p style="font-size: 10px;">This invoice was automatically generated through the Plot Yangu WhatsApp-based property management system.</p>
           <p style="font-size: 10px; margin-top: 8px;">
-            <strong>Company:</strong> Cogvana Biz Limited | <strong>Email:</strong> info@cogvana.co.ke | <strong>Phone:</strong> 0791286165
+            <strong>Company:</strong> Samuhia Biz Limited | <strong>Email:</strong> info@samuhia.co.ke | <strong>Phone:</strong> 0791286165
           </p>
           <p style="font-size: 10px; color: #999; margin-top: 8px;">Generated on ${new Date().toLocaleString('en-KE')} | Reference: ${invoice.id}</p>
-          <p style="font-size: 9px; color: #bbb; margin-top: 10px; font-style: italic;">For support or inquiries, contact us via WhatsApp or email at info@cogvana.co.ke</p>
+          <p style="font-size: 9px; color: #bbb; margin-top: 10px; font-style: italic;">For support or inquiries, contact us via WhatsApp or email at info@samuhia.co.ke</p>
         </div>
       </div>
     </body>

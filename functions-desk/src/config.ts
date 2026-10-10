@@ -1,4 +1,4 @@
-import type { Rank } from "./contract.js";
+import type { Product, Rank } from "./contract.js";
 
 /** Runtime-editable in `desk_config/global` (admin dash only). Money in minor units, rates in percent. */
 export interface DeskConfig {
@@ -12,6 +12,16 @@ export interface DeskConfig {
   rentDeskSharePct: number;              // 30 (% of Plot Yangu's take)
   rentTakeCapMinor: number;              // 25000 = KES 250 per transaction
   milestone: { blockSize: number; bonusMinor: number; lifetimeCapMinor: number; minPaidMonths: number };
+  /** Which Paystack account each product charges through. "separate" = its own account (agent needs a subaccount there too). */
+  paystackAccounts: Record<Product, "main" | "separate">;
+  /** Firebase project IDs of the Chama and Register projects (desk reads them; they never access desk). */
+  projects: { chama: string; school: string };
+  /** Top-desk controls. */
+  topDesk: { dailyPayoutCapMinor: number };
+  /** Base URL of each product's private `deskDelegate` function. Set by the owner after the product patch is deployed. */
+  delegate: Record<Product, string>;
+  /** Support payouts (automatic monthly Paystack transfer). A rate of 0 disables payouts. */
+  support: { rateMinorPerConfirmed: number; maxConfirmedPerDay: number; monthlyCapMinor: number };
   prices: {
     importMinor: number;                 // 20000
     manualTiers: { upToRecords: number; priceMinor: number }[];
@@ -32,6 +42,11 @@ export const DEFAULT_DESK_CONFIG: DeskConfig = {
   rentDeskSharePct: 30,
   rentTakeCapMinor: 25000,
   milestone: { blockSize: 10, bonusMinor: 200000, lifetimeCapMinor: 1000000, minPaidMonths: 2 },
+  paystackAccounts: { chama: "main", school: "main", pms: "main" },
+  projects: { chama: "", school: "" },
+  topDesk: { dailyPayoutCapMinor: 5_000_000 },
+  delegate: { chama: "", school: "", pms: "" },
+  support: { rateMinorPerConfirmed: 0, maxConfirmedPerDay: 5, monthlyCapMinor: 0 },
   prices: {
     importMinor: 20000,
     manualTiers: [
@@ -56,6 +71,11 @@ export function mergeConfig(stored: Partial<DeskConfig> | undefined): DeskConfig
     subShareByRank: { ...DEFAULT_DESK_CONFIG.subShareByRank, ...s.subShareByRank },
     reportShareByRank: { ...DEFAULT_DESK_CONFIG.reportShareByRank, ...s.reportShareByRank },
     milestone: { ...DEFAULT_DESK_CONFIG.milestone, ...s.milestone },
+    paystackAccounts: { ...DEFAULT_DESK_CONFIG.paystackAccounts, ...s.paystackAccounts },
+    projects: { ...DEFAULT_DESK_CONFIG.projects, ...s.projects },
+    topDesk: { ...DEFAULT_DESK_CONFIG.topDesk, ...s.topDesk },
+    delegate: { ...DEFAULT_DESK_CONFIG.delegate, ...s.delegate },
+    support: { ...DEFAULT_DESK_CONFIG.support, ...s.support },
     prices: { ...DEFAULT_DESK_CONFIG.prices, ...s.prices },
   };
 }

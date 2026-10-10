@@ -312,9 +312,9 @@ const FormPage = () => {
         )}
 
         <div className="mt-12 text-center text-gray-500 text-sm">
-          <p>Plot Yangu © {new Date().getFullYear()} | Cogvana Corporation</p>
+          <p>Plot Yangu © {new Date().getFullYear()} | Samuhia Corporation</p>
           <p className="mt-2">
-            For support: 📞 0791286165 | ✉ info@cogvana.co.ke | 🌐 cogvana.co.ke
+            For support: 📞 0791286165 | ✉ info@samuhia.co.ke | 🌐 samuhia.co.ke
           </p>
         </div>
       </div>
@@ -610,9 +610,9 @@ export default FormPage;
 //         )}
 
 //         <div className="mt-12 text-center text-gray-500 text-sm">
-//           <p>Plot Yangu © {new Date().getFullYear()} | Cogvana Corporation</p>
+//           <p>Plot Yangu © {new Date().getFullYear()} | Samuhia Corporation</p>
 //           <p className="mt-2">
-//             For support: 📞 0791286165 | ✉ info@cogvana.co.ke | 🌐 cogvana.co.ke
+//             For support: 📞 0791286165 | ✉ info@samuhia.co.ke | 🌐 samuhia.co.ke
 //           </p>
 //         </div>
 //       </div>

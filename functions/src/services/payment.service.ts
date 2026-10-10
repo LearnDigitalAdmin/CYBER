@@ -188,7 +188,7 @@ export async function initiatePayment(
 
     // Call backend cloud function with same data structure as frontend
     const cloudFunctionResponse = await callCloudFunction(cloudFunctionUrl, {
-      email: `tenant${data.invoice.tenantId}@cogvana.co.ke`,
+      email: `tenant${data.invoice.tenantId}@samuhia.co.ke`,
       amount: data.amount,
       currency: 'KES',
       phone: formattedPhone,

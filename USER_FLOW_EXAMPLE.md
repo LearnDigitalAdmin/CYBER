@@ -56,7 +56,7 @@ When you deploy, configure the webhook in Meta, and a user sends their first mes
 │        getMenu('WELCOME', language='en')                        │
 │  Returns the welcome text:                                      │
 │                                                                 │
-│  "Welcome to *Cogvana Biz* Property & Shop Manager! 🏠          │
+│  "Welcome to *Samuhia Biz* Property & Shop Manager! 🏠          │
 │                                                                 │
 │   Please select your language:                                  │
 │   1. English                                                    │
@@ -73,7 +73,7 @@ When you deploy, configure the webhook in Meta, and a user sends their first mes
 │    to: "254712345678",                                          │
 │    type: "text",                                                │
 │    text: {                                                      │
-│      body: "Welcome to *Cogvana Biz*..."                        │
+│      body: "Welcome to *Samuhia Biz*..."                        │
 │    }                                                            │
 │  }                                                              │
 └────────────────────┬────────────────────────────────────────────┘
@@ -93,7 +93,7 @@ When you deploy, configure the webhook in Meta, and a user sends their first mes
 ┌─────────────────────────────────────────────────────────────────┐
 │              WhatsApp on User's Phone                           │
 │                                                                 │
-│  Welcome to Cogvana Biz Property & Shop Manager! 🏠              │
+│  Welcome to Samuhia Biz Property & Shop Manager! 🏠              │
 │                                                                 │
 │  Please select your language:                                   │
 │  1. English                                                     │
@@ -361,7 +361,7 @@ Document: auto-generated-id
 ### First interaction (formatted in WhatsApp):
 
 ```
-Welcome to Cogvana Biz Property & Shop Manager! 🏠
+Welcome to Samuhia Biz Property & Shop Manager! 🏠
 
 Please select your language:
 1. English

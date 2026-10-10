@@ -14,12 +14,12 @@ import { beginMyChama } from './mychama.handler';
 
 /**
  * Handle main menu selection
- * User can select from 1-9
+ * User can select from 1-6
  */
 export async function handleMainMenu(phone: string, input: string, session: Session): Promise<string> {
   try {
-    // Validate input (1-9)
-    const validation = validateMenuSelection(input, 1, 9);
+    // Validate input (1-6)
+    const validation = validateMenuSelection(input, 1, 6);
 
     if (!validation.valid || validation.option === undefined) {
       return getMenu('MAIN_MENU', session.language);
@@ -38,40 +38,24 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
         logger.info('Navigating to Get Invoice');
         return getMessage('ENTER_NATIONAL_ID', session.language);
 
-      case 3: // Add Shop
-        await updateSessionState(phone, STATE.ADD_SHOP_OWNER_NAME, {});
-        logger.info('Navigating to Add Shop');
-        const addShopMessage = session.language === 'en' ? "Let's set up your shop! 🏪\n\n" : "Hebu kusanidi duka lako! 🏪\n\n";
-        return addShopMessage + getMessage('ENTER_FULL_NAME', session.language);
-
-      case 4: // My Shop
-        await updateSessionState(phone, STATE.MY_SHOP_AUTH, {});
-        logger.info('Navigating to My Shop');
-        return getMessage('ENTER_NATIONAL_ID', session.language);
-
-      case 5: // Pay Bill
-        await updateSessionState(phone, STATE.PAY_BILL_MENU, {});
-        logger.info('Navigating to Pay Bill');
-        return getMenu('PAY_BILL_MENU', session.language);
-
-      case 6: // My Chama (cross-project: mychama1)
+      case 3: // My Chama (cross-project: mychama1)
         logger.info('Navigating to My Chama');
         return await beginMyChama(phone, session);
 
-      case 7: // Manage My Plot
+      case 4: // Manage My Plot
         logger.info('Showing PMS links');
         const label = session.language === 'en' ? 'Manage Your Property' : 'Simamia Kipande Chako';
         const message = session.language === 'en'
-          ? `${label}\n\n📱 Mobile App (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Web Portal: https://pms.cogvana.co.ke\n\n💻 Cyber Portal: https://cyber.cogvana.co.ke`
-          : `${label}\n\n📱 Programu ya Simu (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Portali ya Web: https://pms.cogvana.co.ke\n\n💻 Portali ya Cyber: https://cyber.cogvana.co.ke`;
+          ? `${label}\n\n📱 Mobile App (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Web Portal: https://pms.samuhia.co.ke\n\n💻 Desk Portal: https://cyber.samuhia.co.ke`
+          : `${label}\n\n📱 Programu ya Simu (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Portali ya Web: https://pms.samuhia.co.ke\n\n💻 Portali ya Desk: https://cyber.samuhia.co.ke`;
         return message + '\n\n' + (session.language === 'en' ? 'Reply 0 to return to Main Menu' : 'Jibu 0 kurudi kwenye Menuu Kuu');
 
-      case 8: // Exit
+      case 5: // Exit
         await updateSessionState(phone, STATE.IDLE, {});
         logger.info('User exiting');
         return getMessage('GOODBYE', session.language);
 
-      case 9: // Help
+      case 6: // Help
         await updateSessionState(phone, STATE.HELP_MENU, {});
         logger.info('Navigating to Help');
         return getMenu('HELP_MENU', session.language);

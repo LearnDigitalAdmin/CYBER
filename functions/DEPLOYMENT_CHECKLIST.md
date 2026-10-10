@@ -284,4 +284,4 @@ firebase functions:log --limit 100 --follow
 ---
 
 **Emergency Hotline:** +254791286165
-**Support Email:** info@cogvana.co.ke
+**Support Email:** info@samuhia.co.ke

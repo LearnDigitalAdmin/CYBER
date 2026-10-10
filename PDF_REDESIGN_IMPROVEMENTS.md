@@ -43,7 +43,7 @@
      - Profit Margin
 
 6. ✅ **Footer on Every Page**
-   - Cogvana Biz branding on all pages
+   - Samuhia Biz branding on all pages
    - Contact info on all pages
    - Page-specific footer (Generation date on page 1, Copyright on page 2)
    - Proper spacing to avoid content overlap
@@ -80,7 +80,7 @@
 │ ⚠️ Low Moving Products              │
 │ [Table: Rank, Product, Qty, Revenue]│
 ├─────────────────────────────────────┤
-│ Footer (Cogvana Branding)           │
+│ Footer (Samuhia Branding)           │
 └─────────────────────────────────────┘
 ```
 
@@ -99,7 +99,7 @@
 │ 📦 Current Stock Levels             │
 │ [Table: Product, Units, Est. Value] │
 ├─────────────────────────────────────┤
-│ Footer (Cogvana Branding)           │
+│ Footer (Samuhia Branding)           │
 └─────────────────────────────────────┘
 ```
 
@@ -254,13 +254,13 @@ Footer Spacing:    3mm top
    - Cards: 2.5px left borders with gradient
 
 3. **Watermark**
-   - "Cogvana" in light gray (3% opacity)
+   - "Samuhia" in light gray (3% opacity)
    - Rotated -45 degrees
    - Large font (80px) for brand presence
    - Letter-spacing for elegance
 
 4. **Professional Footer**
-   - "COGVANA BIZ" branding
+   - "SAMUHIA BIZ" branding
    - Tagline: "Property & Shop Management"
    - Contact info and website
    - Generation date and copyright

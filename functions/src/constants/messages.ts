@@ -5,45 +5,11 @@
 
 export const MESSAGES = {
   // Confirmations
-  CONFIRM_PAY: {
-    en: 'Reply *PAY* to confirm payment',
-    sw: 'Jibu *LIPA* kubaini malipo',
-  },
 
   // Prompts
   ENTER_NATIONAL_ID: {
     en: 'Please enter your National ID (7-10 digits):',
     sw: 'Tafadhali ingiza Namba ya Kitambulisho cha Taifa (7-10 tarakamu):',
-  },
-
-  ENTER_FULL_NAME: {
-    en: 'What is your full name?',
-    sw: 'Jina lako kamili ni nini?',
-  },
-
-  ENTER_SHOP_NAME: {
-    en: 'What is your shop name?',
-    sw: 'Jina la duka lako ni nini?',
-  },
-
-  ENTER_LOCATION: {
-    en: 'What is your shop location/area (e.g., Westlands, Kilimani)?',
-    sw: 'Mahali pa duka lako/eneo (mf. Westlands, Kilimani)?',
-  },
-
-  ENTER_EMPLOYEES: {
-    en: 'How many employees do you have? (Enter a number):',
-    sw: 'Una wafanyakazi wangapi? (Ingiza namba):',
-  },
-
-  ENTER_EMAIL: {
-    en: 'Enter your email address (name@example.com):',
-    sw: 'Ingiza barua pepe yako (jina@mfano.com):',
-  },
-
-  ENTER_PHONE: {
-    en: 'Enter your phone number (07XXXXXXXX):',
-    sw: 'Ingiza namba ya simu yako (07XXXXXXXX):',
   },
 
   ENTER_TENANT_ID: {
@@ -92,20 +58,6 @@ export const MESSAGES = {
   },
 
   // Success messages
-  SHOP_CREATED_SUCCESS: {
-    en: 'Success! Your shop has been created! 🎉\n\n*Shop Details:*\n📱 Owner: {ownerName}\n🏪 Shop: {shopName}\n📍 Location: {location}\n👥 Employees: {employees}\n🏭 Type: {businessType}\n📧 Email: {email}\n\n*Login Credentials:*\n📧 Email: {email}\n🔐 Password: {password}\n\nPlease save these credentials safely.',
-    sw: 'Imefanikiwa! Duka lako limefungwa! 🎉\n\n*Maelezo ya Duka:*\n📱 Mwenye: {ownerName}\n🏪 Duka: {shopName}\n📍 Mahali: {location}\n👥 Wafanyakazi: {employees}\n🏭 Aina: {businessType}\n📧 Barua pepe: {email}\n\n*Jina la Duka la Kuingia:*\n📧 Barua pepe: {email}\n🔐 Neno la siri: {password}\n\nTafadhali hifadhi haya ya usalama.',
-  },
-
-  SHOP_CONFIRMATION: {
-    en: '*Please confirm your shop details:*\n\n👤 Owner: {ownerName}\n🏪 Shop: {shopName}\n📍 Location: {location}\n👥 Employees: {employees}\n🏭 Type: {businessType}\n📱 Phone: {phone}\n📧 Email: {email}\n🆔 National ID: {nationalId}\n\nReply *YES* to confirm or *EDIT* to change',
-    sw: '*Tafadhali baini maelezo ya duka:*\n\n👤 Mwenye: {ownerName}\n🏪 Duka: {shopName}\n📍 Mahali: {location}\n👥 Wafanyakazi: {employees}\n🏭 Aina: {businessType}\n📱 Simu: {phone}\n📧 Barua pepe: {email}\n🆔 Kitambulisho: {nationalId}\n\nJibu *NDIO* kubaini au *BAGUISHA* kubadilisha',
-  },
-
-  TRANSACTION_RECORDED: {
-    en: 'Transaction recorded successfully! ✅\n\nAmount: Ksh {amount}\nType: {type}\nTime: {time}',
-    sw: 'Muamala umerekodiwa kwa mafanikio! ✅\n\nKiasi: Ksh {amount}\nAina: {type}\nWakati: {time}',
-  },
 
   // Error messages
   INVALID_ID: {
@@ -118,39 +70,9 @@ export const MESSAGES = {
     sw: 'Namba ya simu si sahihi. Tafadhali ingiza namba ya Kenya (07XXXXXXXX):',
   },
 
-  INVALID_EMAIL: {
-    en: 'Invalid email address. Please enter a valid email (name@example.com):',
-    sw: 'Barua pepe si sahihi. Tafadhali ingiza barua pepe sahihi (jina@mfano.com):',
-  },
-
-  INVALID_EMPLOYEES: {
-    en: 'Invalid number of employees. Please enter a number between 0 and 1000:',
-    sw: 'Namba ya wafanyakazi si sahihi. Tafadhali ingiza namba kati ya 0 na 1000:',
-  },
-
-  INVALID_LOCATION: {
-    en: 'Invalid location. Please enter a valid location (at least 2 characters):',
-    sw: 'Mahali si sahihi. Tafadhali ingiza mahali sahihi (angalau herufi 2):',
-  },
-
   INVALID_AMOUNT: {
     en: 'Invalid amount. Please enter a number between 10 and 1,000,000:',
     sw: 'Kiasi si sahihi. Tafadhali ingiza namba kati ya 10 na 1,000,000:',
-  },
-
-  SHOP_ALREADY_EXISTS: {
-    en: 'A shop with this National ID already exists. Please use a different ID.',
-    sw: 'Duka na hii namba ya kitambulisho tayari lipo. Tafadhali tumia kitambulisho tofauti.',
-  },
-
-  EMAIL_ALREADY_EXISTS: {
-    en: 'This email is already registered. Please use a different email address.',
-    sw: 'Barua pepe hii tayari imejiandikisha. Tafadhali tumia barua pepe tofauti.',
-  },
-
-  SHOP_NOT_FOUND: {
-    en: 'Shop not found. Please check your National ID and try again:',
-    sw: 'Duka halijapatikana. Tafadhali angalia namba yako na ujaribu tena:',
   },
 
   PAYMENT_FAILED: {

@@ -316,5 +316,5 @@ ngrok http 5001
 
 For issues or questions:
 - 📞 Phone: +254791286165
-- 📧 Email: info@cogvana.co.ke
-- 🌐 Web: www.cogvana.co.ke
+- 📧 Email: info@samuhia.co.ke
+- 🌐 Web: samuhia.co.ke

@@ -5,6 +5,7 @@
  */
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
+import { DESK_TOP_CODE } from "../api/contract";
 
 export interface DeskModule {
   /** URL segment under /desk, e.g. "import" -> /desk/import. Lowercase letters, digits, hyphens. */
@@ -16,6 +17,8 @@ export interface DeskModule {
   order: number;
   /** Show in the phone bottom bar (the first 3 by order win). */
   primary?: boolean;
+  /** "top": listed only for the company's top desk (COG-0000). Hiding is cosmetic; every action is enforced server-side. */
+  requires?: "top";
   /** Usually React.lazy(() => import("./Screen")) so each module is its own chunk. */
   component: ComponentType;
 }
@@ -34,6 +37,11 @@ export function buildModuleList(mods: DeskModule[]): DeskModule[] {
     seen.add(m.path);
   }
   return [...mods].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+}
+
+/** Hides top-only modules from everyone except COG-0000 (cosmetic; the server enforces the real rule). */
+export function visibleModules(mods: DeskModule[], agentCode: string | undefined): DeskModule[] {
+  return mods.filter((m) => m.requires !== "top" || agentCode === DESK_TOP_CODE);
 }
 
 const found = import.meta.glob<{ default: DeskModule }>("../**/desk.module.tsx", { eager: true });

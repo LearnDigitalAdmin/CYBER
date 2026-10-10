@@ -1,735 +1,385 @@
 import { motion } from 'framer-motion';
 import {
-  CheckCircle,
   ArrowRight,
-  Shield,
-  Zap,
-  TrendingUp,
-  Store,
-  Wallet,
-  Users,
-  BarChart3,
+  CheckCircle,
+  ClipboardCheck,
+  FileSpreadsheet,
+  Headset,
+  KeyRound,
+  Landmark,
   Lock,
-  Calendar,
-  AlertCircle,
-  Briefcase,
+  MessageSquare,
   Building2,
   GraduationCap,
+  Users,
   UserCheck,
-  Layers3,
-  ClipboardCheck
+  Wallet,
+  BarChart3,
+  ShieldCheck,
+  Banknote,
+  Gift,
+  LifeBuoy
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SEO from '../components/SEO';
 
+const customers = [
+  {
+    icon: <Users className="w-7 h-7" />,
+    product: 'MyChama',
+    who: 'Chamas',
+    gradient: 'from-cyan-500 to-blue-500',
+    intro:
+      'Chama officials are busy volunteers. You help them get their records into MyChama and keep the group informed.',
+    tasks: [
+      'Bring member and contribution records into the chama’s account',
+      'Send SMS reminders and notices to members',
+      'Run the reports officials ask for',
+      'Answer support requests the chama sends to its desk'
+    ]
+  },
+  {
+    icon: <GraduationCap className="w-7 h-7" />,
+    product: 'MyRegister',
+    who: 'Schools',
+    gradient: 'from-blue-500 to-purple-500',
+    intro:
+      'Schools need clean registers and a dependable way to reach parents. You do the setup and the repetitive work.',
+    tasks: [
+      'Import class and learner records, or enter them by hand',
+      'Schedule SMS to parents and send bulk reminders',
+      'Help the school buy SMS credits when it runs low',
+      'Answer support requests the school sends to its desk'
+    ]
+  },
+  {
+    icon: <Building2 className="w-7 h-7" />,
+    product: 'Plot Yangu',
+    who: 'Landlords',
+    gradient: 'from-purple-500 to-pink-500',
+    intro:
+      'Landlords want rent collected on time and tenants kept informed. You help them run the routine side of it.',
+    tasks: [
+      'Request rent payment from tenants by M-Pesa prompt',
+      'Send SMS to tenants',
+      'Run reports on rent and arrears',
+      'Answer support requests the landlord sends to its desk'
+    ]
+  }
+];
+
+const tools = [
+  {
+    icon: <FileSpreadsheet className="w-6 h-6" />,
+    title: 'Import and manual entry',
+    desc: 'Upload a customer’s existing records, or key them in yourself. Records are checked before anything is saved.'
+  },
+  {
+    icon: <MessageSquare className="w-6 h-6" />,
+    title: 'SMS',
+    desc: 'Schedule messages ahead of time or send them now, from the customer’s own account.'
+  },
+  {
+    icon: <BarChart3 className="w-6 h-6" />,
+    title: 'Reports and exports',
+    desc: 'Run reports and export data for the customers you support.'
+  },
+  {
+    icon: <LifeBuoy className="w-6 h-6" />,
+    title: 'Desk requests',
+    desc: 'Customers raise requests inside their own product. They arrive in your Desk requests tab for you to answer.'
+  },
+  {
+    icon: <Wallet className="w-6 h-6" />,
+    title: 'Service tickets',
+    desc: 'Each job is a ticket. The customer pays by M-Pesa prompt, and the work runs once payment is confirmed.'
+  },
+  {
+    icon: <Banknote className="w-6 h-6" />,
+    title: 'Earnings',
+    desc: 'See what each customer and each service has earned you, as it happens.'
+  }
+];
+
+const earnings = [
+  {
+    icon: <Wallet className="w-7 h-7 text-cyan-400" />,
+    title: 'Service fees',
+    desc: 'When a customer pays for a desk service, your share goes straight to your own payout account at the moment of payment. Samuhia keeps a small platform share after payment fees. Nothing waits to be settled.'
+  },
+  {
+    icon: <Landmark className="w-7 h-7 text-blue-400" />,
+    title: 'Commission on the accounts you support',
+    desc: 'You earn a share when the customers you support pay for subscriptions, reports and SMS credits in MyChama, MyRegister and Plot Yangu. The share depends on your rank and the product.'
+  },
+  {
+    icon: <Gift className="w-7 h-7 text-purple-400" />,
+    title: 'Milestone and support bonuses',
+    desc: 'A milestone bonus is paid when enough of your accounts stay on as paying customers, and a monthly support quality bonus rewards good support. The conditions are explained at onboarding. Bonuses are approved and paid by the Samuhia top desk.'
+  }
+];
+
+const steps = [
+  {
+    icon: <ClipboardCheck className="w-8 h-8" />,
+    title: 'Apply',
+    desc: 'Register and submit your details and documents.'
+  },
+  {
+    icon: <UserCheck className="w-8 h-8" />,
+    title: 'Get approved',
+    desc: 'Samuhia reviews your application. Once approved you receive your desk code.'
+  },
+  {
+    icon: <KeyRound className="w-8 h-8" />,
+    title: 'Open a session',
+    desc: 'You confirm each working session with a one-time code sent by SMS.'
+  },
+  {
+    icon: <Headset className="w-8 h-8" />,
+    title: 'Serve customers',
+    desc: 'Work on the accounts you support, get paid, and watch your earnings grow.'
+  }
+];
+
+const standards = [
+  'Every action you take on a customer’s account or on money is recorded.',
+  'Sessions need a one-time code and expire, so a borrowed login is not enough.',
+  'Money is paid out by Paystack to your own account, not collected by hand.',
+  'An account has one owner desk. You cannot own, run or be related to your own accounts.',
+  'Samuhia’s top desk can always step in on any account to resolve a problem.',
+  'Prices are set by the platform and shown to the customer before they pay.'
+];
+
 export default function ExplorePage() {
   const navigate = useNavigate();
-
-  const onboardingSteps = [
-    {
-      icon: <Users className="w-8 h-8" />,
-      title: 'Express Interest',
-      desc: 'Register your interest as a freelancer, cyber operator, or independent service provider.'
-    },
-    {
-      icon: <Calendar className="w-8 h-8" />,
-      title: 'Attend Live Onboarding',
-      desc: 'Join a scheduled live session so we can introduce the platform, standards, and operating model.'
-    },
-    {
-      icon: <GraduationCap className="w-8 h-8" />,
-      title: 'Training & Qualification',
-      desc: 'Learn what the system does, what you can sell, who to target, and how to operate correctly.'
-    },
-    {
-      icon: <Zap className="w-8 h-8" />,
-      title: 'Start Operating',
-      desc: 'Once approved, access your dashboard and begin serving clients within the platform rules.'
-    }
-  ];
-
-  const models = [
-    {
-      icon: <Store className="w-7 h-7" />,
-      title: 'Kaduka Operator Model',
-      desc: 'Use the platform to help shops manage operations, records, and digital workflows. Built for flexible field execution and independent client handling.',
-      color: 'from-cyan-500 to-blue-500'
-    },
-    {
-      icon: <Building2 className="w-7 h-7" />,
-      title: 'Plot Yangu Assisted Model',
-      desc: 'Handle property workflows through a more controlled model where quality assurance, trust, and compliance matter more.',
-      color: 'from-blue-500 to-purple-500'
-    },
-    {
-      icon: <Briefcase className="w-7 h-7" />,
-      title: 'Freelancer Hustle Model',
-      desc: 'For individuals looking for a serious digital hustle using the Cyber Platform to serve real clients.',
-      color: 'from-purple-500 to-pink-500'
-    },
-    {
-      icon: <Users className="w-7 h-7" />,
-      title: 'Cyber Café Growth Model',
-      desc: 'Turn a cyber café into a digital operations hub offering shop management, support services, and property assistance.',
-      color: 'from-pink-500 to-red-500'
-    },
-    {
-      icon: <BarChart3 className="w-7 h-7" />,
-      title: 'Operator Dashboard',
-      desc: 'Track clients, activities, services, records, and operational performance from one place.',
-      color: 'from-green-500 to-teal-500'
-    },
-    {
-      icon: <Lock className="w-7 h-7" />,
-      title: 'Controlled Access & Standards',
-      desc: 'Operate within defined limits, standards, and platform controls so clients are treated correctly and the brand remains protected.',
-      color: 'from-orange-500 to-yellow-500'
-    }
-  ];
-
-  const benefits = [
-    'Free registration with no activation fees',
-    'No invite required to express interest',
-    'Live onboarding helps filter for serious operators',
-    'Built for freelancers, cyber cafés, and digital service providers',
-    'Kaduka supports more decentralized field operations',
-    'Plot Yangu can run under a more controlled service model',
-    'Manage clients and workflows from one dashboard',
-    'Clear operating limits reduce misuse and confusion',
-    'Good fit for people looking for a real digital hustle',
-    'Expandable into multiple service categories over time',
-    'Brand standards and complaint handling remain centralized',
-    'Strong foundation for pilot, iteration, and scale'
-  ];
-
-  const audience = [
-    {
-      icon: <Briefcase className="w-10 h-10 text-cyan-400" />,
-      title: 'Freelancers',
-      desc: 'People looking for a structured way to earn by serving shops, landlords, agents, and other clients using digital tools.'
-    },
-    {
-      icon: <Store className="w-10 h-10 text-blue-400" />,
-      title: 'Cyber Café Operators',
-      desc: 'Cyber owners who want to expand beyond printing and browsing into higher-value recurring digital services.'
-    },
-    {
-      icon: <UserCheck className="w-10 h-10 text-purple-400" />,
-      title: 'Field Agents & Independent Operators',
-      desc: 'Committed individuals who can find clients, onboard them properly, and deliver within platform standards.'
-    }
-  ];
 
   return (
     <>
       <SEO
-        title="Explore Cogvana Cyber - Freelancer, Cyber & Business Operations Platform Kenya"
-        description="Discover how Cogvana Cyber helps freelancers, cyber cafés, and independent operators manage shops through Kaduka and assist with property workflows through Plot Yangu. Free registration, live onboarding, and real digital hustle opportunities in Kenya."
-        keywords="Cogvana Cyber Kenya, Kaduka Kenya, Plot Yangu Kenya, freelancer platform Kenya, cyber café business Kenya, digital hustle Kenya, shop management Kenya, property operations Kenya, freelance opportunities Kenya, cyber platform Kenya"
-        canonicalUrl="https://cyber.cogvana.co.ke/explore"
+        title="Explore Samuhia Desk - Support Chamas, Schools and Landlords in Kenya"
+        description="See what a Samuhia Desk agent does for chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and how the agent earns."
+        keywords="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, rent collection Kenya, earn as an agent Kenya"
+        canonicalUrl="https://cyber.samuhia.co.ke/explore"
       />
 
-      <div className="min-h-screen w-full bg-gradient-to-br from-slate-900 via-gray-900 to-black text-white flex flex-col overflow-hidden">
-        {/* Animated Background Elements */}
+      <div className="min-h-screen w-full bg-gradient-to-br from-slate-900 via-gray-900 to-black text-white flex flex-col overflow-x-hidden">
         <div className="fixed inset-0 overflow-hidden pointer-events-none">
           <motion.div
-            animate={{
-              scale: [1, 1.2, 1],
-              rotate: [0, 90, 0],
-              opacity: [0.03, 0.06, 0.03]
-            }}
+            animate={{ scale: [1, 1.2, 1], rotate: [0, 90, 0], opacity: [0.03, 0.06, 0.03] }}
             transition={{ duration: 20, repeat: Infinity }}
             className="absolute top-0 right-0 w-96 h-96 bg-cyan-500 rounded-full blur-3xl"
           />
           <motion.div
-            animate={{
-              scale: [1, 1.3, 1],
-              rotate: [0, -90, 0],
-              opacity: [0.03, 0.05, 0.03]
-            }}
+            animate={{ scale: [1, 1.3, 1], rotate: [0, -90, 0], opacity: [0.03, 0.05, 0.03] }}
             transition={{ duration: 25, repeat: Infinity }}
             className="absolute bottom-0 left-0 w-96 h-96 bg-purple-500 rounded-full blur-3xl"
           />
         </div>
 
-        {/* Hero Section */}
-        <section className="relative flex flex-col items-center justify-center text-center py-24 px-6 z-10">
+        {/* Hero */}
+        <section className="relative text-center py-20 sm:py-24 px-4 sm:px-6 z-10">
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="mb-4"
+            className="max-w-3xl mx-auto"
           >
-            <div className="inline-block px-4 py-2 bg-cyan-500/10 border border-cyan-500/30 rounded-full">
-              <span className="text-cyan-400 font-semibold">🚀 100% Free Registration • No Activation Fees • No Invites Needed</span>
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-sm mb-6">
+              <Headset className="w-4 h-4" />
+              Samuhia Desk
             </div>
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: -30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            className="text-5xl md:text-7xl font-bold mb-6 bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent"
-          >
-            Start a Real Digital Hustle
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4, duration: 0.8 }}
-            className="max-w-4xl text-gray-300 text-xl mb-8 leading-relaxed"
-          >
-            Cogvana Cyber is the gateway into a new operating model for Kenya’s digital workforce. Use one platform to support shops through Kaduka, assist property workflows through Plot Yangu, and build a serious service business as a freelancer, cyber operator, or independent field partner.
-          </motion.p>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-            className="flex flex-col sm:flex-row gap-4"
-          >
-            <button
-              onClick={() => navigate('/signup')}
-              className="group bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 flex items-center gap-2"
-              aria-label="Start free registration today"
-            >
-              Join Free Today
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </button>
-
-            <a
-              href="https://cogvana.co.ke/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all flex items-center gap-2"
-              aria-label="Learn more about Cogvana"
-            >
-              Learn More
-            </a>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.8 }}
-            className="mt-8 flex flex-wrap justify-center gap-3 text-sm text-gray-400"
-          >
-            <span className="px-3 py-1 rounded-full bg-gray-800 border border-gray-700">Freelancers</span>
-            <span className="px-3 py-1 rounded-full bg-gray-800 border border-gray-700">Cyber Cafés</span>
-            <span className="px-3 py-1 rounded-full bg-gray-800 border border-gray-700">Kaduka Operators</span>
-            <span className="px-3 py-1 rounded-full bg-gray-800 border border-gray-700">Plot Yangu Assisted Operations</span>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-6">
+              Be the desk that{' '}
+              <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                chamas, schools and landlords
+              </span>{' '}
+              call first
+            </h1>
+            <p className="text-base sm:text-lg text-gray-300 mb-8">
+              Samuhia Desk gives agents one place to set customers up, keep their records and messages in order, and
+              get paid for the work.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={() => navigate('/signup')}
+                className="px-6 py-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-lg shadow-cyan-500/30 transition-all inline-flex items-center justify-center gap-2"
+              >
+                Apply to be an agent <ArrowRight className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => navigate('/signin')}
+                className="px-6 py-3 rounded-full border-2 border-cyan-500 text-cyan-400 hover:bg-cyan-500 hover:text-black font-semibold transition-all"
+              >
+                Sign in
+              </button>
+            </div>
           </motion.div>
         </section>
 
-        {/* Operating Model */}
-        <section className="relative bg-gradient-to-b from-transparent to-gray-900/50 py-20 px-6 z-10">
+        {/* What an agent does */}
+        <section className="relative py-16 px-4 sm:px-6 z-10" aria-labelledby="customers-heading">
           <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2 className="text-4xl font-bold mb-4 bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-                The New Operating Approach
+            <div className="text-center mb-12">
+              <h2 id="customers-heading" className="text-3xl sm:text-4xl font-bold mb-3">
+                What an agent does
               </h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                We are not just building a software product. We are building an operating network where the Cyber Platform becomes the gateway to service delivery, training, and real digital work.
+              <p className="text-gray-400 max-w-2xl mx-auto">
+                You support three kinds of customer. Each uses a Samuhia product, and the desk is where you work on their
+                behalf.
               </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-3 gap-6">
-              <motion.article
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-cyan-500/30 rounded-2xl p-6"
-              >
-                <Layers3 className="w-10 h-10 text-cyan-400 mb-4" />
-                <h3 className="text-xl font-bold mb-3">Hybrid Model</h3>
-                <p className="text-gray-400 leading-relaxed">
-                  Some operations can be more decentralized for speed and scale, while others remain more controlled for quality assurance, trust, and compliance.
-                </p>
-              </motion.article>
-
-              <motion.article
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.1 }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-purple-500/30 rounded-2xl p-6"
-              >
-                <Store className="w-10 h-10 text-purple-400 mb-4" />
-                <h3 className="text-xl font-bold mb-3">Kaduka = More Decentralized</h3>
-                <p className="text-gray-400 leading-relaxed">
-                  Independent operators can use Kaduka to serve shops directly, as long as they operate correctly, stay within platform limits, and treat clients properly.
-                </p>
-              </motion.article>
-
-              <motion.article
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.2 }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-yellow-500/30 rounded-2xl p-6"
-              >
-                <Building2 className="w-10 h-10 text-yellow-400 mb-4" />
-                <h3 className="text-xl font-bold mb-3">Plot Yangu = More Controlled</h3>
-                <p className="text-gray-400 leading-relaxed">
-                  Property-related operations may require tighter standards, assisted workflows, and stronger quality control because trust, records, and financial workflows are more sensitive.
-                </p>
-              </motion.article>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {customers.map((c) => (
+                <div key={c.product} className="bg-gray-800/40 border border-gray-700 rounded-2xl p-6 flex flex-col">
+                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${c.gradient} flex items-center justify-center mb-4`}>
+                    {c.icon}
+                  </div>
+                  <p className="text-sm text-gray-400">{c.who}</p>
+                  <h3 className="text-2xl font-bold mb-3">{c.product}</h3>
+                  <p className="text-gray-300 mb-4">{c.intro}</p>
+                  <ul className="space-y-2 mt-auto">
+                    {c.tasks.map((t) => (
+                      <li key={t} className="flex items-start gap-2 text-sm text-gray-300">
+                        <CheckCircle className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
+                        <span className="min-w-0 break-words">{t}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           </div>
         </section>
 
-        {/* Onboarding */}
-        <section className="relative py-20 px-6 z-10" aria-labelledby="onboarding-heading">
+        {/* Tools */}
+        <section className="relative py-16 px-4 sm:px-6 z-10 bg-gradient-to-b from-transparent to-gray-900/50">
           <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2
-                id="onboarding-heading"
-                className="text-4xl font-bold mb-4 bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent"
-              >
-                Live Onboarding First
+            <div className="text-center mb-12">
+              <h2 className="text-3xl sm:text-4xl font-bold mb-3">What is on your desk</h2>
+              <p className="text-gray-400 max-w-2xl mx-auto">The tools you use to do that work.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {tools.map((t) => (
+                <div key={t.title} className="bg-gray-800/40 border border-gray-700 rounded-xl p-5">
+                  <div className="text-cyan-400 mb-3">{t.icon}</div>
+                  <h3 className="font-bold mb-1">{t.title}</h3>
+                  <p className="text-sm text-gray-400">{t.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Earnings */}
+        <section className="relative py-16 px-4 sm:px-6 z-10" aria-labelledby="earn-heading">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-12">
+              <h2 id="earn-heading" className="text-3xl sm:text-4xl font-bold mb-3">
+                How you earn
               </h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                We start with live onboarding instead of fully static self-serve training. That helps us identify serious people, protect standards, and build a stronger pilot from the beginning.
+              <p className="text-gray-400 max-w-2xl mx-auto">
+                Three ways, all tracked on your earnings screen. Exact rates are shown in your dashboard and explained at
+                onboarding.
               </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-4 gap-6">
-              {onboardingSteps.map((step, i) => (
-                <motion.article
-                  key={i}
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.1 }}
-                  className="relative group"
-                >
-                  <div className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 group-hover:border-cyan-500/50 rounded-2xl p-6 h-full transition-all duration-300">
-                    <div className="bg-cyan-500/10 w-16 h-16 rounded-xl flex items-center justify-center mb-4 text-cyan-400 group-hover:scale-110 transition-transform">
-                      {step.icon}
-                    </div>
-                    <h3 className="text-xl font-bold text-white mb-2">{step.title}</h3>
-                    <p className="text-gray-400">{step.desc}</p>
-                  </div>
-                  {i < onboardingSteps.length - 1 && (
-                    <div
-                      className="hidden md:block absolute top-1/2 -right-3 w-6 h-0.5 bg-gradient-to-r from-cyan-500 to-transparent"
-                      aria-hidden="true"
-                    />
-                  )}
-                </motion.article>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {earnings.map((e) => (
+                <div key={e.title} className="bg-gradient-to-br from-cyan-900/20 to-purple-900/20 border border-gray-700 rounded-2xl p-6">
+                  <div className="mb-3">{e.icon}</div>
+                  <h3 className="text-xl font-bold mb-2">{e.title}</h3>
+                  <p className="text-gray-300 text-sm">{e.desc}</p>
+                </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* Models */}
-        <section className="relative py-20 px-6 z-10">
-          <div className="max-w-7xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2 className="text-4xl font-bold mb-4">The Models Inside the Platform</h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                One dashboard. Multiple service paths. Clear standards for how each model works.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {models.map((feature, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.08 }}
-                  whileHover={{ scale: 1.03 }}
-                  className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-gray-600 rounded-2xl p-6 transition-all"
-                >
-                  <div className={`bg-gradient-to-r ${feature.color} w-14 h-14 rounded-xl flex items-center justify-center mb-4 text-white`}>
-                    {feature.icon}
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-2">{feature.title}</h3>
-                  <p className="text-gray-400 leading-relaxed">{feature.desc}</p>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Commitment / Training */}
-        <section className="relative bg-gradient-to-br from-cyan-900/20 via-blue-900/20 to-purple-900/20 py-20 px-6 z-10">
+        {/* How it works */}
+        <section className="relative py-16 px-4 sm:px-6 z-10" aria-labelledby="start-heading">
           <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <div className="inline-block px-4 py-2 bg-cyan-500/20 border border-cyan-500/30 rounded-full mb-4">
-                <span className="text-cyan-400 font-semibold">💎 Pilot-First Rollout</span>
+            <div className="text-center mb-12">
+              <h2 id="start-heading" className="text-3xl sm:text-4xl font-bold mb-3">
+                Getting started
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {steps.map((s, i) => (
+                <div key={s.title} className="relative bg-gray-800/40 border border-gray-700 rounded-xl p-6 text-center">
+                  <div className="absolute -top-3 -left-3 w-8 h-8 bg-gradient-to-br from-cyan-500 to-blue-500 rounded-full flex items-center justify-center text-sm font-bold text-black">
+                    {i + 1}
+                  </div>
+                  <div className="text-cyan-400 flex justify-center mb-3">{s.icon}</div>
+                  <h3 className="text-lg font-bold mb-1">{s.title}</h3>
+                  <p className="text-sm text-gray-400">{s.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Standards */}
+        <section className="relative py-16 px-4 sm:px-6 z-10 bg-gradient-to-br from-cyan-900/10 via-blue-900/10 to-purple-900/10">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-cyan-500/10 text-cyan-400 mb-4">
+                <ShieldCheck className="w-7 h-7" />
               </div>
-              <h2 className="text-4xl font-bold mb-4">Built for Serious Operators</h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                This approach is designed for people who are ready to show up, learn, and operate properly. Live sessions help us filter for commitment before scaling.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-2 gap-8 mb-12">
-              <motion.div
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-cyan-500/30 rounded-2xl p-8"
-              >
-                <ClipboardCheck className="w-12 h-12 text-cyan-400 mb-4" />
-                <h3 className="text-2xl font-bold mb-4">What Training Covers</h3>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-cyan-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">What the system does</p>
-                      <p className="text-gray-400 text-sm">Understand the platform’s current capabilities and limitations.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-cyan-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">What you can sell</p>
-                      <p className="text-gray-400 text-sm">Know the actual services you can confidently offer clients.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-cyan-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">Who to target</p>
-                      <p className="text-gray-400 text-sm">Learn the right client types for Kaduka, Plot Yangu, and Cyber services.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-cyan-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">How to operate properly</p>
-                      <p className="text-gray-400 text-sm">Follow standards, boundaries, and client handling expectations.</p>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, x: 30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-purple-500/30 rounded-2xl p-8"
-              >
-                <TrendingUp className="w-12 h-12 text-purple-400 mb-4" />
-                <h3 className="text-2xl font-bold mb-4">Pilot Rollout Logic</h3>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <TrendingUp className="w-5 h-5 text-purple-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">Start small</p>
-                      <p className="text-gray-400 text-sm">Bring in a manageable pilot group first.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <TrendingUp className="w-5 h-5 text-purple-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">Observe commitment</p>
-                      <p className="text-gray-400 text-sm">Attendance and participation matter from day one.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <TrendingUp className="w-5 h-5 text-purple-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">Iterate quickly</p>
-                      <p className="text-gray-400 text-sm">Refine training, scripts, and workflows based on real operator behavior.</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <TrendingUp className="w-5 h-5 text-purple-400 mt-1 flex-shrink-0" />
-                    <div>
-                      <p className="font-semibold text-white">Scale after proof</p>
-                      <p className="text-gray-400 text-sm">Only expand aggressively once the model works in practice.</p>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <h2 className="text-3xl sm:text-4xl font-bold mb-3">Rules that protect everyone</h2>
+              <p className="text-gray-400">Customers trust you with their records and their money. These rules keep that trust.</p>
             </div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="bg-gradient-to-r from-yellow-900/30 to-orange-900/30 border border-yellow-500/30 rounded-2xl p-6"
-            >
-              <div className="flex items-start gap-4">
-                <AlertCircle className="w-6 h-6 text-yellow-400 flex-shrink-0 mt-1" />
-                <div>
-                  <h4 className="text-lg font-bold text-yellow-400 mb-2">Important: Access Is Guided, Not Wild</h4>
-                  <p className="text-gray-300 leading-relaxed">
-                    Operators are expected to work within platform standards. Client complaints, misuse, or service issues can be escalated centrally, while independent operators remain responsible for the satisfaction of the clients they serve.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </section>
-
-        {/* Trust / Control */}
-        <section className="relative py-20 px-6 z-10">
-          <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2 className="text-4xl font-bold mb-4">Trust, Control & Platform Safety</h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                Growth matters, but trust matters more. The platform is designed so you can scale operators without losing control of standards and brand integrity.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-2 gap-8">
-              <motion.div
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl p-8"
-              >
-                <Shield className="w-12 h-12 text-green-400 mb-4" />
-                <h3 className="text-2xl font-bold mb-4">Centralized Protections</h3>
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Live onboarding and qualification before wider rollout</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Clear standards for service delivery and client handling</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Complaint escalation and issue handling through official channels</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Controlled platform permissions and operating boundaries</p>
-                  </div>
-                </div>
-              </motion.div>
-
-              <motion.div
-                initial={{ opacity: 0, x: 30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl p-8"
-              >
-                <Wallet className="w-12 h-12 text-blue-400 mb-4" />
-                <h3 className="text-2xl font-bold mb-4">Operator Responsibility</h3>
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Serve clients properly within the system’s intended use</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Stay honest about what the platform can and cannot currently do</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Find and manage your own clients where the model allows</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-blue-400 mt-1 flex-shrink-0" />
-                    <p className="text-gray-300">Operate professionally so trust compounds over time</p>
-                  </div>
-                </div>
-              </motion.div>
-            </div>
-          </div>
-        </section>
-
-        {/* Why Choose Us */}
-        <section className="relative bg-gradient-to-b from-transparent to-gray-900/50 py-20 px-6 z-10">
-          <div className="max-w-7xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2 className="text-4xl font-bold mb-4">Why This Model Makes Sense</h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                It is designed to help you scale without becoming reckless, and grow opportunity without losing discipline.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {benefits.map((benefit, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  whileInView={{ opacity: 1, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.05 }}
-                  whileHover={{ scale: 1.04 }}
-                  className="flex items-start gap-3 bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 hover:border-cyan-500/50 rounded-xl p-4 transition-all"
-                >
-                  <CheckCircle className="text-cyan-400 mt-0.5 w-5 h-5 flex-shrink-0" />
-                  <p className="text-gray-300 text-sm">{benefit}</p>
-                </motion.div>
+            <ul className="space-y-3">
+              {standards.map((s) => (
+                <li key={s} className="flex items-start gap-3 bg-gray-800/40 border border-gray-700 rounded-lg p-4">
+                  <Lock className="w-5 h-5 text-cyan-400 mt-0.5 flex-shrink-0" />
+                  <span className="text-gray-300 text-sm min-w-0 break-words">{s}</span>
+                </li>
               ))}
+            </ul>
+          </div>
+        </section>
+
+        {/* CTA */}
+        <section className="relative py-20 px-4 sm:px-6 text-center z-10">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ready to open your desk?</h2>
+            <p className="text-gray-300 mb-8">
+              Apply today. Questions first? Write to{' '}
+              <a href="mailto:info@samuhia.co.ke" className="text-cyan-400 hover:underline break-all">
+                info@samuhia.co.ke
+              </a>
+              .
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={() => navigate('/signup')}
+                className="px-8 py-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-black font-semibold transition-all"
+              >
+                Apply to be an agent
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                className="px-8 py-3 rounded-full border border-gray-600 text-gray-300 hover:border-cyan-500 hover:text-cyan-400 transition-all"
+              >
+                Back home
+              </button>
             </div>
           </div>
         </section>
 
-        {/* Who It's For */}
-        <section className="relative py-20 px-6 z-10">
-          <div className="max-w-6xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center mb-16"
-            >
-              <h2 className="text-4xl font-bold mb-4">Who This Is For</h2>
-              <p className="text-gray-400 text-lg max-w-3xl mx-auto">
-                This is for people and businesses ready to build a practical digital service business, not just create another account and disappear.
-              </p>
-            </motion.div>
-
-            <div className="grid md:grid-cols-3 gap-6">
-              {audience.map((item, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 25 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.08 }}
-                  className="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl p-8"
-                >
-                  <div className="mb-4">{item.icon}</div>
-                  <h3 className="text-2xl font-bold mb-3">{item.title}</h3>
-                  <p className="text-gray-400 leading-relaxed">{item.desc}</p>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Support Section */}
-        <section className="relative py-20 px-6 z-10">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="max-w-4xl mx-auto bg-gradient-to-br from-gray-800 to-gray-900 border-2 border-cyan-500/30 rounded-3xl p-10 text-center"
-          >
-            <div className="bg-cyan-500/10 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <Shield className="w-10 h-10 text-cyan-400" />
-            </div>
-            <h2 className="text-3xl font-bold mb-4">Need Help or Want to Join the Pilot?</h2>
-            <p className="text-gray-400 text-lg mb-8 max-w-2xl mx-auto">
-              Reach out through our official channels to inquire about onboarding, support, or partnership opportunities.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <a
-                href="https://payments.cogvana.co.ke/contact"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-cyan-500 hover:bg-cyan-600 text-white px-8 py-3 rounded-xl font-semibold transition-all shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50 inline-flex items-center justify-center gap-2"
-              >
-                Contact Support
-                <ArrowRight className="w-4 h-4" />
-              </a>
-              <a
-                href="https://cogvana.co.ke/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-gray-700 hover:bg-gray-600 text-white px-8 py-3 rounded-xl font-semibold transition-all inline-flex items-center justify-center gap-2"
-              >
-                Visit Official Site
-              </a>
-            </div>
-          </motion.div>
-        </section>
-
-        {/* Final CTA */}
-        <section className="relative py-24 text-center bg-gradient-to-br from-cyan-900/30 via-blue-900/30 to-purple-900/30 z-10">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="max-w-4xl mx-auto px-6"
-          >
-            <h2 className="text-5xl font-bold mb-6 bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
-              Build With the Cyber Platform
-            </h2>
-            <p className="text-gray-300 text-xl mb-10 max-w-3xl mx-auto leading-relaxed">
-              Whether you are a freelancer looking for a hustle, a cyber café expanding its services, or an independent operator ready to serve clients professionally, this platform is built to help you start, learn, and grow.
-            </p>
-            <motion.button
-              onClick={() => navigate('/signup')}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="group bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-10 py-5 rounded-xl text-xl font-bold transition-all shadow-2xl shadow-cyan-500/30 hover:shadow-cyan-500/50 inline-flex items-center gap-3"
-            >
-              Get Started Free
-              <ArrowRight className="w-6 h-6 group-hover:translate-x-2 transition-transform" />
-            </motion.button>
-            <p className="text-gray-500 mt-6 text-sm">
-              No registration fees • No activation fees • Live onboarding for serious operators
-            </p>
-          </motion.div>
-        </section>
-
-        {/* Footer */}
-        <footer className="relative bg-black text-gray-500 text-sm py-8 text-center border-t border-gray-800 z-10">
-          <p className="mb-4 text-gray-400">© 2025 Cogvana Cyber | Building Kenya&apos;s Digital Workforce</p>
-          <div className="flex flex-wrap justify-center gap-6 mb-4">
-            <a
-              href="https://cogvana.co.ke/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-cyan-400 transition-colors"
-            >
+        <footer className="relative bg-black text-gray-500 text-sm py-8 text-center border-t border-gray-800 z-10 px-4">
+          <p className="mb-4 text-gray-400">© {new Date().getFullYear()} Samuhia Desk. All rights reserved.</p>
+          <div className="flex flex-wrap justify-center gap-6">
+            <a href="https://samuhia.co.ke/" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
               Official Website
             </a>
-            <a
-              href="https://payments.cogvana.co.ke/contact"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-cyan-400 transition-colors"
-            >
+            <a href="https://payments.samuhia.co.ke/contact" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
               Contact Us
             </a>
-            <a
-              href="https://cogvana.co.ke/terms"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-cyan-400 transition-colors"
-            >
+            <a href="https://samuhia.co.ke/terms" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 transition-colors">
               Terms of Use
             </a>
           </div>
-          <p className="text-xs text-gray-600 max-w-4xl mx-auto px-6 leading-relaxed">
-            Platform access, features, and operating models may vary by service category. Some workflows are more decentralized, while others may require tighter review, approval, or quality control depending on risk, trust, and operational sensitivity.
-          </p>
         </footer>
       </div>
     </>

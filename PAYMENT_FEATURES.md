@@ -9,7 +9,7 @@ Added two powerful payment features to the My Shop menu:
 ## Feature 1: Setup Payment Account 💳
 
 ### Purpose
-Allow shop owners to register their payment methods (M-Pesa, Airtel, Bank) with Cogvana for payment collection.
+Allow shop owners to register their payment methods (M-Pesa, Airtel, Bank) with Samuhia for payment collection.
 
 ### User Flow
 
@@ -25,7 +25,7 @@ Enter Details Step-by-Step
     ↓
 Confirm Details
     ↓
-Send to Cogvana Admin (WhatsApp + Firestore)
+Send to Samuhia Admin (WhatsApp + Firestore)
 ```
 
 ### Supported Payment Methods
@@ -86,7 +86,7 @@ After user submits payment setup:
 }
 ```
 
-2. **WhatsApp Message to Cogvana** (+254791286165)
+2. **WhatsApp Message to Samuhia** (+254791286165)
 ```
 🔔 NEW PAYMENT SETUP REQUEST
 
@@ -235,7 +235,7 @@ Shop owner receives auto-message:
 ⏱️ Time: 2025-11-12 14:30:45
 🎫 Transaction ID: paystack_ref_12345
 
-Thank you for using Cogvana!
+Thank you for using Samuhia!
 ```
 
 ### Paystack Integration
@@ -251,7 +251,7 @@ Thank you for using Cogvana!
   },
   "amount": 100000,  // in cents (KES 1000)
   "phone": "254712345678",
-  "email": "stk-push-1234@cogvana.co.ke",
+  "email": "stk-push-1234@samuhia.co.ke",
   "subaccount": "ACT_xxxxxxxxxxxx",  // Paystack sub-account ID
   "metadata": {
     "shopId": "1234",
@@ -351,7 +351,7 @@ Added 10 new conversation states for payment flows:
 1. **`payment.setup.handler.ts`** (425 lines)
    - Multi-step payment method setup
    - Separate flows for M-Pesa, Airtel, Bank
-   - Generate messages for Cogvana
+   - Generate messages for Samuhia
 
 2. **`payment.charge.handler.ts`** (228 lines)
    - Amount and phone input
@@ -494,7 +494,7 @@ const approvePaymentSetup = async (requestId: string, paystackSubaccountId: stri
 - [ ] Setup M-Pesa payment account
 - [ ] Setup Airtel payment account
 - [ ] Setup Bank account
-- [ ] Receive WhatsApp message at Cogvana
+- [ ] Receive WhatsApp message at Samuhia
 - [ ] Verify Firestore records created
 - [ ] Send STK push to test number
 - [ ] Verify transaction logged

@@ -157,7 +157,7 @@ const payload = {
   ussd: { type: network === 'safaricom' ? 'pt' : 'at' },
   amount: Math.round(amount * 100),
   phone: normalizedPhone,
-  email: `stk-push-${shopId}@cogvana.co.ke`,
+  email: `stk-push-${shopId}@samuhia.co.ke`,
   split: paystackSplitCode,  // ← Use split parameter instead
   metadata: { shopId, network, customerPhone }
 };
@@ -172,7 +172,7 @@ const payload = {
   ussd: { type: network === 'safaricom' ? 'pt' : 'at' },
   amount: Math.round(amount * 100),
   phone: normalizedPhone,
-  email: `stk-push-${shopId}@cogvana.co.ke`,
+  email: `stk-push-${shopId}@samuhia.co.ke`,
   // No subaccount, split, or routing parameters
   metadata: { shopId, network, customerPhone }
 };
@@ -302,7 +302,7 @@ Once you implement Option 1 (recommended):
   "ussd": { "type": "pt" },
   "amount": 1000,
   "phone": "254791286165",
-  "email": "stk@cogvana.co.ke",
+  "email": "stk@samuhia.co.ke",
   "metadata": { "shopId": "1234" }
 }
 

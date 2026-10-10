@@ -303,8 +303,8 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
         name: asset.name || 'Plot Yangu',
         address: 'Nairobi, Kenya',
         phone: '0791286165',
-        email: 'info@cogvana.co.ke',
-        website: 'https://cogvana.co.ke'
+        email: 'info@samuhia.co.ke',
+        website: 'https://samuhia.co.ke'
       };
 
       // Generate and upload PDF
