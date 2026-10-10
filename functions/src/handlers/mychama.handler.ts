@@ -2130,6 +2130,13 @@ export async function handlePayConfirm(
       return mcMsg('PAY_NO_SPLIT', lang) + '\n\n' + myChamaMenu(session);
     }
 
+    // A split code without settlementSplitKeyVersion === 2 belongs to the OLD Paystack
+    // account; the MyChama key can't use it, so Paystack would reject the charge.
+    if (ctx.chama.settlementSplitKeyVersion !== 2) {
+      await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
+      return mcMsg('PAY_SPLIT_RELINK', lang) + '\n\n' + myChamaMenu(session);
+    }
+
     // Re-validate against live data before asking Paystack for money.
     if (!(await paymentTargetStillValid(ctx, mc))) {
       await auditWhatsApp({

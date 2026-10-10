@@ -7,6 +7,11 @@ import { defineSecret } from 'firebase-functions/params';
 
 export const PAYSTACK_SECRET_KEY = defineSecret('PAYSTACK_SECRET_KEY');
 
+// MyChama's OWN Paystack account. Used ONLY by the MyChama payment flow
+// (services/mychama.payment.service.ts). Every other flow (CYBER_, SHOP_,
+// REPORT_, SUB_, INV_) keeps PAYSTACK_SECRET_KEY above.
+export const MYCHAMA_PAYSTACK_SECRET_KEY = defineSecret('MYCHAMA_PAYSTACK_SECRET_KEY');
+
 export const PAYSTACK_CONFIG = {
   BASE_URL: 'https://api.paystack.co',
 };

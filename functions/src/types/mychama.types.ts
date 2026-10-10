@@ -22,6 +22,8 @@ export interface Chama {
   smsCredits?: number;
   settlementAccount?: string;
   settlementSplitCode?: string;
+  /** 2 = settlementSplitCode was created under MyChama's own (new) Paystack account. Absent = OLD account: never charge it. */
+  settlementSplitKeyVersion?: number;
   autoSettle?: boolean;
   settlementFreq?: 'daily' | 'weekly' | 'monthly';
   lastSettlement?: string;

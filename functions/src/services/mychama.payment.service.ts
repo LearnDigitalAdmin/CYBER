@@ -20,7 +20,7 @@
  */
 
 import axios from 'axios';
-import { PAYSTACK_SECRET_KEY, PAYSTACK_CONFIG } from '../config/paystack.config';
+import { MYCHAMA_PAYSTACK_SECRET_KEY, PAYSTACK_CONFIG } from '../config/paystack.config';
 import { mychamaDb, mcPath, MC, MC_SECURITY } from '../config/mychama.config';
 import {
   FeeBreakdown,
@@ -211,8 +211,8 @@ export async function initiateMyChamaPayment(params: {
   await intentRef.set(intent);
 
   try {
-    if (!PAYSTACK_SECRET_KEY.value()) {
-      throw new Error('Paystack secret key not configured');
+    if (!MYCHAMA_PAYSTACK_SECRET_KEY.value()) {
+      throw new Error('MyChama Paystack secret key not configured');
     }
 
     const payload = {
@@ -263,7 +263,7 @@ export async function initiateMyChamaPayment(params: {
       payload,
       {
         headers: {
-          Authorization: `Bearer ${PAYSTACK_SECRET_KEY.value()}`,
+          Authorization: `Bearer ${MYCHAMA_PAYSTACK_SECRET_KEY.value()}`,
           'Content-Type': 'application/json',
         },
         timeout: 20000,

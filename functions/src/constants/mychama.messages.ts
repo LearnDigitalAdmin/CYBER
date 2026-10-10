@@ -403,6 +403,14 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '⚠️ Chama chako hakijakamilisha kuweka akaunti ya malipo, hivyo malipo mtandaoni hayapatikani bado.\n\n' +
       'Tafadhali mlipe mweka hazina moja kwa moja.',
   },
+  PAY_SPLIT_RELINK: {
+    en:
+      '⚠️ Your chama\'s settlement account needs to be re-linked after our payments upgrade, so online payment is paused for now.\n\n' +
+      'Ask your chair and treasurer to re-submit it in the MyChama app. Meanwhile, please pay your treasurer directly.',
+    sw:
+      '⚠️ Akaunti ya malipo ya chama chako inahitaji kuunganishwa upya baada ya maboresho ya mfumo wetu, hivyo malipo mtandaoni yamesitishwa kwa sasa.\n\n' +
+      'Waombe mwenyekiti na mweka hazina waiwasilishe tena kwenye programu ya MyChama. Kwa sasa, tafadhali mlipe mweka hazina moja kwa moja.',
+  },
   PAY_DUPLICATE: {
     en:
       '⏳ You already have a payment of *{net}* waiting for your PIN (ref *{ref}*).\n\n' +
