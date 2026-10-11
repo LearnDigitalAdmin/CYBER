@@ -8,7 +8,7 @@
  * `agentId` IS the agent's Firebase Auth uid (desk_agents/{uid}); security rules rely on that.
  */
 
-export const DESK_CONTRACT_VERSION = 4;
+export const DESK_CONTRACT_VERSION = 5;
 export const DESK_REGION = "africa-south1";
 
 /** Desk charges use the existing CYBER_ payment reference family, so PAY's webhook already routes them. */
@@ -237,7 +237,7 @@ export const summaryExport = (kind: string): string => `Export ${kind}`;
  */
 export type DelegateAction =
   | "entity_info" | "validate_records" | "commit_records"
-  | "schedule_sms" | "send_sms_now" | "run_report" | "export_data";
+  | "schedule_sms" | "send_sms_now" | "run_report" | "export_data" | "list_tenants";
 export interface DelegateRequest {
   action: DelegateAction;
   entityCode: string;          // SMC-0042 | KNEC code | PYL-0007
@@ -304,6 +304,10 @@ export interface DeskCallableMap {
   desk_top_setRank: { in: TopSetRankIn; out: TopSetRankOut };
   desk_top_listPayables: { in: TopListPayablesIn; out: TopListPayablesOut };
   desk_top_payout: { in: TopPayoutIn; out: TopPayoutOut };
+  desk_getEntityInfo: { in: GetEntityInfoIn; out: GetEntityInfoOut };
+  desk_runReport: { in: RunReportIn; out: RunReportOut };
+  desk_exportData: { in: ExportDataIn; out: ExportDataOut };
+  desk_listTenants: { in: ListTenantsIn; out: ListTenantsOut };
 }
 export type DeskCallableName = keyof DeskCallableMap;
 
@@ -316,6 +320,7 @@ export const DESK_CALLABLES = [
   "desk_listRequests", "desk_updateRequest", "desk_createRequest",
   "desk_top_requestOtp", "desk_top_listDesks", "desk_top_getDesk", "desk_top_getDoc",
   "desk_top_setDeskStatus", "desk_top_setRank", "desk_top_listPayables", "desk_top_payout",
+  "desk_getEntityInfo", "desk_runReport", "desk_exportData", "desk_listTenants",
 ] as const;
 
 // ------------------------------------------------- client-visible Firestore views
@@ -353,3 +358,46 @@ export const DESK_COLLECTIONS = {
   topOtps: "desk_topOtps",
   splitCodes: "desk_split_codes",
 } as const;
+
+// ------------------------------------------------------------ v5: workspace (entity info, reports, exports, tenants)
+/**
+ * Entity info reaches the UI ONLY through desk_getEntityInfo, which needs an active, OTP-verified session with scope "read".
+ * ResolveEntityOut deliberately carries none of it: resolve runs before any session or grant.
+ */
+export interface GetEntityInfoIn { sessionId: string }
+export interface GetEntityInfoOut {
+  plan: string; creditsBalance: number; audiences: string[]; reportTypes: string[]; exportKinds: string[];
+}
+
+/** Report parameters are flat: primitives, or arrays of primitives. The product validates their meaning. */
+export type ReportParamValue = string | number | boolean | null | Array<string | number | boolean | null>;
+/**
+ * scope "report"; no action OTP and no ticket (the product enforces its own credits). `reportType` must be one the entity offers.
+ * `requestId` is optional: pass the same value when retrying a run so the product does not repeat (and re-charge) it.
+ */
+export interface RunReportIn { sessionId: string; reportType: string; params: Record<string, ReportParamValue>; requestId?: string }
+export type RunReportOut = DelegateFileResult;
+
+/** scope "export"; consumes the "export" action OTP whose summary is summaryExport(kind). `kind` must be one the entity offers. */
+export interface ExportDataIn { sessionId: string; actionId: string; kind: string }
+export type ExportDataOut = DelegateFileResult;
+
+export interface TenantRow {
+  tenantId: string; name: string; unit: string; phoneMasked: string; rentDueMinor?: number;
+}
+/** scope "rent_stk"; pms entities only. `query` matches name or unit; `cursor` is opaque (from the previous nextCursor). */
+export interface ListTenantsIn { sessionId: string; cursor?: string; query?: string }
+export interface ListTenantsOut { tenants: TenantRow[]; nextCursor?: string }
+export const TENANT_PAGE_SIZE = 50;
+
+export interface DelegateListTenantsPayload { limit: number; cursor?: string; query?: string }
+export interface DelegateListTenantsResult { tenants: TenantRow[]; nextCursor?: string }
+
+/**
+ * Typed refusals raised by the workspace callables. Messages are written for people (the UI shows them as they are);
+ * the reason is recorded server-side so refusals can be told apart in logs.
+ */
+export type WorkspaceErrorReason =
+  | "no_such_audience" | "no_such_report" | "no_such_export" | "not_pms_entity" | "product_unsupported";
+/** Delegate reply codes a product uses for an action it does not implement yet (HTTP 501 counts too). */
+export const DELEGATE_UNSUPPORTED_CODES = ["unknown_action", "unsupported_action", "not_supported", "not_implemented", "unimplemented"] as const;

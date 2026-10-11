@@ -1,7 +1,8 @@
 import { Building2, Printer, DollarSign, Download, AlertCircle, Loader } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { cyberService, type IncomeData } from "../../services/Cyber";
 import { useAuth } from "../../context/authContext"; // Adjust path as needed
+import DeskIncomeSection from "./DeskIncomeSection";
 
 interface BarData {
   date: string;
@@ -17,11 +18,11 @@ const StatCard = ({
   color, 
   label = '' 
 }: { 
-  icon: any; 
-  value: any; 
-  trend: any; 
-  color: any; 
-  label?: any 
+  icon: ReactNode; 
+  value: string; 
+  trend: string; 
+  color: string; 
+  label?: string 
 }) => {
   const colorClasses: Record<string, string> = {
     cyan: 'from-cyan-500 to-cyan-600',
@@ -348,6 +349,9 @@ const IncomeTab = () => {
           </div>
         </div>
       </div>
+
+      {/* Desk earnings: ledger, milestone and a check against the payment records above (desk accounts only) */}
+      <DeskIncomeSection period={period} />
 
       {/* Transaction Details */}
       {(incomeData.records.plot.length > 0 || incomeData.records.cyber.length > 0) && (
