@@ -1,0 +1,364 @@
+From 1232eb9c23580e0ed76c08d5bd0c3167bedf6db8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 10:31:47 +0000
+Subject: [PATCH] fix(desk): indexes, cheaper reads, main-dash link, email
+ verification - desk.indexes.fragment.json: add desk_audit(agentId,at desc),
+ desk_ledger(agentId,status|kind), desk_sessions(agentId,status) - schedulers
+ (reconcileTickets, reconcilePayouts, sweepRequests) 512MiB -> 256MiB -
+ sweepRequests: skip the public-config state read when this instance already
+ confirmed the hash - desk_top_listDesks: exact COG-#### search is a 1-read
+ lookup instead of an up-to-5000-doc scan - Frame: 'Main dashboard' link
+ (sidebar + More menu) back to /dashboard - Account: verify the CURRENT email
+ without changing it; signup mails the verification link - syncEmail message
+ no longer says 'new' email
+
+---
+ desk.indexes.fragment.json                | 56 +++++++++++++++++++++++
+ functions-desk/src/account/handlers.ts    |  2 +-
+ functions-desk/src/ledger/index.ts        |  2 +-
+ functions-desk/src/payouts/index.ts       |  2 +-
+ functions-desk/src/requests/index.ts      |  2 +-
+ functions-desk/src/requests/sweep.ts      |  8 +++-
+ functions-desk/src/topdesk/handlers.ts    |  9 +++-
+ src/desk/core/Frame.tsx                   | 15 +++++-
+ src/desk/modules/account/EmailSection.tsx | 46 ++++++++++++++++++-
+ src/pages/SignupPage.tsx                  |  4 +-
+ 10 files changed, 135 insertions(+), 11 deletions(-)
+
+diff --git a/desk.indexes.fragment.json b/desk.indexes.fragment.json
+index b22d245..858701e 100644
+--- a/desk.indexes.fragment.json
++++ b/desk.indexes.fragment.json
+@@ -204,6 +204,62 @@
+           "order": "ASCENDING"
+         }
+       ]
++    },
++    {
++      "collectionGroup": "desk_audit",
++      "queryScope": "COLLECTION",
++      "fields": [
++        {
++          "fieldPath": "agentId",
++          "order": "ASCENDING"
++        },
++        {
++          "fieldPath": "at",
++          "order": "DESCENDING"
++        }
++      ]
++    },
++    {
++      "collectionGroup": "desk_ledger",
++      "queryScope": "COLLECTION",
++      "fields": [
++        {
++          "fieldPath": "agentId",
++          "order": "ASCENDING"
++        },
++        {
++          "fieldPath": "status",
++          "order": "ASCENDING"
++        }
++      ]
++    },
++    {
++      "collectionGroup": "desk_ledger",
++      "queryScope": "COLLECTION",
++      "fields": [
++        {
++          "fieldPath": "agentId",
++          "order": "ASCENDING"
++        },
++        {
++          "fieldPath": "kind",
++          "order": "ASCENDING"
++        }
++      ]
++    },
++    {
++      "collectionGroup": "desk_sessions",
++      "queryScope": "COLLECTION",
++      "fields": [
++        {
++          "fieldPath": "agentId",
++          "order": "ASCENDING"
++        },
++        {
++          "fieldPath": "status",
++          "order": "ASCENDING"
++        }
++      ]
+     }
+   ]
+ }
+diff --git a/functions-desk/src/account/handlers.ts b/functions-desk/src/account/handlers.ts
+index 6c01c30..9de1592 100644
+--- a/functions-desk/src/account/handlers.ts
++++ b/functions-desk/src/account/handlers.ts
+@@ -25,7 +25,7 @@ export async function syncEmail(deps: AccountDeps, uid: string): Promise<SyncEma
+   const user = await deps.getAuthUser(uid);
+   const email = user.email?.trim().toLowerCase();
+   if (!email) throw new DeskError("failed_precondition", "Your account has no email address");
+-  if (!user.emailVerified) throw new DeskError("failed_precondition", "Verify your new email address first, then try again");
++  if (!user.emailVerified) throw new DeskError("failed_precondition", "Verify your email address first, then try again");
+ 
+   const agentRef = col("agents").doc(uid);
+   const payRef = db().collection("agents").doc(uid);
+diff --git a/functions-desk/src/ledger/index.ts b/functions-desk/src/ledger/index.ts
+index 0a6cc79..4d6d841 100644
+--- a/functions-desk/src/ledger/index.ts
++++ b/functions-desk/src/ledger/index.ts
+@@ -26,7 +26,7 @@ export const desk_onCyberTransaction = onDocumentWritten(
+ 
+ /** Every 5 minutes: verifies awaiting tickets (recovers a missed webhook), expires dead ones and 24 h-old drafts. ≤ 100 per run. */
+ export const desk_reconcileTickets = onSchedule(
+-  { schedule: "every 5 minutes", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 300, memory: "512MiB" },
++  { schedule: "every 5 minutes", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 300, memory: "256MiB" },
+   async () => { await reconcileTickets(); },
+ );
+ 
+diff --git a/functions-desk/src/payouts/index.ts b/functions-desk/src/payouts/index.ts
+index bdf0eb5..d2d0f63 100644
+--- a/functions-desk/src/payouts/index.ts
++++ b/functions-desk/src/payouts/index.ts
+@@ -19,7 +19,7 @@ export const desk_top_payout = topCallable<TopPayoutIn, TopPayoutOut>(
+ 
+ /** Every 10 minutes: settles `processing` payouts against Paystack Transfers verification. */
+ export const desk_reconcilePayouts = onSchedule(
+-  { schedule: "every 10 minutes", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 300, memory: "512MiB" },
++  { schedule: "every 10 minutes", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 300, memory: "256MiB" },
+   async () => { await reconcilePayouts(deps()); },
+ );
+ 
+diff --git a/functions-desk/src/requests/index.ts b/functions-desk/src/requests/index.ts
+index 26fa7fb..8fe41b4 100644
+--- a/functions-desk/src/requests/index.ts
++++ b/functions-desk/src/requests/index.ts
+@@ -13,7 +13,7 @@ const SWEEP_BUDGET_MS = 240_000;
+ 
+ /** Every 30 minutes: pulls product outboxes, pushes the public config, retries write-backs. Idempotent end to end. */
+ export const desk_sweepRequests = onSchedule(
+-  { schedule: "every 30 minutes", region: DESK_REGION, timeoutSeconds: 300, memory: "512MiB" },
++  { schedule: "every 30 minutes", region: DESK_REGION, timeoutSeconds: 300, memory: "256MiB" },
+   async () => { await sweepRequests(defaultRequestsDeps(), SWEEP_BUDGET_MS); },
+ );
+ 
+diff --git a/functions-desk/src/requests/sweep.ts b/functions-desk/src/requests/sweep.ts
+index 343a4ee..b7cf7c5 100644
+--- a/functions-desk/src/requests/sweep.ts
++++ b/functions-desk/src/requests/sweep.ts
+@@ -55,16 +55,22 @@ async function sweepProduct(deps: RequestsDeps, cfg: DeskConfig, product: SweptP
+   }
+ }
+ 
++/** Last hash + project this warm instance confirmed as pushed: lets an unchanged config skip the state-doc read entirely. */
++const pushedMemo = new Map<string, string>();
++
+ /** Pushes `desk_public_config/global` into a product project when its hash differs from the last pushed one. */
+ async function pushPublicConfig(deps: RequestsDeps, cfg: DeskConfig, product: SweptProduct): Promise<boolean> {
+   const payload = buildPublicConfig(cfg, deps.now());
+   const hash = hashPublicConfig(payload);
++  const memoKey = `${hash}@${cfg.projects[product]}`;
++  if (pushedMemo.get(product) === memoKey) return false;
+   const stateRef = col("counters").doc(`publicconfig_${product}`);
+   const last = (await stateRef.get()).data() as { hash?: string; projectId?: string } | undefined;
+   const projectId = cfg.projects[product];
+-  if (last?.hash === hash && last.projectId === projectId) return false;
++  if (last?.hash === hash && last.projectId === projectId) { pushedMemo.set(product, memoKey); return false; }
+   await deps.productDb(cfg, product).collection(PUBLIC_CONFIG_COLLECTION).doc("global").set(payload);
+   await stateRef.set({ hash, projectId, pushedAt: deps.now() });
++  pushedMemo.set(product, memoKey);
+   return true;
+ }
+ 
+diff --git a/functions-desk/src/topdesk/handlers.ts b/functions-desk/src/topdesk/handlers.ts
+index fc3fbe3..1b25262 100644
+--- a/functions-desk/src/topdesk/handlers.ts
++++ b/functions-desk/src/topdesk/handlers.ts
+@@ -83,9 +83,16 @@ export async function topListDesks(auth: AuthLike | null | undefined, raw: unkno
+   const limit = Math.min(Math.max(typeof d.limit === "number" && Number.isInteger(d.limit) ? d.limit : LIST_DESKS_MAX, 1), LIST_DESKS_MAX);
+ 
+   const found: AgentDoc[] = [];
++  // A full desk code is looked up directly (1 read) instead of scanning up to SCAN_MAX agents; no exact hit falls through to the scan.
++  let direct = false;
++  if (/^COG-\d{4,}$/i.test(search)) {
++    const hit = await col("agents").where("agentCode", "==", search.toUpperCase()).limit(1).get();
++    const a = hit.docs[0]?.data() as AgentDoc | undefined;
++    if (a) { direct = true; if (!status || a.status === status) found.push(a); }
++  }
+   let scanned = 0;
+   let last: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+-  while (found.length < limit && scanned < SCAN_MAX) {
++  while (!direct && found.length < limit && scanned < SCAN_MAX) {
+     let q: Query = col("agents");
+     if (status) q = q.where("status", "==", status);
+     q = q.orderBy("createdAt", "desc");
+diff --git a/src/desk/core/Frame.tsx b/src/desk/core/Frame.tsx
+index 270b7ee..c312c7a 100644
+--- a/src/desk/core/Frame.tsx
++++ b/src/desk/core/Frame.tsx
+@@ -1,7 +1,7 @@
+ import { useState } from "react";
+ import type { ReactNode } from "react";
+-import { NavLink } from "react-router-dom";
+-import { Home, MoreHorizontal } from "lucide-react";
++import { Link, NavLink } from "react-router-dom";
++import { ArrowLeft, Home, MoreHorizontal } from "lucide-react";
+ import { DESK_MODULES, visibleModules } from "./registry";
+ import { useAgent } from "./useAgent";
+ import { Modal } from "../ui";
+@@ -10,6 +10,8 @@ import { cn } from "../ui/cn";
+ const linkBase = "flex min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium";
+ const toItem = (m: (typeof DESK_MODULES)[number]) => ({ to: `/desk/${m.path}`, label: m.label, icon: m.icon, end: false });
+ const HOME = { to: "/desk", label: "Home", icon: Home, end: true };
++/** Way back out of the desk to the main CYBER dashboard. */
++const MAIN_DASH = "/dashboard";
+ 
+ /** Sidebar from md up; bottom tab bar (Home + up to 3 + More) on phones. */
+ export default function Frame({ children }: { children: ReactNode }) {
+@@ -21,6 +23,9 @@ export default function Frame({ children }: { children: ReactNode }) {
+   return (
+     <div className="flex min-h-screen min-w-0 bg-gray-50">
+       <aside className="hidden w-60 shrink-0 border-r border-gray-200 bg-white p-3 md:block">
++        <Link to={MAIN_DASH} className={cn(linkBase, "mb-2 border border-gray-200 text-gray-700 hover:bg-gray-100")}>
++          <ArrowLeft size={18} className="shrink-0" /><span className="min-w-0 truncate">Main dashboard</span>
++        </Link>
+         <p className="mb-3 truncate px-3 text-sm font-bold text-gray-900">Samuhia Desk</p>
+         <nav className="space-y-1" aria-label="Desk">
+           {items.map((n) => (
+@@ -45,6 +50,12 @@ export default function Frame({ children }: { children: ReactNode }) {
+       </nav>
+       <Modal open={more} title="Desk menu" onClose={() => setMore(false)}>
+         <ul className="space-y-1">
++          <li>
++            <Link to={MAIN_DASH} onClick={() => setMore(false)}
++              className={cn(linkBase, "min-h-11 border border-gray-200 text-gray-800 hover:bg-gray-100")}>
++              <ArrowLeft size={18} className="shrink-0" /><span className="min-w-0 truncate">Main dashboard</span>
++            </Link>
++          </li>
+           {items.map((n) => (
+             <li key={n.to}>
+               <NavLink to={n.to} end={n.end} onClick={() => setMore(false)}
+diff --git a/src/desk/modules/account/EmailSection.tsx b/src/desk/modules/account/EmailSection.tsx
+index 1d19223..05f1643 100644
+--- a/src/desk/modules/account/EmailSection.tsx
++++ b/src/desk/modules/account/EmailSection.tsx
+@@ -1,5 +1,5 @@
+ import { useCallback, useEffect, useRef, useState } from "react";
+-import { EmailAuthProvider, reauthenticateWithCredential, verifyBeforeUpdateEmail } from "firebase/auth";
++import { EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification, verifyBeforeUpdateEmail } from "firebase/auth";
+ import type { User } from "firebase/auth";
+ import { deskApi, DeskApiError, formatDateTime } from "../../api";
+ import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
+@@ -13,6 +13,10 @@ type Msg = { tone: "ok" | "error" | "info"; text: string } | null;
+ const codeOf = (e: unknown): string | undefined => (e as { code?: string } | null)?.code;
+ 
+ /**
++ * Verifies the CURRENT sign-in email (no change needed) and handles sign-in email changes.
++ *
++ * Verify: `sendEmailVerification` mails a link to the address already on the account; once opened, `emailVerified` is true.
++ *
+  * Sign-in email change. Re-authenticate with the current password, then `verifyBeforeUpdateEmail`: Firebase mails a link to the
+  * NEW address and only switches the sign-in email once it is opened. When the person comes back we reload the user and, once
+  * the new address is the verified sign-in email, call `syncEmail` so the desk record follows.
+@@ -27,7 +31,7 @@ export default function EmailSection({ user }: { user: User }) {
+   const [password, setPassword] = useState("");
+   const [errors, setErrors] = useState<EmailChangeErrors>({});
+   const [msg, setMsg] = useState<Msg>(null);
+-  const [busy, setBusy] = useState<"send" | "resend" | "check" | null>(null);
++  const [busy, setBusy] = useState<"send" | "resend" | "check" | "verify" | null>(null);
+   const checking = useRef(false);
+   const canUsePassword = hasPasswordSignIn(user);
+ 
+@@ -52,6 +56,11 @@ export default function EmailSection({ user }: { user: User }) {
+       setCurrentEmail(fresh.email);
+       setVerified(fresh.emailVerified);
+       const stored = readPending(store, user.uid);
++      if (!stored && !fresh.emailVerified) {
++        // Nothing pending and the current address is not verified yet: there is nothing to sync, so say so instead of erroring.
++        if (manual) setMsg({ tone: "info", text: `${fresh.email ?? "Your email"} is not verified yet. Open the link we emailed, then check again.` });
++        return;
++      }
+       const arrived = !!stored && sameEmail(fresh.email, stored.email);
+       if (arrived) await fresh.getIdToken(true); // new token carries the new email + email_verified
+       try {
+@@ -62,6 +71,8 @@ export default function EmailSection({ user }: { user: User }) {
+           setMsg({ tone: "ok", text: `Your sign-in email is now ${out.email}.` });
+         } else if (manual && stored) {
+           setMsg({ tone: "info", text: `Still waiting for ${stored.email} to be verified. Open the link we emailed, then check again.` });
++        } else if (manual) {
++          setMsg({ tone: "ok", text: `Your email ${out.email} is verified.` });
+         }
+       } catch (e) {
+         if (arrived || manual) setMsg({ tone: "error", text: e instanceof DeskApiError ? e.message : "Could not update your desk record." });
+@@ -81,6 +92,21 @@ export default function EmailSection({ user }: { user: User }) {
+     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
+   }, [check]);
+ 
++  /** Verify the address the account already has. No password prompt: Firebase only mails a link to that inbox. */
++  async function verifyCurrent() {
++    const current = auth.currentUser;
++    if (!current || !current.email) { setMsg({ tone: "error", text: "Please sign in again." }); return; }
++    setBusy("verify"); setMsg(null);
++    try {
++      await sendEmailVerification(current);
++      setMsg({ tone: "ok", text: `We sent a verification link to ${current.email}. Open it, then come back and tap "I have verified it".` });
++    } catch (e) {
++      setMsg({ tone: "error", text: authErrorMessage(codeOf(e)) });
++    } finally {
++      setBusy(null);
++    }
++  }
++
+   async function sendVerification(target: string, kind: "send" | "resend") {
+     const current = auth.currentUser;
+     if (!current || !current.email) { setMsg({ tone: "error", text: "Please sign in again." }); return; }
+@@ -140,6 +166,22 @@ export default function EmailSection({ user }: { user: User }) {
+           )}
+         </dl>
+ 
++        {!verified && (
++          <div className="min-w-0 space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
++            <p className="break-words text-sm text-blue-900">
++              Your email <span className="break-all font-semibold">{currentEmail ?? "—"}</span> is not verified yet. You do not need to change it: we just send a link to it.
++            </p>
++            <div className="flex min-w-0 flex-wrap gap-2">
++              <button type="button" onClick={() => void verifyCurrent()} disabled={!!busy} className={buttonClass.primary}>
++                {busy === "verify" ? "Sending…" : "Send verification link"}
++              </button>
++              <button type="button" onClick={() => void check(true)} disabled={!!busy} className={buttonClass.secondary}>
++                {busy === "check" ? "Checking…" : "I have verified it"}
++              </button>
++            </div>
++          </div>
++        )}
++
+         {pending && !sameEmail(pending.email, currentEmail) && (
+           <div className="min-w-0 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+             <p className="break-words text-sm text-amber-900">
+diff --git a/src/pages/SignupPage.tsx b/src/pages/SignupPage.tsx
+index b0d4dae..a3c5840 100644
+--- a/src/pages/SignupPage.tsx
++++ b/src/pages/SignupPage.tsx
+@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
+ import { motion, AnimatePresence } from "framer-motion";
+ import { Upload, MapPin, User, Mail, Phone, FileText, Building, CheckCircle, AlertCircle, Camera, ArrowRight, ArrowLeft } from "lucide-react";
+ import { auth, db, storage } from "../services/firebaseService";
+-import { createUserWithEmailAndPassword } from "firebase/auth";
++import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+ import { doc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+ 
+@@ -151,6 +151,8 @@ const SignupPage: React.FC = () => {
+ 
+     try {
+       const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
++      // Email is verified when someone joins: mail the link now. Best effort, so a mail hiccup never blocks signup.
++      void sendEmailVerification(user).catch(() => { /* they can resend from Desk → Account */ });
+       
+       const passportUrl = passportPhoto ? await uploadFile(passportPhoto, `uploads/${user.uid}/passport`) : "";
+       const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
+-- 
+2.43.0
+

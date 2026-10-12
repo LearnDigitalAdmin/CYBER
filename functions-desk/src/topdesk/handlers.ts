@@ -83,9 +83,16 @@ export async function topListDesks(auth: AuthLike | null | undefined, raw: unkno
   const limit = Math.min(Math.max(typeof d.limit === "number" && Number.isInteger(d.limit) ? d.limit : LIST_DESKS_MAX, 1), LIST_DESKS_MAX);
 
   const found: AgentDoc[] = [];
+  // A full desk code is looked up directly (1 read) instead of scanning up to SCAN_MAX agents; no exact hit falls through to the scan.
+  let direct = false;
+  if (/^COG-\d{4,}$/i.test(search)) {
+    const hit = await col("agents").where("agentCode", "==", search.toUpperCase()).limit(1).get();
+    const a = hit.docs[0]?.data() as AgentDoc | undefined;
+    if (a) { direct = true; if (!status || a.status === status) found.push(a); }
+  }
   let scanned = 0;
   let last: FirebaseFirestore.QueryDocumentSnapshot | undefined;
-  while (found.length < limit && scanned < SCAN_MAX) {
+  while (!direct && found.length < limit && scanned < SCAN_MAX) {
     let q: Query = col("agents");
     if (status) q = q.where("status", "==", status);
     q = q.orderBy("createdAt", "desc");

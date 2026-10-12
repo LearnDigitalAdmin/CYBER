@@ -55,16 +55,22 @@ async function sweepProduct(deps: RequestsDeps, cfg: DeskConfig, product: SweptP
   }
 }
 
+/** Last hash + project this warm instance confirmed as pushed: lets an unchanged config skip the state-doc read entirely. */
+const pushedMemo = new Map<string, string>();
+
 /** Pushes `desk_public_config/global` into a product project when its hash differs from the last pushed one. */
 async function pushPublicConfig(deps: RequestsDeps, cfg: DeskConfig, product: SweptProduct): Promise<boolean> {
   const payload = buildPublicConfig(cfg, deps.now());
   const hash = hashPublicConfig(payload);
+  const memoKey = `${hash}@${cfg.projects[product]}`;
+  if (pushedMemo.get(product) === memoKey) return false;
   const stateRef = col("counters").doc(`publicconfig_${product}`);
   const last = (await stateRef.get()).data() as { hash?: string; projectId?: string } | undefined;
   const projectId = cfg.projects[product];
-  if (last?.hash === hash && last.projectId === projectId) return false;
+  if (last?.hash === hash && last.projectId === projectId) { pushedMemo.set(product, memoKey); return false; }
   await deps.productDb(cfg, product).collection(PUBLIC_CONFIG_COLLECTION).doc("global").set(payload);
   await stateRef.set({ hash, projectId, pushedAt: deps.now() });
+  pushedMemo.set(product, memoKey);
   return true;
 }
 

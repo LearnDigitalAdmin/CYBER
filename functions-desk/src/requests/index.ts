@@ -13,7 +13,7 @@ const SWEEP_BUDGET_MS = 240_000;
 
 /** Every 30 minutes: pulls product outboxes, pushes the public config, retries write-backs. Idempotent end to end. */
 export const desk_sweepRequests = onSchedule(
-  { schedule: "every 30 minutes", region: DESK_REGION, timeoutSeconds: 300, memory: "512MiB" },
+  { schedule: "every 30 minutes", region: DESK_REGION, timeoutSeconds: 300, memory: "256MiB" },
   async () => { await sweepRequests(defaultRequestsDeps(), SWEEP_BUDGET_MS); },
 );
 

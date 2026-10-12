@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EmailAuthProvider, reauthenticateWithCredential, verifyBeforeUpdateEmail } from "firebase/auth";
+import { EmailAuthProvider, reauthenticateWithCredential, sendEmailVerification, verifyBeforeUpdateEmail } from "firebase/auth";
 import type { User } from "firebase/auth";
 import { deskApi, DeskApiError, formatDateTime } from "../../api";
 import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
@@ -13,6 +13,10 @@ type Msg = { tone: "ok" | "error" | "info"; text: string } | null;
 const codeOf = (e: unknown): string | undefined => (e as { code?: string } | null)?.code;
 
 /**
+ * Verifies the CURRENT sign-in email (no change needed) and handles sign-in email changes.
+ *
+ * Verify: `sendEmailVerification` mails a link to the address already on the account; once opened, `emailVerified` is true.
+ *
  * Sign-in email change. Re-authenticate with the current password, then `verifyBeforeUpdateEmail`: Firebase mails a link to the
  * NEW address and only switches the sign-in email once it is opened. When the person comes back we reload the user and, once
  * the new address is the verified sign-in email, call `syncEmail` so the desk record follows.
@@ -27,7 +31,7 @@ export default function EmailSection({ user }: { user: User }) {
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<EmailChangeErrors>({});
   const [msg, setMsg] = useState<Msg>(null);
-  const [busy, setBusy] = useState<"send" | "resend" | "check" | null>(null);
+  const [busy, setBusy] = useState<"send" | "resend" | "check" | "verify" | null>(null);
   const checking = useRef(false);
   const canUsePassword = hasPasswordSignIn(user);
 
@@ -52,6 +56,11 @@ export default function EmailSection({ user }: { user: User }) {
       setCurrentEmail(fresh.email);
       setVerified(fresh.emailVerified);
       const stored = readPending(store, user.uid);
+      if (!stored && !fresh.emailVerified) {
+        // Nothing pending and the current address is not verified yet: there is nothing to sync, so say so instead of erroring.
+        if (manual) setMsg({ tone: "info", text: `${fresh.email ?? "Your email"} is not verified yet. Open the link we emailed, then check again.` });
+        return;
+      }
       const arrived = !!stored && sameEmail(fresh.email, stored.email);
       if (arrived) await fresh.getIdToken(true); // new token carries the new email + email_verified
       try {
@@ -62,6 +71,8 @@ export default function EmailSection({ user }: { user: User }) {
           setMsg({ tone: "ok", text: `Your sign-in email is now ${out.email}.` });
         } else if (manual && stored) {
           setMsg({ tone: "info", text: `Still waiting for ${stored.email} to be verified. Open the link we emailed, then check again.` });
+        } else if (manual) {
+          setMsg({ tone: "ok", text: `Your email ${out.email} is verified.` });
         }
       } catch (e) {
         if (arrived || manual) setMsg({ tone: "error", text: e instanceof DeskApiError ? e.message : "Could not update your desk record." });
@@ -80,6 +91,21 @@ export default function EmailSection({ user }: { user: User }) {
     document.addEventListener("visibilitychange", onFocus);
     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [check]);
+
+  /** Verify the address the account already has. No password prompt: Firebase only mails a link to that inbox. */
+  async function verifyCurrent() {
+    const current = auth.currentUser;
+    if (!current || !current.email) { setMsg({ tone: "error", text: "Please sign in again." }); return; }
+    setBusy("verify"); setMsg(null);
+    try {
+      await sendEmailVerification(current);
+      setMsg({ tone: "ok", text: `We sent a verification link to ${current.email}. Open it, then come back and tap "I have verified it".` });
+    } catch (e) {
+      setMsg({ tone: "error", text: authErrorMessage(codeOf(e)) });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function sendVerification(target: string, kind: "send" | "resend") {
     const current = auth.currentUser;
@@ -139,6 +165,22 @@ export default function EmailSection({ user }: { user: User }) {
             </>
           )}
         </dl>
+
+        {!verified && (
+          <div className="min-w-0 space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <p className="break-words text-sm text-blue-900">
+              Your email <span className="break-all font-semibold">{currentEmail ?? "—"}</span> is not verified yet. You do not need to change it: we just send a link to it.
+            </p>
+            <div className="flex min-w-0 flex-wrap gap-2">
+              <button type="button" onClick={() => void verifyCurrent()} disabled={!!busy} className={buttonClass.primary}>
+                {busy === "verify" ? "Sending…" : "Send verification link"}
+              </button>
+              <button type="button" onClick={() => void check(true)} disabled={!!busy} className={buttonClass.secondary}>
+                {busy === "check" ? "Checking…" : "I have verified it"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {pending && !sameEmail(pending.email, currentEmail) && (
           <div className="min-w-0 space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3">

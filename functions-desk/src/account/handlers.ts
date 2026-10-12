@@ -25,7 +25,7 @@ export async function syncEmail(deps: AccountDeps, uid: string): Promise<SyncEma
   const user = await deps.getAuthUser(uid);
   const email = user.email?.trim().toLowerCase();
   if (!email) throw new DeskError("failed_precondition", "Your account has no email address");
-  if (!user.emailVerified) throw new DeskError("failed_precondition", "Verify your new email address first, then try again");
+  if (!user.emailVerified) throw new DeskError("failed_precondition", "Verify your email address first, then try again");
 
   const agentRef = col("agents").doc(uid);
   const payRef = db().collection("agents").doc(uid);

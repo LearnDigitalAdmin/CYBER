@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, MapPin, User, Mail, Phone, FileText, Building, CheckCircle, AlertCircle, Camera, ArrowRight, ArrowLeft } from "lucide-react";
 import { auth, db, storage } from "../services/firebaseService";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
 import { doc, setDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -151,6 +151,8 @@ const SignupPage: React.FC = () => {
 
     try {
       const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      // Email is verified when someone joins: mail the link now. Best effort, so a mail hiccup never blocks signup.
+      void sendEmailVerification(user).catch(() => { /* they can resend from Desk → Account */ });
       
       const passportUrl = passportPhoto ? await uploadFile(passportPhoto, `uploads/${user.uid}/passport`) : "";
       const idUrl = idFile ? await uploadFile(idFile, `uploads/${user.uid}/id`) : "";
