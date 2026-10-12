@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingCart, Home, CreditCard, Users, TrendingUp, Loader2, Package, X, CheckCircle } from 'lucide-react';
 import React from 'react';
 import { collection, getDocs, doc, onSnapshot } from 'firebase/firestore';
-import { db, functions } from '../services/firebaseService';
+import { db, functionsAfrica as functions } from '../services/firebaseService';
 import { snpService, type Product } from '../services/snp';
 import { httpsCallable } from 'firebase/functions';
 import { toast } from 'react-toastify';

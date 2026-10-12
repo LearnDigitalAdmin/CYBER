@@ -8,7 +8,7 @@ export interface DocsStore {
 }
 export interface DocsDeps { now(): number; store: DocsStore }
 
-const bucket = () => { if (getApps().length === 0) initializeApp(); return getStorage().bucket(); };
+const bucket = () => { if (!getApps().some((a) => a.name === "[DEFAULT]")) initializeApp(); return getStorage().bucket(); };
 
 export const bucketStore: DocsStore = {
   async save(path, bytes, contentType) {

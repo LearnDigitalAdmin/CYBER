@@ -4,7 +4,7 @@ import { loadDeskConfig, type DeskConfig } from "./config.js";
 import { DESK_COLLECTIONS } from "./contract.js";
 
 export function db(): Firestore {
-  if (getApps().length === 0) initializeApp();
+  if (!getApps().some((a) => a.name === "[DEFAULT]")) initializeApp();
   return getFirestore();
 }
 export const col = (name: keyof typeof DESK_COLLECTIONS) => db().collection(DESK_COLLECTIONS[name]);

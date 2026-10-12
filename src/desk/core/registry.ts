@@ -23,10 +23,9 @@ export interface DeskModule {
   component: ComponentType;
 }
 
-const PATH = /^[a-z][a-z0-9-]*$/;
-
 export function defineDeskModule(m: DeskModule): DeskModule {
-  if (!PATH.test(m.path)) throw new Error(`Invalid desk module path "${m.path}"`);
+  // Inline on purpose: the eager glob below makes every desk.module.tsx run before this file's own constants exist.
+  if (!/^[a-z][a-z0-9-]*$/.test(m.path)) throw new Error(`Invalid desk module path "${m.path}"`);
   return m;
 }
 

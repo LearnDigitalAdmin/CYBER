@@ -1,5 +1,5 @@
 import { doc, getDoc } from "firebase/firestore";
-import { db, functions } from "./firebaseService";
+import { db, functionsAfrica as functions } from "./firebaseService";
 import { httpsCallable } from "firebase/functions";
 
 

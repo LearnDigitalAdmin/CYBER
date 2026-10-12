@@ -50,7 +50,9 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-export const functions = getFunctions(app); 
+export const functions = getFunctions(app, 'us-central1');
+// PAY's callables (setupAccount, chargeCustomer, processPayment, createUserWithFirebaseAuth) still live in africa-south1.
+export const functionsAfrica = getFunctions(app, 'africa-south1');
 
 export class FirebaseService {
 
@@ -117,7 +119,7 @@ export class PaymentService {
       // Map payment method to provider
       const provider = data.paymentMethod === 'mpesa' ? 'mpesa' : 'atl';
 
-      const processPayment = httpsCallable(functions, 'processPayment');
+      const processPayment = httpsCallable(functionsAfrica, 'processPayment');
       const result: any = await processPayment({
         email: `tenant${data.invoice.tenantId}@plot.app`, // Generate email
         amount: data.amount,

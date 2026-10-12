@@ -11,7 +11,7 @@ export interface AccountDeps { getAuthUser(uid: string): Promise<AuthUserLite> }
 
 export const defaultAccountDeps = (): AccountDeps => ({
   async getAuthUser(uid) {
-    if (getApps().length === 0) initializeApp();
+    if (!getApps().some((a) => a.name === "[DEFAULT]")) initializeApp();
     const u = await getAuth().getUser(uid);
     return { email: u.email, emailVerified: u.emailVerified };
   },

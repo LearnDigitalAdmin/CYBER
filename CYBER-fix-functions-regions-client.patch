@@ -1,0 +1,61 @@
+diff --git a/src/pages/Services.tsx b/src/pages/Services.tsx
+index f9fe956..4fb5cfe 100644
+--- a/src/pages/Services.tsx
++++ b/src/pages/Services.tsx
+@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
+ import { ShoppingCart, Home, CreditCard, Users, TrendingUp, Loader2, Package, X, CheckCircle } from 'lucide-react';
+ import React from 'react';
+ import { collection, getDocs, doc, onSnapshot } from 'firebase/firestore';
+-import { db, functions } from '../services/firebaseService';
++import { db, functionsAfrica as functions } from '../services/firebaseService';
+ import { snpService, type Product } from '../services/snp';
+ import { httpsCallable } from 'firebase/functions';
+ import { toast } from 'react-toastify';
+diff --git a/src/services/Assets.tsx b/src/services/Assets.tsx
+index 79b6b3a..25c5d1f 100644
+--- a/src/services/Assets.tsx
++++ b/src/services/Assets.tsx
+@@ -11,7 +11,7 @@ import {
+   orderBy,
+   limit} from 'firebase/firestore';
+ import { httpsCallable } from 'firebase/functions';
+-import { db, functions } from './firebaseService';
++import { db, functionsAfrica as functions } from './firebaseService';
+ 
+ export interface CompanyInfo {
+   name: string;
+diff --git a/src/services/firebaseService.ts b/src/services/firebaseService.ts
+index a787338..464960e 100644
+--- a/src/services/firebaseService.ts
++++ b/src/services/firebaseService.ts
+@@ -50,7 +50,9 @@ const app = initializeApp(firebaseConfig);
+ export const auth = getAuth(app);
+ export const db = getFirestore(app);
+ export const storage = getStorage(app);
+-export const functions = getFunctions(app); 
++export const functions = getFunctions(app, 'us-central1');
++// PAY's callables (setupAccount, chargeCustomer, processPayment, createUserWithFirebaseAuth) still live in africa-south1.
++export const functionsAfrica = getFunctions(app, 'africa-south1');
+ 
+ export class FirebaseService {
+ 
+@@ -117,7 +119,7 @@ export class PaymentService {
+       // Map payment method to provider
+       const provider = data.paymentMethod === 'mpesa' ? 'mpesa' : 'atl';
+ 
+-      const processPayment = httpsCallable(functions, 'processPayment');
++      const processPayment = httpsCallable(functionsAfrica, 'processPayment');
+       const result: any = await processPayment({
+         email: `tenant${data.invoice.tenantId}@plot.app`, // Generate email
+         amount: data.amount,
+diff --git a/src/services/paystackService.ts b/src/services/paystackService.ts
+index 7e5ae83..dd688d1 100644
+--- a/src/services/paystackService.ts
++++ b/src/services/paystackService.ts
+@@ -1,5 +1,5 @@
+ import { doc, getDoc } from "firebase/firestore";
+-import { db, functions } from "./firebaseService";
++import { db, functionsAfrica as functions } from "./firebaseService";
+ import { httpsCallable } from "firebase/functions";
+ 
+ 
