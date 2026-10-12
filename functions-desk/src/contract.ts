@@ -9,7 +9,7 @@
  */
 
 export const DESK_CONTRACT_VERSION = 5;
-export const DESK_REGION = "africa-south1";
+export const DESK_REGION = "us-central1";
 
 /** Desk charges use the existing CYBER_ payment reference family, so PAY's webhook already routes them. */
 export const DESK_REF_PREFIX = "CYBER_DSK_";

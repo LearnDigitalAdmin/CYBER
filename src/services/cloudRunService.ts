@@ -32,7 +32,7 @@ export interface CloudRunError {
 
 // Update these based on your Firebase project region
 const FIREBASE_PROJECT_ID = 'plot-9fd6e';
-const FIREBASE_REGION = 'africa-south1';
+const FIREBASE_REGION = 'us-central1';
 
 // Cloud Function endpoint URL
 const FUNCTION_URL = `https://${FIREBASE_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net/generatePassport`;

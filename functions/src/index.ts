@@ -392,7 +392,7 @@ export const convertImagesToPdf = onCall(
     timeoutSeconds: 540,
     memory: '8GiB',
     cpu: 2,
-    maxInstances: 5,
+    maxInstances: 2,
     cors: true,
   },
   async (request) => {
@@ -897,8 +897,8 @@ export const generatePassport = onRequest(
     memory: '2GiB',
     timeoutSeconds: 300,
     cors: true,
-    maxInstances: 10,
-    region: 'africa-south1',
+    maxInstances: 2,
+    region: 'us-central1',
   },
   async (req, res) => {
     try {
@@ -930,9 +930,11 @@ export const generatePassport = onRequest(
 export const healthCheck = onRequest(
   {
     memory: '256MiB',
+    cpu: 'gcf_gen1',
     timeoutSeconds: 10,
     cors: true,
-    region: 'africa-south1',
+    maxInstances: 2,
+    region: 'us-central1',
   },
   async (req, res) => {
     try {
@@ -1540,9 +1542,10 @@ function generateHTML(numberOfTenants: number): string {
 
 export const generateRegistrationForm = onCall(
   {
-    region: 'africa-south1',
+    region: 'us-central1',
     memory: '2GiB',
     timeoutSeconds: 120,
+    maxInstances: 2,
   },
   async (request) => {
     try {
