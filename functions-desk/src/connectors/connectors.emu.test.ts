@@ -109,7 +109,7 @@ test("incomplete bank details are reported, not guessed", opts, async () => {
 });
 test("sync writes deskOwner on every chama this desk owns, using the chama subaccount", opts, async () => {
   chamaSeparate();
-  for (const [id, code] of [["c1", "SMC-0001"], ["c2", "SMC-0002"], ["c3", "SMC-0003"]]) await h.chama.collection("chamas").doc(id).set({ code });
+  for (const [id, code] of [["c1", "SMC-0001"], ["c2", "SMC-0002"], ["c3", "SMC-0003"]]) await h.chama.collection("chamas").doc(id).set({ publicCode: code });
   for (const code of ["SMC-0001", "SMC-0002"]) await col("customers").doc(`chama:${code}`).set({ entityKey: `chama:${code}`, product: "chama", ownerAgentId: "1", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
   await col("customers").doc("chama:SMC-0003").set({ entityKey: "chama:SMC-0003", product: "chama", ownerAgentId: "other", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
   await syncPayoutAccounts(h.deps, "1");
@@ -119,7 +119,7 @@ test("sync writes deskOwner on every chama this desk owns, using the chama subac
 });
 test("writeDeskOwner writes nothing when the account is not ready, with the reason", opts, async () => {
   chamaSeparate();
-  await h.chama.collection("chamas").doc("c1").set({ code: "SMC-0001" });
+  await h.chama.collection("chamas").doc("c1").set({ publicCode: "SMC-0001" });
   await col("customers").doc(KEY).set({ entityKey: KEY, product: "chama", ownerAgentId: "1", attributedAt: 1, firstPurchaseUsed: false, paidPeriods: [] });
   const agent = (await col("agents").doc("1").get()).data() as AgentDoc;
   const r = await writeDeskOwner(h.deps, h.state.cfg, agent, "SMC-0001");
@@ -127,7 +127,7 @@ test("writeDeskOwner writes nothing when the account is not ready, with the reas
   assert.equal((await h.chama.collection("chamas").doc("c1").get()).data()?.deskOwner, undefined);
 });
 test("writeDeskOwner refuses a chama this desk does not own", opts, async () => {
-  await h.chama.collection("chamas").doc("c1").set({ code: "SMC-0001" });
+  await h.chama.collection("chamas").doc("c1").set({ publicCode: "SMC-0001" });
   const agent = (await col("agents").doc("1").get()).data() as AgentDoc;
   assert.equal((await writeDeskOwner(h.deps, h.state.cfg, agent, "SMC-0001")).written, false);
 });

@@ -12,10 +12,9 @@ import type { Deps } from "./deps.js";
 /** Chama collection holding chama documents (functions/shared/constants.py: MC.CHAMAS). */
 export const CHAMA_COLLECTION = "chamas";
 /**
- * Field on a chama document that holds its public SMC-… code. The current Chama repo has no such field yet (the SMC code
- * scheme is delivered by Chama's own patch), so this is the single place to change if that patch names it differently.
+ * Field on a chama document that holds its public SMC-… code (Chama stores it as `publicCode`; see Chama functions/shared/desk_codes.py).
  */
-export const CHAMA_CODE_FIELD = "code";
+export const CHAMA_CODE_FIELD = "publicCode";
 
 export interface DeskOwnerResult { written: boolean; reason?: string }
 

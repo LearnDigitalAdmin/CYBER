@@ -4,4 +4,5 @@
  *   useActiveSession(): { sessionId: string | null; entityKey: string | null }   (sessionStorage)
  * Comms, Reports and Rent are shared consumers of this folder; if W1-D ever moves these, fix it here only.
  */
-export { ActionOtpDialog, useActiveSession } from "../../../access/ActionOtpDialog";
+export { ActionOtpDialog } from "../../../access/ActionOtpDialog";
+export { useActiveSession } from "../../../access/useActiveSession";
