@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* Native-like shell: brand colour behind everything, no rubber-band, no 300ms tap delay. */
+html {
+  background: #0B1210;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: #0B1210;
+  -webkit-tap-highlight-color: transparent;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+#root { min-height: 100dvh; }
+a, button, [role="button"], input, select, textarea { touch-action: manipulation; }

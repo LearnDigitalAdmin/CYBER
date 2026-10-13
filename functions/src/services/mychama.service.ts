@@ -123,6 +123,16 @@ export function grossUpForFees(net: number, ourRate: number): FeeBreakdown {
   };
 }
 
+/**
+ * The flat amount (whole kobo/cents) MyChama's main Paystack account keeps on a split charge: everything the
+ * member pays beyond what the chama is owed. The chama's subaccount gets the rest, so it receives exactly `net`,
+ * never more and never less; rounding leftovers and any gap between our Paystack-fee estimate and the real fee
+ * stay with the main account. Mirrors Chama functions/shared/money.py::main_account_charge_subunits.
+ */
+export function mainAccountChargeSubunits(gross: number, net: number): number {
+  return Math.round(gross * 100) - Math.round(net * 100);
+}
+
 export function contributionFees(net: number): FeeBreakdown {
   return grossUpForFees(net, FEES.CONTRIBUTION_MARKUP_RATE);
 }

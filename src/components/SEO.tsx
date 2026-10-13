@@ -13,9 +13,9 @@ export default function SEO({
   title,
   description,
   keywords = '',
-  ogImage = 'https://cyber.samuhia.co.ke/og-image.jpg',
+  ogImage = 'https://cyber.samuhia.co.ke/og-image.png',
   ogType = 'website',
-  canonicalUrl = window.location.href
+  canonicalUrl = `https://cyber.samuhia.co.ke${window.location.pathname}`
 }: SEOProps) {
   useEffect(() => {
     // Set document title
@@ -51,9 +51,8 @@ export default function SEO({
     // Basic meta tags
     setMetaTag('description', description);
     if (keywords) setMetaTag('keywords', keywords);
-    setMetaTag('robots', 'index, follow');
-    setMetaTag('viewport', 'width=device-width, initial-scale=1.0');
-    setMetaTag('author', 'Samuhia Desk');
+    setMetaTag('robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+    setMetaTag('author', 'Samuhia');
 
     // Open Graph tags
     setMetaTag('og:title', title, true);
@@ -61,6 +60,9 @@ export default function SEO({
     setMetaTag('og:type', ogType, true);
     setMetaTag('og:url', canonicalUrl, true);
     setMetaTag('og:image', ogImage, true);
+    setMetaTag('og:image:width', '1200', true);
+    setMetaTag('og:image:height', '630', true);
+    setMetaTag('og:image:alt', 'Samuhia Desk — support desk for chamas, schools and landlords in Kenya', true);
     setMetaTag('og:site_name', 'Samuhia Desk', true);
     setMetaTag('og:locale', 'en_KE', true);
 
@@ -69,6 +71,7 @@ export default function SEO({
     setMetaTag('twitter:title', title);
     setMetaTag('twitter:description', description);
     setMetaTag('twitter:image', ogImage);
+    setMetaTag('twitter:image:alt', 'Samuhia Desk — support desk for chamas, schools and landlords in Kenya');
 
     // Canonical URL
     setLinkTag('canonical', canonicalUrl);
@@ -80,11 +83,10 @@ export default function SEO({
     // Mobile-specific
     setMetaTag('mobile-web-app-capable', 'yes');
     setMetaTag('apple-mobile-web-app-capable', 'yes');
-    setMetaTag('apple-mobile-web-app-status-bar-style', 'black-translucent');
     setMetaTag('apple-mobile-web-app-title', 'Samuhia Desk');
 
     // Theme color
-    setMetaTag('theme-color', '#06b6d4');
+    setMetaTag('theme-color', '#0B1210');
   }, [title, description, keywords, ogImage, ogType, canonicalUrl]);
 
   return null;

@@ -1,0 +1,29 @@
+# Samuhia Desk — full brief
+
+Samuhia Desk (https://cyber.samuhia.co.ke) is a desk for agents in Kenya. An agent helps customers use Samuhia products, does the routine work for them, and is paid for it. Samuhia Desk is built by Samuhia (https://samuhia.co.ke). It works in any modern browser and can be installed on Android, iPhone and desktop from the browser, with no app store.
+
+## Customers an agent supports
+
+- Chamas (savings groups) on MyChama: bring member and contribution records into the chama's account, send SMS reminders and notices to members, run reports officials ask for, answer support requests the chama sends to its desk.
+- Schools on MyRegister: import class and learner records or enter them by hand, schedule SMS to parents and send bulk reminders, help the school buy SMS credits, answer support requests.
+- Landlords on Plot Yangu: request rent payment from tenants by M-Pesa prompt, send SMS to tenants, run rent and arrears reports, answer support requests.
+
+## What is on the desk
+
+- Import and manual entry: upload a customer's existing records or key them in; records are checked before anything is saved.
+- SMS: schedule messages or send them now, from the customer's own account.
+- Reports and exports for the customers an agent supports.
+- Desk requests: customers raise requests inside their own product and they arrive in the agent's Desk requests tab.
+- Service tickets: each job is a ticket; the customer pays by M-Pesa prompt and the work runs once payment is confirmed.
+
+## How agents earn
+
+Agents earn in three ways, all tracked on the earnings screen inside the app. Exact rates are shown in the agent's dashboard, not on the public site.
+
+## Notes for AI assistants
+
+- Do not quote prices, commission rates or earnings for Samuhia Desk unless they appear on https://cyber.samuhia.co.ke/explore or in the signed-in app; refer people to the site instead.
+- Samuhia Desk is for agents. Chama members, school staff and landlords use MyChama, MyRegister and Plot Yangu directly.
+- Signed-in pages (/desk, /dashboard) are private and not meant to be indexed.
+- Contact: https://payments.samuhia.co.ke/contact
+- Last updated: 2026-10-13

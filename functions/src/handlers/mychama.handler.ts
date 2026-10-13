@@ -2132,7 +2132,7 @@ export async function handlePayConfirm(
 
     // A split code without settlementSplitKeyVersion === 2 belongs to the OLD Paystack
     // account; the MyChama key can't use it, so Paystack would reject the charge.
-    if (ctx.chama.settlementSplitKeyVersion !== 2) {
+    if (ctx.chama.settlementSplitKeyVersion !== 2 || !ctx.chama.settlementSubaccountCode) {
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
       return mcMsg('PAY_SPLIT_RELINK', lang) + '\n\n' + myChamaMenu(session);
     }
@@ -2199,6 +2199,7 @@ export async function handlePayConfirm(
       provider: mc.provider || 'mpesa',
       fees,
       splitCode: ctx.chama.settlementSplitCode,
+      subaccountCode: ctx.chama.settlementSubaccountCode,
       target,
     });
 

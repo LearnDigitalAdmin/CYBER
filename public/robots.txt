@@ -1,40 +1,15 @@
-# Robots.txt for Samuhia Desk
-# https://cyber.samuhia.co.ke/robots.txt
-
-# Allow all crawlers
+# Samuhia Desk — https://cyber.samuhia.co.ke
 User-agent: *
 Allow: /
-Allow: /explore
-Allow: /signin
-Allow: /signup
-
-# Disallow authenticated/private areas
+# Signed-in app areas (also sent with X-Robots-Tag: noindex)
 Disallow: /dashboard
-Disallow: /profile
-Disallow: /settings
-Disallow: /admin
-Disallow: /api/
-
-# Disallow user-specific paths
+Disallow: /desk
 Disallow: /*?token=
 Disallow: /*?session=
 Disallow: /*?auth=
 
-# Special rules for good bots
-User-agent: Googlebot
-Allow: /
-Allow: /explore
-Allow: /signin
-Allow: /signup
+# Machine-readable summaries for AI assistants
+# https://cyber.samuhia.co.ke/llms.txt
+# https://cyber.samuhia.co.ke/llms-full.txt
 
-User-agent: Bingbot
-Allow: /
-Allow: /explore
-Allow: /signin
-Allow: /signup
-
-# Sitemap location
 Sitemap: https://cyber.samuhia.co.ke/sitemap.xml
-
-# Crawl delay (optional, adjust if needed)
-Crawl-delay: 1

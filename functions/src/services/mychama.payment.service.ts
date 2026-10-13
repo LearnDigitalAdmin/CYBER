@@ -27,7 +27,7 @@ import {
   IntentPurpose,
   PaymentIntent,
 } from '../types/mychama.types';
-import { normalizePhone } from './mychama.service';
+import { mainAccountChargeSubunits, normalizePhone } from './mychama.service';
 import { logger } from '../utils/logger';
 
 interface PaystackChargeResponse {
@@ -159,9 +159,11 @@ export async function initiateMyChamaPayment(params: {
   provider: 'mpesa' | 'airtel';
   fees: FeeBreakdown;
   splitCode: string;
+  /** The chama's subaccount: the charge routes the exact net to it (flat charge to the main account), see payload. */
+  subaccountCode: string;
   target: IntentTarget;
 }): Promise<InitiateResult> {
-  const { chamaId, chamaName, memberId, memberName, phone, provider, fees, splitCode, target } =
+  const { chamaId, chamaName, memberId, memberName, phone, provider, fees, splitCode, subaccountCode, target } =
     params;
 
   const targetError = validateIntentTarget(target);
@@ -224,7 +226,11 @@ export async function initiateMyChamaPayment(params: {
         provider: provider === 'airtel' ? 'airtel' : 'mpesa',
       },
       reference,
-      split_code: splitCode,
+      // Routed by subaccount + a flat charge (gross - net) kept by the main account, which also bears Paystack's
+      // fee, so the chama is paid exactly the net: never the 100% split code, which would pay it net + our markup.
+      subaccount: subaccountCode,
+      transaction_charge: mainAccountChargeSubunits(fees.gross, fees.net),
+      bearer: 'account',
       metadata: {
         // Same routing keys the app's initiatePayment sends, so the webhook
         // classifies bot and app payments identically instead of relying on

@@ -1,109 +1,108 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-KE">
   <head>
     <meta charset="UTF-8" />
-    <link rel="manifest" href="/manifest.json" />
-    <div id="recaptcha-container"></div>
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <!-- <link rel="manifest" href="/site.webmanifest"> -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#10b981">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <!-- Primary Meta Tags -->
-    <title>Samuhia Desk - Digital Business Platform for Kenya</title>
-    <meta name="title" content="Samuhia Desk - Digital Business Platform for Kenya" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Primary SEO (HomePage/ExplorePage refine these at runtime via <SEO/>) -->
+    <title>Samuhia Desk — Support Desk for Chamas, Schools and Landlords in Kenya</title>
     <meta name="description" content="Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do." />
-    <meta name="keywords" content="samuhia, samuhia desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, property management Kenya" />
-    <meta name="robots" content="index, follow" />
-    <meta name="language" content="English" />
-    <meta name="author" content="Samuhia Desk" />
-    
-    <!-- Geo Tags -->
+    <meta name="keywords" content="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, property management Kenya" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="author" content="Samuhia" />
     <meta name="geo.region" content="KE" />
-    <meta name="geo.placename" content="Kenya" />
-    
-    <!-- Open Graph / Facebook -->
+    <link rel="canonical" href="https://cyber.samuhia.co.ke/" />
+    <link rel="alternate" hreflang="en-KE" href="https://cyber.samuhia.co.ke/" />
+    <link rel="alternate" hreflang="x-default" href="https://cyber.samuhia.co.ke/" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable summary of Samuhia Desk" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+    <!-- Icons -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Open Graph / link previews -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://cyber.samuhia.co.ke/" />
-    <meta property="og:title" content="Samuhia Desk - Digital Business Platform for Kenya" />
-    <meta property="og:description" content="Support chamas, schools and landlords, and earn from the work you do." />
-    <meta property="og:image" content="https://cyber.samuhia.co.ke/og-image.jpg" />
     <meta property="og:site_name" content="Samuhia Desk" />
     <meta property="og:locale" content="en_KE" />
-    
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://cyber.samuhia.co.ke/" />
-    <meta property="twitter:title" content="Samuhia Desk - Digital Business Platform for Kenya" />
-    <meta property="twitter:description" content="Support chamas, schools and landlords, and earn from the work you do." />
-    <meta property="twitter:image" content="https://cyber.samuhia.co.ke/og-image.jpg" />
-    
-    <!-- Mobile Meta Tags -->
+    <meta property="og:title" content="Samuhia Desk — Support Desk for Chamas, Schools and Landlords" />
+    <meta property="og:description" content="Support chamas, schools and landlords, and earn from the work you do." />
+    <meta property="og:url" content="https://cyber.samuhia.co.ke/" />
+    <meta property="og:image" content="https://cyber.samuhia.co.ke/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Samuhia Desk — support desk for chamas, schools and landlords in Kenya" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Samuhia Desk — Support Desk for Chamas, Schools and Landlords" />
+    <meta name="twitter:description" content="Support chamas, schools and landlords, and earn from the work you do." />
+    <meta name="twitter:image" content="https://cyber.samuhia.co.ke/og-image.png" />
+    <meta name="twitter:image:alt" content="Samuhia Desk — support desk for chamas, schools and landlords in Kenya" />
+
+    <!-- PWA: native-like, no browser chrome when installed -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="application-name" content="Samuhia Desk" />
+    <meta name="theme-color" content="#0B1210" />
+    <meta name="color-scheme" content="dark light" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Samuhia Desk" />
-    <meta name="theme-color" content="#06b6d4" />
-    
-    <!-- Canonical Link -->
-    <link rel="canonical" href="https://cyber.samuhia.co.ke/" />
-    
-    <!-- Preconnect to external domains -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    
-    <!-- Structured Data (JSON-LD) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Paint the brand colour immediately so there is no white flash on launch -->
+    <style>html,body{background:#0B1210}</style>
+
+    <!-- Structured data -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "Samuhia Desk",
-      "applicationCategory": "BusinessApplication",
-      "operatingSystem": "Web",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "KES"
-      },
-      "description": "Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do.",
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.8",
-        "ratingCount": "127"
-      },
-      "author": {
-        "@type": "Organization",
-        "name": "Samuhia",
-        "url": "https://samuhia.co.ke"
-      }
-    }
-    </script>
-    
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "Samuhia Desk",
-      "url": "https://cyber.samuhia.co.ke",
-      "logo": "https://cyber.samuhia.co.ke/logo.png",
-      "contactPoint": {
-        "@type": "ContactPoint",
-        "contactType": "Customer Support",
-        "url": "https://payments.samuhia.co.ke/contact",
-        "areaServed": "KE"
-      },
-      "sameAs": [
-        "https://samuhia.co.ke"
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://samuhia.co.ke/#org",
+          "name": "Samuhia",
+          "url": "https://samuhia.co.ke",
+          "logo": "https://cyber.samuhia.co.ke/logo.png",
+          "contactPoint": { "@type": "ContactPoint", "contactType": "Customer Support", "url": "https://payments.samuhia.co.ke/contact", "areaServed": "KE" }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://cyber.samuhia.co.ke/#website",
+          "url": "https://cyber.samuhia.co.ke/",
+          "name": "Samuhia Desk",
+          "inLanguage": "en-KE",
+          "publisher": { "@id": "https://samuhia.co.ke/#org" }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://cyber.samuhia.co.ke/#app",
+          "name": "Samuhia Desk",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web, Android, iOS (installable PWA)",
+          "url": "https://cyber.samuhia.co.ke/",
+          "image": "https://cyber.samuhia.co.ke/og-image.png",
+          "inLanguage": "en-KE",
+          "description": "Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do.",
+          "publisher": { "@id": "https://samuhia.co.ke/#org" }
+        }
       ]
     }
     </script>
   </head>
   <body>
+    <div id="recaptcha-container"></div>
     <div id="root"></div>
+    <noscript>
+      <main style="font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;color:#FBF9F4">
+        <h1>Samuhia Desk</h1>
+        <p>Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do.</p>
+        <p>Please enable JavaScript to use the app. Learn more: <a href="/llms.txt" style="color:#22D3EE">about Samuhia Desk</a> · <a href="https://samuhia.co.ke" style="color:#22D3EE">samuhia.co.ke</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

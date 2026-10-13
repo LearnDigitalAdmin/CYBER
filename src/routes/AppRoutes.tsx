@@ -110,6 +110,12 @@ import DeskApp from "../desk/core/DeskApp";
  * - Handles animated route transitions.
  */
 
+const isInstalledApp = () =>
+  typeof window !== "undefined" &&
+  (window.matchMedia("(display-mode: standalone)").matches ||
+    window.matchMedia("(display-mode: minimal-ui)").matches ||
+    (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
+
 const AppRoutes: React.FC = () => {
   const { currentUser, loading } = useAuth();
   const location = useLocation();
@@ -117,7 +123,7 @@ const AppRoutes: React.FC = () => {
   // Wait for initial auth check before rendering routes
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-dvh flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading...</p>
@@ -136,11 +142,17 @@ const AppRoutes: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
-      className="min-h-screen bg-gray-50 text-gray-900"
+      className="min-h-dvh bg-gray-50 text-gray-900"
     >
       <Routes location={location}>
         {/* Public Routes */}
-        <Route path="/" element={<HomePage />} />
+        <Route
+          path="/"
+          element={
+            // Installed app: open straight into the app, not the marketing page
+            isInstalledApp() ? <Navigate to={currentUser ? "/dashboard" : "/signin"} replace /> : <HomePage />
+          }
+        />
         <Route path="/explore" element={<ExplorePage />} />
         <Route path="/signin" element={<AuthPage />} />
         <Route path="/signup" element={<SignupPage />} />

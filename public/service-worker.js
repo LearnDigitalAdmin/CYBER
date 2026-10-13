@@ -1,13 +1,16 @@
 // service-worker.js - PWA Service Worker
 
-const CACHE_NAME = 'cyber-payments-v1';
-const RUNTIME_CACHE = 'cyber-runtime-v1';
+const CACHE_NAME = 'desk-shell-v2';
+const RUNTIME_CACHE = 'desk-runtime-v2';
 
 // Assets to cache on install
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
-  '/manifest.json',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
   '/icons/manifest-icon-192.maskable.png',
   '/icons/manifest-icon-512.maskable.png',
   '/icons/apple-icon-180.png'
@@ -21,7 +24,7 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then((cache) => {
         console.log('[ServiceWorker] Precaching assets');
-        return cache.addAll(PRECACHE_ASSETS);
+        return Promise.all(PRECACHE_ASSETS.map((u) => cache.add(u).catch(() => null)));
       })
       .then(() => self.skipWaiting())
   );
