@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { Upload } from 'lucide-react'
 import SEO from '../components/SEO';
+import InstallButton from '../pwa/InstallButton';
 import lockupReversed from '../../brand/desk-lockup-reversed.svg'
 
 // Short landscape phones: drop the optional blocks instead of scrolling.
@@ -54,6 +55,10 @@ export default function HomePage() {
             />
           </motion.div>
           
+          <div className="absolute right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-20">
+            <InstallButton tone="onDark" />
+          </div>
+
           {/* Main content: sizes scale with the screen, spacing follows the available height */}
           <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center text-center px-5 gap-[clamp(0.6rem,2.6dvh,1.75rem)]">
             <motion.img

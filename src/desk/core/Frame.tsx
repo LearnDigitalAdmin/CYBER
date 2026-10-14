@@ -6,6 +6,7 @@ import { DESK_MODULES, visibleModules } from "./registry";
 import { useAgent } from "./useAgent";
 import { Modal } from "../ui";
 import { cn } from "../ui/cn";
+import InstallButton from "../../pwa/InstallButton";
 
 const linkBase = "flex min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium";
 const toItem = (m: (typeof DESK_MODULES)[number]) => ({ to: `/desk/${m.path}`, label: m.label, icon: m.icon, end: false });
@@ -35,6 +36,9 @@ export default function Frame({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+        <div className="mt-3 px-1">
+          <InstallButton tone="light" block />
+        </div>
       </aside>
       <main className="min-w-0 flex-1 pb-20 md:pb-0">{children}</main>
       <nav aria-label="Desk" className="fixed inset-x-0 bottom-0 z-40 grid grid-flow-col auto-cols-fr border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
@@ -64,6 +68,9 @@ export default function Frame({ children }: { children: ReactNode }) {
               </NavLink>
             </li>
           ))}
+          <li className="pt-1">
+            <InstallButton tone="light" block />
+          </li>
         </ul>
       </Modal>
     </div>

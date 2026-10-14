@@ -5,6 +5,7 @@
 import { BrowserRouter } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import AppRoutes from "./routes/AppRoutes";
+import PWAPrompts from "./pwa/PWAPrompts";
 import { AuthProvider } from "./context/authContext";
 //import { DataProvider } from "./context/dataContext";
 //import { Loader } from "./components/global/Loader";
@@ -32,6 +33,7 @@ const App: React.FC = () => {
         <AnimatePresence mode="wait">
           <AppRoutes />
         </AnimatePresence>
+        <PWAPrompts />
       </AuthProvider>
     </BrowserRouter>
   );

@@ -25,6 +25,7 @@ import PricingModal from '../components/PricingPage';
 import { PaymentSuccessHandler, type Transaction } from '../services/PaymentsSuccess';
 import { toast } from 'react-toastify';
 import CyberTab from '../components/cyber/CyberTab';
+import InstallButton from '../pwa/InstallButton';
 import { Paystack } from '../services/paystackService';
 import { Screening } from '../services/Screening';
 import TerminalModal from '../components/global/Terminal';
@@ -335,6 +336,10 @@ const Dashboard = () => {
               >
                 <Settings className="w-5 h-5" />
               </button>
+            </div>
+
+            <div className="hidden sm:block flex-shrink-0">
+              <InstallButton tone="onDark" />
             </div>
 
             {/* Profile Section */}
