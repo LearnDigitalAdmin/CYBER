@@ -14,8 +14,6 @@ import { getMessage } from '../constants/messages';
 import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { db } from '../config/firebase.config';
-import { generateInvoicePDF } from '../services/pdf.service';
-import { uploadPDFToStorage, generatePDFFileName } from '../services/storage.service';
 import { initiatePayment, hasPaymentInfo, getAssetContactInfo } from '../services/payment.service';
 
 interface TenantData {
@@ -528,7 +526,6 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
 
       // Step 3: Initiate payment with asset details
       let paymentReference: string = '';
-      let paymentSucceeded = false;
 
       try {
         const paymentResult = await initiatePayment({
@@ -560,7 +557,6 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
         }
 
         paymentReference = paymentResult.reference;
-        paymentSucceeded = true;
 
         logger.info('Payment initiated successfully', {
           reference: paymentReference,
@@ -582,93 +578,9 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
         return errorMsg;
       }
 
-      // Step 4: Update invoice status ONLY if payment succeeded
-      let pdfUrl: string | undefined;
-
-      if (paymentSucceeded && foundInvoice.id && foundInvoice.id !== 'temp' && assetId) {
-        const invoiceRef = db.collection('users').doc(assetId).collection('invoices').doc(foundInvoice.id.toString());
-        const newAmountPaid = foundInvoice.amountPaid + paymentAmount;
-        const isPaid = newAmountPaid >= foundInvoice.totalAmount;
-
-        // Step 5: Generate, upload PDF, and get URL (BEFORE updating invoice)
-        try {
-          logger.info('Generating invoice PDF', {
-            tenantId: foundTenant.localId,
-            invoiceId: foundInvoice.id,
-          });
-
-          const updatedInvoiceData = {
-            ...foundInvoice,
-            amountPaid: newAmountPaid,
-            isPaid: isPaid,
-            paidDate: isPaid ? new Date().toLocaleDateString('en-KE') : undefined,
-          };
-
-          // Generate PDF buffer
-          const pdfBuffer = await generateInvoicePDF(
-            foundTenant,
-            updatedInvoiceData,
-            assetData?.name || 'Property'
-          );
-
-          logger.info('Invoice PDF generated successfully', {
-            tenantId: foundTenant.localId,
-            pdfSize: pdfBuffer.length,
-          });
-
-          // Upload PDF to Cloud Storage
-          // Path: invoices/{assetId}/{tenantId}/invoice_{tenantName}_{invoiceId}.pdf
-          const fileName = generatePDFFileName(foundTenant.name, foundInvoice.id.toString());
-          pdfUrl = await uploadPDFToStorage(pdfBuffer, fileName, assetId, foundTenant.localId.toString());
-
-          logger.info('PDF uploaded to Cloud Storage', {
-            fileName,
-            pdfUrl,
-          });
-        } catch (pdfError) {
-          logger.warn('Failed to generate or upload PDF', pdfError);
-          // Continue without PDF - don't fail the entire payment process
-        }
-
-        // Step 6: Update invoice - First phase: update amount, reference, and PDF URL
-        const updateDataPhase1: any = {
-          amountPaid: newAmountPaid,
-          paymentReference: paymentReference,
-          updatedAt: new Date(),
-        };
-
-        // Add PDF URL if successfully generated
-        if (pdfUrl) {
-          updateDataPhase1.pdfUrl = pdfUrl;
-        }
-
-        await invoiceRef.update(updateDataPhase1);
-
-        logger.info('Invoice Phase 1 updated: amount, reference, PDF URL', {
-          invoiceId: foundInvoice.id,
-          amountPaid: newAmountPaid,
-          paymentReference: paymentReference,
-          hasPdfUrl: !!pdfUrl,
-        });
-
-        // Step 6b: Wait before updating status (timeout for transaction confirmation)
-        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
-
-        // Step 6c: Update invoice - Second phase: update status (isPaid)
-        const updateDataPhase2: any = {
-          isPaid: isPaid,
-          paidDate: isPaid ? new Date() : null,
-          updatedAt: new Date(),
-        };
-
-        await invoiceRef.update(updateDataPhase2);
-
-        logger.info('Invoice Phase 2 updated: payment status', {
-          invoiceId: foundInvoice.id,
-          isPaid,
-          paidDate: isPaid ? new Date().toISOString() : null,
-        });
-      }
+      // The invoice is NOT touched here. Initiating an M-Pesa prompt is not a payment: PAY's webhook credits the invoice
+      // (users/{agent}/invoices/{id}) when Paystack confirms it — full => paid, part-payment => partial with the balance
+      // as arrears — and sends the payment SMS. A prompt that is never completed leaves the invoice as it was.
 
       // Step 7: Clear session and return to main menu
       await clearSessionContext(phone);

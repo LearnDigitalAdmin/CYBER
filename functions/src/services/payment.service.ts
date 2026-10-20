@@ -62,23 +62,31 @@ function formatPhoneNumber(phone: string): string {
 }
 
 /**
- * Calculate platform fees
+ * Rent fee split (mirrors PAY functions/src/desk/rentFees.ts — the processPayment server is authoritative).
+ * Tenant pays rent + min(KES 150, 0.5%); the landlord covers the rest of Paystack's ~1.5% plus a 0.2% convenience fee.
+ * Integer minor units; the invoice is always credited the rent.
  */
 function calculateFees(amount: number, invoiceBalance: number): {
-  platformFee: number;
+  tenantFee: number;
   total: number;
   netAmount: number;
+  deductions: number;
+  netPayout: number;
   arrears: number;
 } {
-  const platformFee = amount * 0.008; // 0.8% fee
-  const total = amount + platformFee;
-  const netAmount = amount;
+  const pct = (minor: number, p: number) => Math.floor((minor * Math.round(p * 100) + 5000) / 10000);
+  const rent = Math.round(amount * 100);
+  const tenantFee = Math.min(pct(rent, 0.5), 15000);
+  const paystackEstimate = Math.min(pct(rent, 1.5), 300000);
+  const deductions = Math.max(0, paystackEstimate - tenantFee) + pct(rent, 0.2);
   const arrears = amount < invoiceBalance ? invoiceBalance - amount : 0;
 
   return {
-    platformFee: Math.round(platformFee * 100) / 100,
-    total: Math.round(total * 100) / 100,
-    netAmount: Math.round(netAmount * 100) / 100,
+    tenantFee: tenantFee / 100,
+    total: (rent + tenantFee) / 100,
+    netAmount: rent / 100,
+    deductions: deductions / 100,
+    netPayout: (rent - deductions) / 100,
     arrears: Math.round(arrears * 100) / 100,
   };
 }
@@ -159,7 +167,7 @@ export async function initiatePayment(
 
     logger.info('Payment fees calculated', {
       amount: data.amount,
-      platformFee: fees.platformFee,
+      tenantFee: fees.tenantFee,
       total: fees.total,
       arrears: fees.arrears,
     });
@@ -203,8 +211,9 @@ export async function initiatePayment(
         agentId: data.assetId, // user.id from users collection document
         agentName: data.assetName || 'Unknown',
         paymentType: 'rent',
-        platformFee: fees.platformFee,
+        tenantFee: fees.tenantFee,
         totalAmount: fees.total,
+        netPayout: fees.netPayout,
       },
     });
 
