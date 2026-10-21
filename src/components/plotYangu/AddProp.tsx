@@ -41,7 +41,8 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     address: '',
     description: '',
     agentCommissionRate: 0,
-    maxUnits: 1
+    maxUnits: 1,
+    billingMode: 'full'
   });
 
   if (!isOpen) return null;
@@ -79,7 +80,8 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         address: '',
         description: '',
         agentCommissionRate: 0,
-        maxUnits: 1
+        maxUnits: 1,
+        billingMode: 'full'
       });
     } catch (err: any) {
       setError(err.message || 'Failed to create property');
@@ -171,6 +173,33 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 required
                 className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
               />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Billing Mode</label>
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                { value: 'full', title: 'Full billing', hint: 'Rent plus water, power and other charges' },
+                { value: 'rent_only', title: 'Rent only', hint: 'Rent-only invoices, generated in bulk for all tenants' }
+              ] as const).map(opt => (
+                <label
+                  key={opt.value}
+                  className={`cursor-pointer p-3 rounded-lg border-2 transition-colors ${
+                    formData.billingMode === opt.value ? 'border-cyan-500 bg-cyan-500/10' : 'border-gray-700 bg-gray-900/50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="billingMode"
+                    className="sr-only"
+                    checked={formData.billingMode === opt.value}
+                    onChange={() => setFormData(prev => ({ ...prev, billingMode: opt.value }))}
+                  />
+                  <div className="text-sm font-semibold text-white">{opt.title}</div>
+                  <div className="text-xs text-gray-400 mt-1">{opt.hint}</div>
+                </label>
+              ))}
             </div>
           </div>
 

@@ -99,7 +99,7 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
 
         {/* Property Details */}
         <div className="flex-shrink-0 px-6 py-4 bg-gray-800/30">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="bg-gray-700/30 p-3 rounded-lg">
               <p className="text-xs text-gray-400 mb-1">Owner</p>
               <p className="text-sm font-medium text-white">{asset.name}</p>
@@ -111,6 +111,10 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
             <div className="bg-gray-700/30 p-3 rounded-lg">
               <p className="text-xs text-gray-400 mb-1">Commission Rate</p>
               <p className="text-sm font-medium text-white">{property.agentCommissionRate}%</p>
+            </div>
+            <div className="bg-gray-700/30 p-3 rounded-lg">
+              <p className="text-xs text-gray-400 mb-1">Billing</p>
+              <p className="text-sm font-medium text-white">{property.billingMode === 'rent_only' ? 'Rent only' : 'Full billing'}</p>
             </div>
           </div>
           {property.description && (

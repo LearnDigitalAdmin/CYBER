@@ -734,6 +734,9 @@ const PropertiesListModal = ({
                   <div>
                     <h4 className="font-medium text-white">{property.name}</h4>
                     <p className="text-sm text-gray-400">{property.address || 'No address'}</p>
+                    {property.billingMode === 'rent_only' && (
+                      <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">Rent only</span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-400">Max Units</p>

@@ -61,9 +61,28 @@ export interface Property {
   image?: string;
   agentCommissionRate: number;
   maxUnits: number;
+  /** 'rent_only': invoices are rent-only (no water/power metering) and can be bulk-generated. 'full': itemised billing. Matches Plot Yangu. */
+  billingMode?: BillingMode;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+export type BillingMode = 'rent_only' | 'full';
+
+export const normalizeBillingMode = (v: unknown): BillingMode => (v === 'rent_only' ? 'rent_only' : 'full');
+
+/**
+ * Fields Plot Yangu's sync layer needs on every document Desk writes:
+ *  - lastSyncTime: the app's download query orders by it, so documents without it are never returned
+ *  - lastModified: the app's "is the cloud copy newer?" check reads it
+ *  - origin: 'desk' marks the document as Desk-created, so the app never silently overwrites it with an unrelated local record that reused its ID
+ */
+const syncStamp = () => ({
+  lastSyncTime: Timestamp.now(),
+  lastModified: new Date().toISOString(),
+});
+export const deskOriginStamp = () => ({ origin: 'desk' as const, ...syncStamp() });
+export const deskUpdateStamp = () => syncStamp();
 
 
 export interface PropertyInput {
@@ -75,6 +94,7 @@ export interface PropertyInput {
   image?: string;
   agentCommissionRate?: number;
   maxUnits?: number;
+  billingMode?: BillingMode;
 }
 
 export interface Tenant {
@@ -300,8 +320,11 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         image: propertyData.image || '',
         agentCommissionRate: propertyData.agentCommissionRate || 0,
         maxUnits: propertyData.maxUnits || 1,
+        billingMode: normalizeBillingMode(propertyData.billingMode),
+        isRestricted: false,
         createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
+        ...deskOriginStamp()
       };
       
       await setDoc(propertyRef, property);
@@ -324,7 +347,9 @@ public async getNextInvoiceId(userId: string): Promise<number> {
       
       await updateDoc(propertyRef, {
         ...updates,
-        updatedAt: Timestamp.now()
+        ...(updates.billingMode !== undefined ? { billingMode: normalizeBillingMode(updates.billingMode) } : {}),
+        updatedAt: Timestamp.now(),
+        ...deskUpdateStamp()
       });
     } catch (error) {
       console.error('Error updating property:', error);
@@ -338,6 +363,12 @@ public async getNextInvoiceId(userId: string): Promise<number> {
   async createTenant(tenantData: TenantInput): Promise<Tenant> {
     try {
       const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
+
+      // The tenant ID is the National ID. Never silently overwrite an existing tenant document that reuses it.
+      const existing = await getDoc(tenantRef);
+      if (existing.exists()) {
+        throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
+      }
       
       const tenant = {
         id: tenantData.id,
@@ -354,15 +385,18 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         leaseStart: tenantData.leaseStart || null,
         leaseEnd: tenantData.leaseEnd || null,
         isActive: true,
+        isRestricted: false,
         createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
+        ...deskOriginStamp()
       };
       
       await setDoc(tenantRef, tenant);
       
       return tenant as Tenant;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating tenant:', error);
+      if (typeof error?.message === 'string' && error.message.includes('already exists')) throw error;
       throw new Error('Failed to create tenant. Please try again.');
     }
   }
@@ -376,7 +410,8 @@ public async getNextInvoiceId(userId: string): Promise<number> {
       
       await updateDoc(tenantRef, {
         ...updates,
-        updatedAt: Timestamp.now()
+        updatedAt: Timestamp.now(),
+        ...deskUpdateStamp()
       });
     } catch (error) {
       console.error('Error updating tenant:', error);
@@ -397,6 +432,14 @@ public async getNextInvoiceId(userId: string): Promise<number> {
       console.error('Error fetching properties:', error);
       return [];
     }
+  }
+
+  /**
+   * Tenant IDs that already have an invoice for the given billing month (single-field query, no composite index).
+   */
+  async getInvoicedTenantIdsForMonth(userId: string, billingMonth: string): Promise<Set<number>> {
+    const snap = await getDocs(query(collection(db, 'users', userId, 'invoices'), where('billingMonth', '==', billingMonth)));
+    return new Set(snap.docs.map(d => Number(d.data().tenantId)));
   }
 
   /**

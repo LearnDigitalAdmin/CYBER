@@ -3,10 +3,13 @@ import {
   ChevronLeft, ChevronRight, Check, Calculator, Calendar, 
   Zap, Droplets, FileText, X, AlertCircle, Info, Loader2 
 } from 'lucide-react';
-import { assetsService, type Asset, type Property, type Tenant } from '../../services/Assets';
+import { assetsService, deskOriginStamp, normalizeBillingMode, type Asset, type Property, type Tenant } from '../../services/Assets';
 import { Timestamp, setDoc, doc } from 'firebase/firestore';
 import { PaymentSuccessHandler } from '../../services/PaymentsSuccess';
 import { db } from '../../services/firebaseService';
+
+/** Sentinel tenant selection meaning "one rent invoice per active tenant in the property" (mirrors Plot Yangu). */
+const ALL_TENANTS_ID = -1;
 
 interface InvoiceInput {
   propertyId: number;
@@ -81,6 +84,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
   const [properties, setProperties] = useState<Property[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [, setTenant] = useState<Tenant | null>(null);
   const [property, setProperty] = useState<Property | null>(null);
@@ -110,14 +114,39 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
     dueDate: ''
   });
 
-  const steps = [
-    { title: 'Property & Tenant', icon: FileText },
-    { title: 'Rent Details', icon: FileText },
-    { title: 'Water Billing', icon: Droplets },
-    { title: 'Power Billing', icon: Zap },
-    { title: 'Other Charges', icon: Calculator },
-    { title: 'Summary', icon: Check }
+  // Bulk mode ("All Tenants") skips per-tenant rent entry and utility metering.
+  // Rent-only properties never bill water/power, so those steps are dropped for them too.
+  const isBulkMode = formData.tenantId === ALL_TENANTS_ID;
+  const isRentOnlyProperty = normalizeBillingMode(properties.find(p => p.id === formData.propertyId)?.billingMode) === 'rent_only';
+
+  type StepKey = 'property' | 'rent' | 'water' | 'power' | 'other' | 'summary';
+  const allStepDefs: { key: StepKey; title: string; icon: any }[] = [
+    { key: 'property', title: 'Property & Tenant', icon: FileText },
+    { key: 'rent', title: 'Rent Details', icon: FileText },
+    { key: 'water', title: 'Water Billing', icon: Droplets },
+    { key: 'power', title: 'Power Billing', icon: Zap },
+    { key: 'other', title: 'Other Charges', icon: Calculator },
+    { key: 'summary', title: 'Summary', icon: Check }
   ];
+  const steps = allStepDefs.filter(step => {
+    if (isBulkMode) return step.key === 'property' || step.key === 'other' || step.key === 'summary';
+    if (isRentOnlyProperty) return step.key !== 'water' && step.key !== 'power';
+    return true;
+  });
+  const currentStepKey: StepKey = (steps[currentStep] || steps[0]).key;
+
+  // Keep the step index in range if the mode changes on step 0
+  useEffect(() => {
+    if (currentStep > steps.length - 1) setCurrentStep(steps.length - 1);
+  }, [steps.length, currentStep]);
+
+  // A rent-only property has nothing to pick per tenant: it is always "All Tenants"
+  useEffect(() => {
+    if (isRentOnlyProperty && formData.tenantId !== ALL_TENANTS_ID) {
+      setFormData(prev => ({ ...prev, tenantId: ALL_TENANTS_ID, tenantName: '', tenantEmail: '', tenantPhone: '' }));
+      setTenant(null);
+    }
+  }, [isRentOnlyProperty]);
 
   useEffect(() => {
     if (isOpen) {
@@ -198,29 +227,29 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
   const validateCurrentStep = (): boolean => {
     const newErrors: Record<string, string> = {};
     
-    switch (currentStep) {
-      case 0:
+    switch (currentStepKey) {
+      case 'property':
         if (!formData.propertyId) newErrors.propertyId = 'Please select a property';
         if (!formData.tenantId) newErrors.tenantId = 'Please select a tenant';
         if (!formData.billingMonth) newErrors.billingMonth = 'Please select billing month';
         break;
-      case 1:
+      case 'rent':
         if (formData.rentAmount <= 0) newErrors.rentAmount = 'Rent amount must be greater than 0';
         break;
-      case 2:
+      case 'water':
         if (formData.waterCurrentReading < formData.waterPreviousReading) {
           newErrors.waterCurrentReading = 'Current reading cannot be less than previous reading';
         }
         break;
-      case 3:
+      case 'power':
         if (formData.includePower && formData.powerCurrentReading < formData.powerPreviousReading) {
           newErrors.powerCurrentReading = 'Current reading cannot be less than previous reading';
         }
         break;
-      case 4:
+      case 'other':
         if (formData.otherCharges < 0) newErrors.otherCharges = 'Other charges cannot be negative';
         break;
-      case 5:
+      case 'summary':
         if (!formData.dueDate) newErrors.dueDate = 'Please select a due date';
         break;
     }
@@ -248,125 +277,218 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
     }
   };
 
+  /**
+   * Builds, renders the PDF for and saves ONE invoice. Shared by the single and bulk paths so every
+   * invoice Desk writes has exactly the same shape Plot Yangu and its notification trigger expect:
+   *  - localId === id === the Firestore document ID (the trigger writes its flags back using it)
+   *  - pdfStatus 'pending' | 'failed' (the app uses 'pending' | 'paid')
+   *  - lastSyncTime / lastModified / origin stamps so the app downloads it and never overwrites it
+   */
+  const saveInvoiceDoc = async (input: {
+    tenantId: number;
+    tenantName: string;
+    tenantEmail: string;
+    tenantPhone: string;
+    rentAmount: number;
+    includeUtilities: boolean;
+    otherCharges: number;
+    otherChargesDescription: string;
+  }) => {
+    const waterAmount = input.includeUtilities ? calculateTotals().waterAmount : 0;
+    const powerAmount = input.includeUtilities ? calculateTotals().powerAmount : 0;
+    const totalAmount = input.rentAmount + waterAmount + powerAmount + input.otherCharges;
+
+    const invoiceNumber = `INV-${Date.now()}`;
+    const id = await assetsService.getNextInvoiceId(asset.id);
+
+    const invoiceDataWithoutPDF = {
+      id,
+      invoiceNumber,
+      tenantId: input.tenantId,
+      tenantName: input.tenantName || "",
+      tenantEmail: input.tenantEmail || "",
+      tenantPhone: input.tenantPhone || "",
+      propertyId: formData.propertyId,
+      propertyName: formData.propertyName || property?.name || "",
+      userId: asset.id,
+      assetId: asset.id,
+      localId: id,
+      billingMonth: formData.billingMonth,
+      rentAmount: input.rentAmount,
+      waterCurrentReading: input.includeUtilities ? formData.waterCurrentReading : 0,
+      waterPreviousReading: input.includeUtilities ? formData.waterPreviousReading : 0,
+      waterStandingFee: input.includeUtilities && formData.includeWaterStanding ? formData.waterStandingFee : 0,
+      waterUnitPrice: input.includeUtilities ? formData.waterUnitPrice : 0,
+      waterAmount,
+      powerCurrentReading: input.includeUtilities && formData.includePower ? formData.powerCurrentReading : 0,
+      powerPreviousReading: input.includeUtilities && formData.includePower ? formData.powerPreviousReading : 0,
+      powerUnitPrice: input.includeUtilities && formData.includePower ? formData.powerUnitPrice : 0,
+      powerAmount,
+      otherCharges: input.otherCharges,
+      otherChargesDescription: input.otherChargesDescription,
+      totalAmount,
+      amountPaid: 0,
+      arrears: 0,
+      isPaid: false,
+      pdfStatus: "pending",
+      pdfUrl: "",
+      dueDate: formData.dueDate,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+      ...deskOriginStamp()
+    };
+
+    const companyInfo = {
+      name: asset.name || 'Plot Yangu',
+      address: 'Nairobi, Kenya',
+      phone: '0791286165',
+      email: 'info@samuhia.co.ke',
+      website: 'https://samuhia.co.ke'
+    };
+
+    let pdfUrl = "";
+    try {
+      if (property) {
+        pdfUrl = await PaymentSuccessHandler.generateAndUploadInvoicePDF(
+          invoiceDataWithoutPDF as any,
+          property,
+          companyInfo,
+          invoiceNumber
+        );
+      }
+    } catch (pdfError) {
+      console.error('Error generating PDF:', pdfError);
+      pdfUrl = "";
+    }
+
+    const finalInvoiceData = {
+      ...invoiceDataWithoutPDF,
+      pdfUrl,
+      pdfStatus: pdfUrl ? "pending" : "failed"
+    };
+
+    const invoiceRef = doc(db, "users", asset.id, "invoices", id.toString());
+    await setDoc(invoiceRef, finalInvoiceData);
+    return id;
+  };
+
+  const resetForm = () => {
+    setCurrentStep(0);
+    setFormData({
+      propertyId: 0,
+      tenantId: 0,
+      tenantName: '',
+      tenantEmail: '',
+      tenantPhone: '',
+      propertyName: '',
+      userId: asset.id,
+      billingMonth: new Date().toISOString().slice(0, 7),
+      rentAmount: 0,
+      standingFees: 0,
+      waterCurrentReading: 0,
+      waterPreviousReading: 0,
+      waterStandingFee: 0,
+      waterUnitPrice: 0,
+      includeWaterStanding: false,
+      powerCurrentReading: 0,
+      powerPreviousReading: 0,
+      powerUnitPrice: 0,
+      includePower: false,
+      otherCharges: 0,
+      otherChargesDescription: '',
+      dueDate: ''
+    });
+    setTenant(null);
+    setProperty(null);
+    setProgress(null);
+  };
+
   const handleSave = async () => {
     if (!validateCurrentStep()) return;
-    
+
     setLoading(true);
     try {
-      const totals = calculateTotals();
-      
-      // Generate invoice number and get next ID
-      const invoiceNumber = `INV-${Date.now()}`;
-      const id = await assetsService.getNextInvoiceId(asset.id);
-
-      // Create invoice data object FIRST (without PDF URL)
-      const invoiceDataWithoutPDF = {
-        id,
-        invoiceNumber,
-        tenantId: formData.tenantId,
-        tenantName: formData.tenantName || "",
-        tenantEmail: formData.tenantEmail || "",
-        tenantPhone: formData.tenantPhone || "",
-        propertyId: formData.propertyId,
-        propertyName: formData.propertyName || "",
-        userId: asset.id,
-        assetId: asset.id,
-        localId: Date.now(),
-        billingMonth: formData.billingMonth,
-        rentAmount: formData.rentAmount,
-        waterCurrentReading: formData.waterCurrentReading,
-        waterPreviousReading: formData.waterPreviousReading,
-        waterStandingFee: formData.includeWaterStanding ? formData.waterStandingFee : 0,
-        waterUnitPrice: formData.waterUnitPrice,
-        waterAmount: totals.waterAmount,
-        powerCurrentReading: formData.includePower ? formData.powerCurrentReading : 0,
-        powerPreviousReading: formData.includePower ? formData.powerPreviousReading : 0,
-        powerUnitPrice: formData.includePower ? formData.powerUnitPrice : 0,
-        powerAmount: totals.powerAmount,
-        otherCharges: formData.otherCharges,
-        otherChargesDescription: formData.otherChargesDescription,
-        totalAmount: totals.totalAmount,
-        amountPaid: 0,
-        arrears: 0,
-        isPaid: false,
-        pdfStatus: "generating",
-        pdfUrl: "",
-        dueDate: formData.dueDate,
-        lastModified: new Date().toISOString(),
-        lastSyncTime: Timestamp.now(),
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
-      };
-
-      // Get company info for PDF generation
-      const companyInfo = {
-        name: asset.name || 'Plot Yangu',
-        address: 'Nairobi, Kenya',
-        phone: '0791286165',
-        email: 'info@samuhia.co.ke',
-        website: 'https://samuhia.co.ke'
-      };
-
-      // Generate and upload PDF
-      let pdfUrl = "";
-      try {
-        if (property) {
-          pdfUrl = await PaymentSuccessHandler.generateAndUploadInvoicePDF(
-            invoiceDataWithoutPDF as any,
-            property,
-            companyInfo,
-            invoiceNumber
-          );
+      if (isBulkMode) {
+        // Bulk path: one rent-only invoice per active tenant, each forking that tenant's OWN rent.
+        // otherCharges (if any) applies flatly to every invoice; water/power are never included.
+        const activeTenants = tenants.filter(t => t.isActive !== false);
+        if (activeTenants.length === 0) {
+          setErrors({ general: 'This property has no active tenants to invoice.' });
+          return;
         }
-      } catch (pdfError) {
-        console.error('Error generating PDF:', pdfError);
-        // Continue without PDF - we'll mark it as failed
-        pdfUrl = "";
+
+        const alreadyInvoiced = await assetsService.getInvoicedTenantIdsForMonth(asset.id, formData.billingMonth);
+        const toInvoice = activeTenants.filter(t => !alreadyInvoiced.has(Number(t.id)));
+        const skipped = activeTenants.length - toInvoice.length;
+
+        if (toInvoice.length === 0) {
+          setErrors({ general: `No invoices created: all ${skipped} active tenant(s) already have an invoice for this billing month.` });
+          return;
+        }
+
+        let created = 0;
+        const failed: string[] = [];
+        setProgress({ done: 0, total: toInvoice.length });
+
+        // Sequential on purpose: each invoice reads the next free ID, so they must not race each other.
+        for (const tenant of toInvoice) {
+          try {
+            await saveInvoiceDoc({
+              tenantId: Number(tenant.id),
+              tenantName: tenant.name,
+              tenantEmail: tenant.email || '',
+              tenantPhone: tenant.phone || '',
+              rentAmount: tenant.rentAmount || 0,
+              includeUtilities: false,
+              otherCharges: formData.otherCharges,
+              otherChargesDescription: formData.otherChargesDescription
+            });
+            created++;
+          } catch (err) {
+            console.error(`Bulk invoice failed for tenant ${tenant.id}:`, err);
+            failed.push(tenant.name);
+          }
+          setProgress({ done: created + failed.length, total: toInvoice.length });
+        }
+
+        if (created === 0) {
+          setErrors({ general: 'Failed to create invoices. Please try again.' });
+          return;
+        }
+        if (failed.length > 0 || skipped > 0) {
+          const notes = [
+            skipped > 0 ? `${skipped} already invoiced for this month` : '',
+            failed.length > 0 ? `${failed.length} failed (${failed.join(', ')})` : ''
+          ].filter(Boolean).join('; ');
+          alert(`Created ${created} invoice(s). Skipped: ${notes}.`);
+        }
+
+        onSuccess();
+        onClose();
+        resetForm();
+        return;
       }
 
-      // Create final invoice data with PDF URL
-      const finalInvoiceData = {
-        ...invoiceDataWithoutPDF,
-        pdfUrl: pdfUrl,
-        pdfStatus: pdfUrl ? "completed" : "failed"
-      };
-
-      // Save to Firestore
-      const invoiceRef = doc(db, "users", asset.id, "invoices", id.toString());
-      await setDoc(invoiceRef, finalInvoiceData);
+      await saveInvoiceDoc({
+        tenantId: Number(formData.tenantId),
+        tenantName: formData.tenantName || '',
+        tenantEmail: formData.tenantEmail || '',
+        tenantPhone: formData.tenantPhone || '',
+        rentAmount: formData.rentAmount,
+        includeUtilities: !isRentOnlyProperty,
+        otherCharges: formData.otherCharges,
+        otherChargesDescription: formData.otherChargesDescription
+      });
 
       onSuccess();
       onClose();
-      
-      // Reset form
-      setCurrentStep(0);
-      setFormData({
-        propertyId: 0,
-        tenantId: 0,
-        userId: asset.id,
-        billingMonth: new Date().toISOString().slice(0, 7),
-        rentAmount: 0,
-        standingFees: 0,
-        waterCurrentReading: 0,
-        waterPreviousReading: 0,
-        waterStandingFee: 0,
-        waterUnitPrice: 0,
-        includeWaterStanding: false,
-        powerCurrentReading: 0,
-        powerPreviousReading: 0,
-        powerUnitPrice: 0,
-        includePower: false,
-        otherCharges: 0,
-        otherChargesDescription: '',
-        dueDate: ''
-      });
-      setTenant(null);
-      setProperty(null);
+      resetForm();
     } catch (error) {
       console.error('Error saving invoice:', error);
       setErrors({ general: 'Failed to create invoice. Please try again.' });
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -374,11 +496,12 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
 
   const selectedProperty = properties.find(p => p.id === formData.propertyId);
   const selectedTenant = tenants.find(t => t.id === formData.tenantId);
+  const activeTenantCount = tenants.filter(t => t.isActive !== false).length;
   const totals = calculateTotals();
 
   const renderStep = () => {
-    switch (currentStep) {
-      case 0:
+    switch (currentStepKey) {
+      case 'property':
         return (
           <div className="space-y-4">
             <div>
@@ -421,7 +544,17 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 value={formData.tenantId || ''}
                 onChange={(e) => {
                   const selectedId = e.target.value;
-                  updateFormData('tenantId', selectedId);
+
+                  if (selectedId === String(ALL_TENANTS_ID)) {
+                    updateFormData('tenantId', ALL_TENANTS_ID);
+                    updateFormData('tenantName', '');
+                    updateFormData('tenantEmail', '');
+                    updateFormData('tenantPhone', '');
+                    setTenant(null);
+                    return;
+                  }
+
+                  updateFormData('tenantId', Number(selectedId));
 
                   const selectedTenant = tenants.find(t => t.id.toString() === selectedId);
                   setTenant(selectedTenant || null);
@@ -435,13 +568,14 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                     updateFormData('standingFees', selectedTenant.standingFees || 0);
                   }
                 }}
-                disabled={!formData.propertyId}
+                disabled={!formData.propertyId || isRentOnlyProperty}
                 className={`w-full px-4 py-3 bg-gray-900/50 border ${
                   errors.tenantId ? 'border-red-500' : 'border-gray-700'
                 } rounded-lg focus:ring-2 focus:ring-cyan-500 text-white`}
               >
                 <option value="">Select a tenant</option>
-                {tenants.map(tenant => (
+                <option value={ALL_TENANTS_ID}>All Tenants (one rent invoice each)</option>
+                {!isRentOnlyProperty && tenants.map(tenant => (
                   <option key={tenant.id} value={tenant.id}>
                     {tenant.name} {tenant.unitNumber && `(Unit ${tenant.unitNumber})`}
                   </option>
@@ -449,6 +583,12 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
               </select>
               {errors.tenantId && (
                 <p className="text-red-400 text-sm mt-1">{errors.tenantId}</p>
+              )}
+              {isRentOnlyProperty && (
+                <p className="text-cyan-400 text-xs mt-2">This is a rent-only property: an invoice is created for every active tenant using their own rent.</p>
+              )}
+              {isBulkMode && !isRentOnlyProperty && (
+                <p className="text-gray-500 text-xs mt-2">Each active tenant is invoiced their own rent. Water and power are not included in bulk invoices.</p>
               )}
             </div>
 
@@ -463,18 +603,18 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
               {errors.billingMonth && <p className="text-red-400 text-sm mt-1">{errors.billingMonth}</p>}
             </div>
 
-            {selectedProperty && selectedTenant && (
+            {selectedProperty && (selectedTenant || isBulkMode) && (
               <div className="bg-cyan-500/10 p-4 rounded-lg border border-cyan-500/30">
                 <h4 className="font-medium text-cyan-400 mb-2">Selected Details</h4>
                 <p className="text-cyan-300 text-sm">Property: {selectedProperty.name}</p>
-                <p className="text-cyan-300 text-sm">Tenant: {selectedTenant.name}</p>
+                <p className="text-cyan-300 text-sm">Tenant: {isBulkMode ? `All active tenants (${activeTenantCount})` : selectedTenant?.name}</p>
                 <p className="text-cyan-300 text-sm">Month: {new Date(formData.billingMonth).toLocaleString('default', { month: 'long', year: 'numeric' })}</p>
               </div>
             )}
           </div>
         );
 
-      case 1:
+      case 'rent':
         return (
           <div className="space-y-4">
             <div>
@@ -517,7 +657,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
           </div>
         );
 
-      case 2:
+      case 'water':
         return (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
@@ -596,7 +736,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
           </div>
         );
 
-      case 3:
+      case 'power':
         return (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
@@ -673,7 +813,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
           </div>
         );
 
-      case 4:
+      case 'other':
         return (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
@@ -730,7 +870,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
           </div>
         );
 
-      case 5:
+      case 'summary':
         return (
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
@@ -749,7 +889,7 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Tenant:</span>
-                  <span className="font-medium text-white">{selectedTenant?.name}</span>
+                  <span className="font-medium text-white">{isBulkMode ? `All active tenants (${activeTenantCount})` : selectedTenant?.name}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Billing Month:</span>
@@ -765,10 +905,17 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 <h4 className="font-medium text-white">Charges Breakdown</h4>
               </div>
               <div className="p-4 space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Monthly Rent:</span>
-                  <span className="font-medium text-white">KES {formData.rentAmount.toLocaleString()}</span>
-                </div>
+                {isBulkMode ? (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Monthly Rent:</span>
+                    <span className="font-medium text-white">Each tenant's own rent</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Monthly Rent:</span>
+                    <span className="font-medium text-white">KES {formData.rentAmount.toLocaleString()}</span>
+                  </div>
+                )}
                 
                 {totals.waterAmount > 0 && (
                   <div>
@@ -809,12 +956,14 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                   </div>
                 )}
 
-                <div className="border-t border-gray-700 pt-3">
-                  <div className="flex justify-between text-lg font-semibold">
-                    <span className="text-white">Total Amount:</span>
-                    <span className="text-cyan-400">KES {totals.totalAmount.toLocaleString()}</span>
+                {!isBulkMode && (
+                  <div className="border-t border-gray-700 pt-3">
+                    <div className="flex justify-between text-lg font-semibold">
+                      <span className="text-white">Total Amount:</span>
+                      <span className="text-cyan-400">KES {totals.totalAmount.toLocaleString()}</span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
@@ -836,9 +985,11 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
               <div className="flex items-start gap-2">
                 <Info className="w-5 h-5 text-cyan-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <h4 className="font-medium text-cyan-400 mb-1">Ready to Create Invoice</h4>
+                  <h4 className="font-medium text-cyan-400 mb-1">Ready to Create {isBulkMode ? 'Invoices' : 'Invoice'}</h4>
                   <p className="text-cyan-300 text-sm">
-                    Review all details above. Once saved, the invoice will be created for the tenant.
+                    {isBulkMode
+                      ? 'One invoice is created for every active tenant. Tenants already invoiced for this month are skipped.'
+                      : 'Review all details above. Once saved, the invoice will be created for the tenant.'}
                   </p>
                 </div>
               </div>
@@ -940,10 +1091,10 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Creating...
+                    {progress ? `Creating ${progress.done}/${progress.total}...` : 'Creating...'}
                   </>
                 ) : (
-                  'Create Invoice'
+                  isBulkMode ? 'Create Invoices' : 'Create Invoice'
                 )}
               </button>
             ) : (
