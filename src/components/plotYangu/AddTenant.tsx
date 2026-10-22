@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, AlertCircle, Loader2, UserPlus } from 'lucide-react';
 import { assetsService, type Asset, type Property, type TenantInput } from '../../services/Assets';
+import { checkSafaricomPhone } from '../../utils/safaricom';
 
 type LimitNumber = number | -1;
 
@@ -81,6 +82,13 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
       return;
     }
 
+    // Phone is optional here, but when given it must be a Safaricom number
+    const phoneCheck = checkSafaricomPhone(formData.phone);
+    if (formData.phone && !phoneCheck.ok) {
+      setError(phoneCheck.message);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -105,7 +113,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
         throw new Error(`Property has reached maximum ${selectedProperty.maxUnits} units`);
       }
 
-      await assetsService.createTenant(formData);
+      await assetsService.createTenant({ ...formData, phone: phoneCheck.ok ? phoneCheck.local : formData.phone });
       onSuccess();
       onClose();
       
@@ -195,11 +203,12 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">Phone Number</label>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Phone Number (Safaricom only) *</label>
               <input
                 type="tel"
                 value={formData.phone}
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                required
                 className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
                 placeholder="0712345678"
               />

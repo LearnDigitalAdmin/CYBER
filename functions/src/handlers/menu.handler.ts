@@ -44,10 +44,10 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
 
       case 4: // Manage My Plot
         logger.info('Showing PMS links');
-        const label = session.language === 'en' ? 'Manage Your Property' : 'Simamia Kipande Chako';
+        const label = session.language === 'en' ? 'Manage Your Property' : 'Simamia Ploti Yako';
         const message = session.language === 'en'
-          ? `${label}\n\n📱 Mobile App (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Web Portal: https://pms.samuhia.co.ke\n\n💻 Desk Portal: https://cyber.samuhia.co.ke`
-          : `${label}\n\n📱 Programu ya Simu (Android): https://play.google.com/store/apps/details?id=co.ke.cogvana.pms\n\n🌐 Portali ya Web: https://pms.samuhia.co.ke\n\n💻 Portali ya Desk: https://cyber.samuhia.co.ke`;
+          ? `${label}\n\nCall Us On: 0791286165 or 0111538613\n\n📱 Mobile App: https://plot.samuhia.co.ke\n\n🌐 Web Portal: https://plot.samuhia.co.ke\n\n💻 Desk Portal: https://desk.samuhia.co.ke`
+          : `${label}\n\nTupigie Simu Kupitia: 0791286165 au 0111538613\n\n📱 Programu ya Simu: https://plot.samuhia.co.ke\n\n🌐 Portali ya Web: https://plot.samuhia.co.ke\n\n💻 Portali ya Desk: https://desk.samuhia.co.ke`;
         return message + '\n\n' + (session.language === 'en' ? 'Reply 0 to return to Main Menu' : 'Jibu 0 kurudi kwenye Menuu Kuu');
 
       case 5: // Exit

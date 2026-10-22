@@ -2,6 +2,7 @@ import { X, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../../context/authContext";
 import { assetsService } from "../../services/Assets";
+import { checkSafaricomPhone } from '../../utils/safaricom';
 
 // Add Asset Modal Component
 const AddAssetModal = ({ 
@@ -67,6 +68,12 @@ const AddAssetModal = ({
       return;
     }
 
+    const phoneCheck = checkSafaricomPhone(formData.phone);
+    if (!phoneCheck.ok) {
+      setError(phoneCheck.message);
+      return;
+    }
+
     if (formData.id.length < 5) {
       setError('Please enter a valid National ID');
       return;
@@ -80,7 +87,7 @@ const AddAssetModal = ({
     setLoading(true);
 
     try {
-      await assetsService.createAsset(formData, firestoreUser?.pId || '');
+      await assetsService.createAsset({ ...formData, phone: phoneCheck.local }, firestoreUser?.pId || '');
       onSuccess();
       onClose();
     } catch (err: any) {
@@ -162,7 +169,7 @@ const AddAssetModal = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Phone Number *</label>
+                <label className="block text-sm font-medium text-gray-400 mb-2">Phone Number * (Safaricom only)</label>
                 <input
                   type="tel"
                   name="phone"
