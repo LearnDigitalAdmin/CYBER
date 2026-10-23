@@ -6,16 +6,16 @@ Agents set customers up, keep their records and messages in order, answer suppor
 
 ## Key pages
 
-- [Home](https://cyber.samuhia.co.ke/): what Samuhia Desk is
-- [Explore](https://cyber.samuhia.co.ke/explore): who an agent supports, the tools on the desk, how agents earn, how to start, and the rules that protect customers
+- [Home](https://desk.samuhia.co.ke/): what Samuhia Desk is
+- [Explore](https://desk.samuhia.co.ke/explore): who an agent supports, the tools on the desk, how agents earn, how to start, and the rules that protect customers
 
 ## Machine-readable detail
 
-- [Full brief for LLMs](https://cyber.samuhia.co.ke/llms-full.txt): products supported, what agents do, service tickets, and notes for AI assistants
-- [Sitemap](https://cyber.samuhia.co.ke/sitemap.xml)
+- [Full brief for LLMs](https://desk.samuhia.co.ke/llms-full.txt): products supported, what agents do, service tickets, and notes for AI assistants
+- [Sitemap](https://desk.samuhia.co.ke/sitemap.xml)
 
 ## Optional
 
 - [Samuhia (parent company)](https://samuhia.co.ke)
 - [Contact](https://payments.samuhia.co.ke/contact)
-- [Sign in](https://cyber.samuhia.co.ke/signin): for existing agents
+- [Sign in](https://desk.samuhia.co.ke/signin): for existing agents

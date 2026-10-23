@@ -1,4 +1,4 @@
-# Samuhia Desk — https://cyber.samuhia.co.ke
+# Samuhia Desk — https://desk.samuhia.co.ke
 User-agent: *
 Allow: /
 # Signed-in app areas (also sent with X-Robots-Tag: noindex)
@@ -9,7 +9,7 @@ Disallow: /*?session=
 Disallow: /*?auth=
 
 # Machine-readable summaries for AI assistants
-# https://cyber.samuhia.co.ke/llms.txt
-# https://cyber.samuhia.co.ke/llms-full.txt
+# https://desk.samuhia.co.ke/llms.txt
+# https://desk.samuhia.co.ke/llms-full.txt
 
-Sitemap: https://cyber.samuhia.co.ke/sitemap.xml
+Sitemap: https://desk.samuhia.co.ke/sitemap.xml

@@ -13,9 +13,9 @@ export default function SEO({
   title,
   description,
   keywords = '',
-  ogImage = 'https://cyber.samuhia.co.ke/og-image.png',
+  ogImage = 'https://desk.samuhia.co.ke/og-image.png',
   ogType = 'website',
-  canonicalUrl = `https://cyber.samuhia.co.ke${window.location.pathname}`
+  canonicalUrl = `https://desk.samuhia.co.ke${window.location.pathname}`
 }: SEOProps) {
   useEffect(() => {
     // Set document title

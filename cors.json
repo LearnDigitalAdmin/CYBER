@@ -1,12 +1,15 @@
 [
   {
     "origin": [
-      "https://cyber.cogvana.co.ke",
-      "https://cogvana.co.ke",
-      "https://www.cogvana.co.ke",
       "https://cyber.samuhia.co.ke",
       "https://samuhia.co.ke",
-      "https://www.samuhia.co.ke"
+      "https://www.samuhia.co.ke",
+      "https://plot.samuhia.co.ke",
+      "https://www.plot.samuhia.co.ke",
+      "https://desk.samuhia.co.ke",
+      "https://www.desk.samuhia.co.ke",
+      "https://chama.samuhia.co.ke",
+      "https://www.chama.samuhia.co.ke"
     ],
     "method": [
       "GET",

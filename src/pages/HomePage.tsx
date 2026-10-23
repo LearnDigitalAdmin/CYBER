@@ -26,7 +26,7 @@ export default function HomePage() {
           title="Samuhia Desk - Support Desk for Chamas, Schools and Landlords in Kenya"
           description="Samuhia Desk lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do."
           keywords="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, property management Kenya"
-          canonicalUrl="https://cyber.samuhia.co.ke/"
+          canonicalUrl="https://desk.samuhia.co.ke/"
         />
         
         {/* h-dvh follows the visible viewport (mobile URL bar, installed app), so nothing is cut off or scrolls */}

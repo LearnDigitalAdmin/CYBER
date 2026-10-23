@@ -160,7 +160,7 @@ export default function ExplorePage() {
         title="Explore Samuhia Desk - Support Chamas, Schools and Landlords in Kenya"
         description="See what a Samuhia Desk agent does for chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and how the agent earns."
         keywords="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, rent collection Kenya, earn as an agent Kenya"
-        canonicalUrl="https://cyber.samuhia.co.ke/explore"
+        canonicalUrl="https://desk.samuhia.co.ke/explore"
       />
 
       <div className="min-h-screen w-full bg-gradient-to-br from-slate-900 via-gray-900 to-black text-white flex flex-col overflow-x-hidden">

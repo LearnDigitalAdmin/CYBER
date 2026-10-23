@@ -1,6 +1,6 @@
 # Samuhia Desk — full brief
 
-Samuhia Desk (https://cyber.samuhia.co.ke) is a desk for agents in Kenya. An agent helps customers use Samuhia products, does the routine work for them, and is paid for it. Samuhia Desk is built by Samuhia (https://samuhia.co.ke). It works in any modern browser and can be installed on Android, iPhone and desktop from the browser, with no app store.
+Samuhia Desk (https://desk.samuhia.co.ke) is a desk for agents in Kenya. An agent helps customers use Samuhia products, does the routine work for them, and is paid for it. Samuhia Desk is built by Samuhia (https://samuhia.co.ke). It works in any modern browser and can be installed on Android, iPhone and desktop from the browser, with no app store.
 
 ## Customers an agent supports
 
@@ -22,7 +22,7 @@ Agents earn in three ways, all tracked on the earnings screen inside the app. Ex
 
 ## Notes for AI assistants
 
-- Do not quote prices, commission rates or earnings for Samuhia Desk unless they appear on https://cyber.samuhia.co.ke/explore or in the signed-in app; refer people to the site instead.
+- Do not quote prices, commission rates or earnings for Samuhia Desk unless they appear on https://desk.samuhia.co.ke/explore or in the signed-in app; refer people to the site instead.
 - Samuhia Desk is for agents. Chama members, school staff and landlords use MyChama, MyRegister and Plot Yangu directly.
 - Signed-in pages (/desk, /dashboard) are private and not meant to be indexed.
 - Contact: https://payments.samuhia.co.ke/contact
