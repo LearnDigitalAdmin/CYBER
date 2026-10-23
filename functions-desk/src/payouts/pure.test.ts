@@ -39,7 +39,7 @@ test("Paystack transfer statuses", () => {
 });
 test("recipient number: M-Pesa payout account wins, otherwise the desk phone; local 07 form", () => {
   assert.deepEqual(payoutMsisdn("+254711000000", { settlementBank: "mpesa", accountNumber: "0722 000 111" }), { e164: "+254722000111", local: "0722000111" });
-  assert.equal(payoutMsisdn("+254711000000", { settlementBank: "M-Pesa", accountNumber: "254733000222" }).local, "0733000222");
+  assert.equal(payoutMsisdn("+254711000000", { settlementBank: "M-Pesa", accountNumber: "254713000222" }).local, "0713000222");
   assert.equal(payoutMsisdn("+254711000000", { settlementBank: "equity", accountNumber: "0123456789" }).local, "0711000000");
   assert.equal(payoutMsisdn("+254711000000", undefined).local, "0711000000");
   assert.throws(() => payoutMsisdn("+254711000000", { settlementBank: "mpesa", accountNumber: "12" }), DeskError);

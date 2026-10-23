@@ -300,10 +300,13 @@ const AddInvoiceModal: React.FC<AddInvoiceModalProps> = ({
 
     const invoiceNumber = `INV-${Date.now()}`;
     const id = await assetsService.getNextInvoiceId(asset.id);
+    // The property's owner id travels with every invoice of that property.
+    const ownerId = await assetsService.ensurePropertyOwnerId(asset.id, formData.propertyId);
 
     const invoiceDataWithoutPDF = {
       id,
       invoiceNumber,
+      ownerId,
       tenantId: input.tenantId,
       tenantName: input.tenantName || "",
       tenantEmail: input.tenantEmail || "",

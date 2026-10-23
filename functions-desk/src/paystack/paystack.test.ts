@@ -10,7 +10,7 @@ test("phone numbers normalise to E.164", () => {
   assert.equal(maskPhone("+254712345678"), "+2547•• ••• 678");
 });
 test("bad phone numbers are rejected", () => {
-  for (const raw of ["", "0212345678", "12345", "+255712345678", "07123456789"])
+  for (const raw of ["", "0212345678", "12345", "+255712345678", "07123456789", "0733123456", "0750123456", "0100123456", "abc0712345678"])
     assert.throws(() => normalizeKenyaPhone(raw));
 });
 test("split keys are stable, order-independent and share-sensitive", () => {

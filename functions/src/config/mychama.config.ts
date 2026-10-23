@@ -112,20 +112,24 @@ export const mcPath = {
 export const FEES = {
   PAYSTACK_FEE_RATE: 0.015,
   PAYSTACK_FEE_CAP: 3000,
-  CONTRIBUTION_MARKUP_RATE: 0.005,
+  /** Plain contributions: no markup; the all-in transaction cost is a flat 1.7% (capped). */
+  CONTRIBUTION_MARKUP_RATE: 0,
+  CONTRIBUTION_TRANSACTION_RATE: 0.017,
+  /** Loan repayments: flat markup per plan, on top of Paystack's 1.5%. */
   LOAN_MARKUP_RATE: {
     free: null,
-    starter: 0.015,
-    basic: 0.011,
-    growth: 0.007,
-    max: 0.007,
+    starter: 0.008,
+    basic: 0.008,
+    growth: 0.0045,
+    max: 0.0025,
   } as Record<string, number | null>,
+  /** MGR collections: dynamic markup per plan, on top of Paystack's 1.5%. */
   MGR_PAYOUT_MARKUP_RATE: {
     free: null,
-    starter: 0.015,
-    basic: 0.011,
-    growth: 0.007,
-    max: 0.007,
+    starter: 0.007,
+    basic: 0.006,
+    growth: 0.004,
+    max: 0.002,
   } as Record<string, number | null>,
 } as const;
 

@@ -27,7 +27,7 @@ import {
   IntentPurpose,
   PaymentIntent,
 } from '../types/mychama.types';
-import { mainAccountChargeSubunits, normalizePhone } from './mychama.service';
+import { isSafaricomPhone, mainAccountChargeSubunits, normalizePhone } from './mychama.service';
 import { logger } from '../utils/logger';
 
 interface PaystackChargeResponse {
@@ -178,6 +178,7 @@ export async function initiateMyChamaPayment(params: {
   }
 
   const reference = buildReference(chamaId, target.purpose);
+  if (!isSafaricomPhone(phone)) throw new Error('Only Safaricom numbers are supported.');
   const normalized = normalizePhone(phone);
   const now = Date.now();
 

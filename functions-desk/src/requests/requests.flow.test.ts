@@ -199,13 +199,13 @@ test("updateRequest on a pms or desk request needs no write-back", async () => {
   assert.equal(((await col("requests").doc("p1").get()).data() as RequestDoc).writeBackPending, false);
 });
 test("createRequest: a desk asks COG-0000; validated, rate limited, audited; the top desk cannot ask itself", async () => {
-  await seedTop(); await seedAgent("5", { name: "Wanjiru", phone: "+254733000111" });
+  await seedTop(); await seedAgent("5", { name: "Wanjiru", phone: "+254713000111" });
   clock = 777;
   const { id } = await createRequest(deps, "5", { category: "other", subject: "Need help", message: "Customer dispute" });
   assert.match(id, /^desk_COG-0005_/);
   const r = (await col("requests").doc(id).get()).data() as RequestDoc;
   assert.equal(r.source, "desk"); assert.equal(r.entityCode, "COG-0005"); assert.deepEqual(r.targetDeskCodes, ["COG-0000"]); assert.equal(r.status, "new");
-  assert.equal(r.requesterName, "Wanjiru"); assert.equal(r.requesterPhone, "+254733000111"); assert.equal(r.createdAt, 777);
+  assert.equal(r.requesterName, "Wanjiru"); assert.equal(r.requesterPhone, "+254713000111"); assert.equal(r.createdAt, 777);
   assert.equal((await col("audit").where("action", "==", "request_created").get()).size, 1);
   assert.equal((await listRequests("top1", {})).requests.length, 1);
   await rejects(createRequest(deps, "5", { category: "bogus", subject: "s", message: "m" }), "invalid_argument");

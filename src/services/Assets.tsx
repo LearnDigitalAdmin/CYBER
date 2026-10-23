@@ -12,6 +12,7 @@ import {
   limit} from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functionsAfrica as functions } from './firebaseService';
+import { checkSafaricomPhone } from '../utils/safaricom';
 
 export interface CompanyInfo {
   name: string;
@@ -63,6 +64,10 @@ export interface Property {
   maxUnits: number;
   /** 'rent_only': invoices are rent-only (no water/power metering) and can be bulk-generated. 'full': itemised billing. Matches Plot Yangu. */
   billingMode?: BillingMode;
+  /** PYP-NNNN, allocated by the server (allocatePropertyOwnerId) when the property is created. */
+  ownerId?: string;
+  /** The owner's Safaricom number, stored as +2547XXXXXXXX. */
+  ownerPhone?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -95,6 +100,8 @@ export interface PropertyInput {
   agentCommissionRate?: number;
   maxUnits?: number;
   billingMode?: BillingMode;
+  /** REQUIRED when creating a property. Must be a Safaricom number. */
+  ownerPhone?: string;
 }
 
 export interface Tenant {
@@ -304,9 +311,17 @@ public async getNextInvoiceId(userId: string): Promise<number> {
    */
   async createProperty(propertyData: PropertyInput, pId: string): Promise<Property> {
     try {
+      const ownerCheck = checkSafaricomPhone(propertyData.ownerPhone);
+      if (!ownerCheck.ok) {
+        throw new Error(`Owner phone: ${ownerCheck.message}`);
+      }
+
       const propertyId = await this.getNextPropertyId(propertyData.userId);
       
       const propertyRef = doc(db, 'users', propertyData.userId, 'properties', propertyId.toString());
+
+      // Every property carries a unique PYP-NNNN owner id from the moment it exists in Firestore.
+      const ownerId = await this.allocateOwnerId(propertyData.userId, propertyId);
       
       const property = {
         id: propertyId,
@@ -321,6 +336,8 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         agentCommissionRate: propertyData.agentCommissionRate || 0,
         maxUnits: propertyData.maxUnits || 1,
         billingMode: normalizeBillingMode(propertyData.billingMode),
+        ownerId,
+        ownerPhone: ownerCheck.e164,
         isRestricted: false,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
@@ -332,10 +349,37 @@ public async getNextInvoiceId(userId: string): Promise<number> {
       console.log('Property created successfully:', property);
       
       return property as Property;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating property:', error);
+      if (typeof error?.message === 'string' && error.message.startsWith('Owner phone:')) throw error;
       throw new Error('Failed to create property. Please try again.');
     }
+  }
+
+  /** Asks the server for the next PYP-NNNN id. Idempotent per property, so a retry returns the same id. */
+  private async allocateOwnerId(userId: string, propertyId: number): Promise<string> {
+    const allocate = httpsCallable<{ userId: string; propertyId: number }, { ownerId: string }>(functions, 'allocatePropertyOwnerId');
+    const res = await allocate({ userId, propertyId });
+    const ownerId = res.data?.ownerId;
+    if (typeof ownerId !== 'string' || !/^PYP-\d{4,}$/.test(ownerId)) {
+      throw new Error('Could not allocate an owner ID. Please try again.');
+    }
+    return ownerId;
+  }
+
+  /**
+   * The PYP-NNNN owner id of a property. Properties created before owner ids existed get one the first time a tenant or
+   * invoice is added to them, so nothing created from now on is ever without it.
+   */
+  public async ensurePropertyOwnerId(userId: string, propertyId: number): Promise<string> {
+    const propertyRef = doc(db, 'users', userId, 'properties', propertyId.toString());
+    const snap = await getDoc(propertyRef);
+    const existing = snap.data()?.ownerId;
+    if (typeof existing === 'string' && /^PYP-\d{4,}$/.test(existing)) return existing;
+
+    const ownerId = await this.allocateOwnerId(userId, propertyId);
+    if (snap.exists()) await updateDoc(propertyRef, { ownerId });
+    return ownerId;
   }
 
   /**
@@ -344,15 +388,25 @@ public async getNextInvoiceId(userId: string): Promise<number> {
   async updateProperty(userId: string, propertyId: number, updates: Partial<PropertyInput>): Promise<void> {
     try {
       const propertyRef = doc(db, 'users', userId, 'properties', propertyId.toString());
+
+      const { ownerPhone, ...rest } = updates;
+      let ownerPhoneUpdate: { ownerPhone: string } | Record<string, never> = {};
+      if (ownerPhone !== undefined) {
+        const ownerCheck = checkSafaricomPhone(ownerPhone);
+        if (!ownerCheck.ok) throw new Error(`Owner phone: ${ownerCheck.message}`);
+        ownerPhoneUpdate = { ownerPhone: ownerCheck.e164 };
+      }
       
       await updateDoc(propertyRef, {
-        ...updates,
+        ...rest,
+        ...ownerPhoneUpdate,
         ...(updates.billingMode !== undefined ? { billingMode: normalizeBillingMode(updates.billingMode) } : {}),
         updatedAt: Timestamp.now(),
         ...deskUpdateStamp()
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating property:', error);
+      if (typeof error?.message === 'string' && error.message.startsWith('Owner phone:')) throw error;
       throw new Error('Failed to update property. Please try again.');
     }
   }
@@ -370,10 +424,14 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
       }
       
+      // The property's owner id travels with every tenant of that property.
+      const ownerId = await this.ensurePropertyOwnerId(tenantData.userId, tenantData.propertyId);
+
       const tenant = {
         id: tenantData.id,
         localId: tenantData.id,
         propertyId: tenantData.propertyId,
+        ownerId,
         userId: tenantData.userId,
         name: tenantData.name,
         phone: tenantData.phone || '',

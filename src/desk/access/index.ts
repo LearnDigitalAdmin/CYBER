@@ -2,4 +2,4 @@
 export { ActionOtpDialog } from "./ActionOtpDialog";
 export type { ActionOtpDialogProps } from "./ActionOtpDialog";
 export { useActiveSession, useActiveSessionDetail, useSessionView, useNow } from "./useActiveSession";
-export { normalizeKenyaPhone } from "./phone";
+export { normalizeKenyaPhone, phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "./phone";

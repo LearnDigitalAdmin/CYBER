@@ -89,6 +89,9 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
               <div>
                 <h3 className="text-xl font-bold text-white">{property.name}</h3>
                 <p className="text-sm text-gray-400">{property.address || 'No address provided'}</p>
+                {property.ownerId && (
+                  <p className="mt-0.5 text-xs font-mono text-cyan-400">{property.ownerId}</p>
+                )}
               </div>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">

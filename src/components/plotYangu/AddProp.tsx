@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, AlertCircle, Loader2, Home } from 'lucide-react';
 import { assetsService, type Asset, type PropertyInput } from '../../services/Assets';
+import { checkSafaricomPhone } from '../../utils/safaricom';
 
 type LimitNumber = number | -1;
 
@@ -42,7 +43,8 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     description: '',
     agentCommissionRate: 0,
     maxUnits: 1,
-    billingMode: 'full'
+    billingMode: 'full',
+    ownerPhone: ''
   });
 
   if (!isOpen) return null;
@@ -53,6 +55,12 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    const ownerCheck = checkSafaricomPhone(formData.ownerPhone);
+    if (!ownerCheck.ok) {
+      setError(`Owner phone: ${ownerCheck.message}`);
+      return;
+    }
 
     // Validate max units against tier limits
     if (formData.maxUnits && formData.maxUnits > maxUnitsAllowed) {
@@ -81,7 +89,8 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         description: '',
         agentCommissionRate: 0,
         maxUnits: 1,
-        billingMode: 'full'
+        billingMode: 'full',
+        ownerPhone: ''
       });
     } catch (err: any) {
       setError(err.message || 'Failed to create property');
@@ -122,6 +131,19 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               required
               className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
               placeholder="e.g., Greenview Apartments"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-2">Owner Phone (Safaricom) *</label>
+            <input
+              type="tel"
+              inputMode="tel"
+              value={formData.ownerPhone || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, ownerPhone: e.target.value }))}
+              required
+              className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+              placeholder="0712 345 678"
             />
           </div>
 

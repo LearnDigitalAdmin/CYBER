@@ -3,10 +3,10 @@ import { deskApi, formatKes, type QuoteServiceOut } from "../../api";
 import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
 import { ActionOtpDialog } from "./lib/access";
 import { messageOf } from "./lib/messages";
+import { phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../../access/phone";
 import { useTicketDoc } from "./useTicketDoc";
 
-const PHONE = /^(?:\+?254|0)?[17]\d{8}$/;
-const isKenyanPhone = (v: string): boolean => PHONE.test(v.replace(/[\s()-]/g, ""));
+const isKenyanPhone = (v: string): boolean => phoneProblem(v) === null;
 
 interface Props {
   sessionId: string;
@@ -79,8 +79,8 @@ export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, o
           ))}
           <li className="flex min-w-0 justify-between gap-3 bg-gray-50 px-3 py-2 font-semibold"><span>You pay</span><span className="tabular-nums">{formatKes(quote.amountMinor)}</span></li>
         </ul>
-        <FormField label="Your M-PESA number" htmlFor="checkout-phone" hint="The M-PESA prompt is sent to this number." error={phone && !phoneOk ? "Enter a valid Kenyan number, e.g. 0712 345 678" : null}>
-          <input id="checkout-phone" inputMode="tel" autoComplete="tel" className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} disabled={busy} />
+        <FormField label="Your M-PESA number" htmlFor="checkout-phone" hint="The M-PESA prompt is sent to this number." error={phone && !phoneOk ? phoneProblem(phone) : null}>
+          <input id="checkout-phone" inputMode="tel" autoComplete="tel" className={inputClass} value={phone} onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))} maxLength={PHONE_MAX_INPUT_LENGTH} disabled={busy} />
         </FormField>
         {error && <p role="alert" className="break-words text-sm text-red-700">{error}</p>}
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row">

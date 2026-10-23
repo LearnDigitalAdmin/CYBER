@@ -12,6 +12,7 @@ import { Spinner } from "../access/gates";
 import { errorMessage } from "../access/errors";
 import { AGENT_TERMS } from "./terms";
 import { JOURNEY, journeyIndex, nextSteps } from "./steps";
+import { sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../access/phone";
 import { cleanApplication, validateApplication } from "./validation";
 import type { ApplicationErrors, ApplicationFields } from "./validation";
 
@@ -90,8 +91,8 @@ function ApplicationForm() {
         <FormField label="Full name" htmlFor="ob-name" error={show("name")}>
           <input id="ob-name" className={inputClass} value={f.name} onChange={set("name")} autoComplete="name" maxLength={80} />
         </FormField>
-        <FormField label="Mobile phone" htmlFor="ob-phone" hint="We send customer codes and payouts to this number." error={show("phone")}>
-          <input id="ob-phone" className={inputClass} value={f.phone} onChange={set("phone")} type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678" />
+        <FormField label="Mobile phone" htmlFor="ob-phone" hint="Safaricom numbers only (07xx or 01xx). We send customer codes and payouts to this number." error={show("phone")}>
+          <input id="ob-phone" className={inputClass} value={f.phone} onChange={(e) => set("phone")({ target: { value: sanitizePhoneInput(e.target.value) } })} type="tel" inputMode="tel" autoComplete="tel" maxLength={PHONE_MAX_INPUT_LENGTH} placeholder="0712 345 678" />
         </FormField>
         <FormField label="National ID number" htmlFor="ob-id" hint="Only the last 4 digits are ever shown again." error={show("idNumber")}>
           <input id="ob-id" className={inputClass} value={f.idNumber} onChange={set("idNumber")} inputMode="numeric" autoComplete="off" maxLength={12} />

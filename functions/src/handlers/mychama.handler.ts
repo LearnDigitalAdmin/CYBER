@@ -60,6 +60,8 @@ import {
   normalizePhone,
   localPhone,
   detectProvider,
+  isSafaricomPhone,
+  SAFARICOM_ONLY_MESSAGE,
   kes,
   fmtDate,
   auditWhatsApp,
@@ -2022,11 +2024,11 @@ export async function handlePayPhone(
     if (cleaned === '1') {
       target = getMc(session).memberPhone || normalizePhone(session.phone);
     } else {
-      const normalized = normalizePhone(cleaned);
-      if (!/^\+254[17]\d{8}$/.test(normalized)) {
-        return renderPayPhonePrompt(session);
-      }
-      target = normalized;
+      target = normalizePhone(cleaned);
+    }
+    // Safaricom only: format, length and network. Say so, then ask again.
+    if (!isSafaricomPhone(cleaned === '1' ? target : cleaned)) {
+      return `⚠️ ${SAFARICOM_ONLY_MESSAGE}\n\n` + renderPayPhonePrompt(session);
     }
 
     await pushState(phone, session, STATE.MYCHAMA_PAY_PROVIDER, {
@@ -2089,11 +2091,10 @@ async function renderPayConfirm(phone: string, session: Session): Promise<string
     label: mc.payLabel || '',
     chamaName: ctx.chama.name,
     net: kes(fees.net),
-    paystackFee: kes(fees.paystackFee),
-    ourFee: kes(fees.ourFee),
+    transactionCost: kes(Math.round((fees.paystackFee + fees.ourFee) * 100) / 100),
     gross: kes(fees.gross),
     phone: localPhone(mc.payPhone || ''),
-    provider: mc.provider === 'airtel' ? 'Airtel Money' : 'M-Pesa',
+    provider: 'M-Pesa',
   });
 }
 

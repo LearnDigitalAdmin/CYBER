@@ -1,0 +1,480 @@
+diff --git a/functions-desk/src/payouts/pure.test.ts b/functions-desk/src/payouts/pure.test.ts
+index 11eb01d..f3850a6 100644
+--- a/functions-desk/src/payouts/pure.test.ts
++++ b/functions-desk/src/payouts/pure.test.ts
+@@ -39,7 +39,7 @@ test("Paystack transfer statuses", () => {
+ });
+ test("recipient number: M-Pesa payout account wins, otherwise the desk phone; local 07 form", () => {
+   assert.deepEqual(payoutMsisdn("+254711000000", { settlementBank: "mpesa", accountNumber: "0722 000 111" }), { e164: "+254722000111", local: "0722000111" });
+-  assert.equal(payoutMsisdn("+254711000000", { settlementBank: "M-Pesa", accountNumber: "254733000222" }).local, "0733000222");
++  assert.equal(payoutMsisdn("+254711000000", { settlementBank: "M-Pesa", accountNumber: "254713000222" }).local, "0713000222");
+   assert.equal(payoutMsisdn("+254711000000", { settlementBank: "equity", accountNumber: "0123456789" }).local, "0711000000");
+   assert.equal(payoutMsisdn("+254711000000", undefined).local, "0711000000");
+   assert.throws(() => payoutMsisdn("+254711000000", { settlementBank: "mpesa", accountNumber: "12" }), DeskError);
+diff --git a/functions-desk/src/paystack/paystack.test.ts b/functions-desk/src/paystack/paystack.test.ts
+index 9e37077..5acd2ca 100644
+--- a/functions-desk/src/paystack/paystack.test.ts
++++ b/functions-desk/src/paystack/paystack.test.ts
+@@ -10,7 +10,7 @@ test("phone numbers normalise to E.164", () => {
+   assert.equal(maskPhone("+254712345678"), "+2547•• ••• 678");
+ });
+ test("bad phone numbers are rejected", () => {
+-  for (const raw of ["", "0212345678", "12345", "+255712345678", "07123456789"])
++  for (const raw of ["", "0212345678", "12345", "+255712345678", "07123456789", "0733123456", "0750123456", "0100123456", "abc0712345678"])
+     assert.throws(() => normalizeKenyaPhone(raw));
+ });
+ test("split keys are stable, order-independent and share-sensitive", () => {
+diff --git a/functions-desk/src/paystack/phone.ts b/functions-desk/src/paystack/phone.ts
+index a481eda..dfe6e7f 100644
+--- a/functions-desk/src/paystack/phone.ts
++++ b/functions-desk/src/paystack/phone.ts
+@@ -1,13 +1,37 @@
+ import { DeskError } from "../errors.js";
+ 
+-/** Any common Kenyan format -> +2547XXXXXXXX / +2541XXXXXXXX. Throws on anything else. */
++/** Every current Safaricom prefix (3 digits after the leading 0 / +254), inclusive. Same list as PAY safaricom.ts. */
++const SAFARICOM_PREFIX_RANGES: ReadonlyArray<readonly [number, number]> = [
++  [700, 729], [740, 743], [745, 746], [757, 759], [768, 769], [790, 799],
++  [110, 115], [118, 119], [140, 143], [180, 182],
++];
++export const PHONE_MAX_INPUT_LENGTH = 17;
++export const PHONE_EXAMPLE = "Enter a Safaricom number such as 0712 345 678 or 0110 123 456.";
++export const NOT_SAFARICOM = "Only Safaricom numbers are supported (for example 0712 345 678 or 0110 123 456).";
++
++/** null when `raw` is a valid Safaricom number, else a message saying what to fix. */
++export function phoneProblem(raw: string): string | null {
++  const t = String(raw ?? "").trim();
++  if (!t) return PHONE_EXAMPLE;
++  if (t.length > PHONE_MAX_INPUT_LENGTH) return `That number is too long. ${PHONE_EXAMPLE}`;
++  if (!/^\+?[\d\s()-]+$/.test(t)) return `Phone numbers can only contain digits (and a + at the start). ${PHONE_EXAMPLE}`;
++  const digits = t.replace(/\D/g, "");
++  if (!/^(?:254|0)?[17]\d{8}$/.test(digits)) {
++    const expected = digits.startsWith("254") ? 12 : digits.startsWith("0") ? 10 : 9;
++    if (digits.length < expected) return `That number is too short — a Safaricom number has 10 digits. ${PHONE_EXAMPLE}`;
++    if (digits.length > expected) return `That number is too long — a Safaricom number has 10 digits. ${PHONE_EXAMPLE}`;
++    return `That doesn't look like a Kenyan mobile number. ${PHONE_EXAMPLE}`;
++  }
++  const national = digits.slice(-9);
++  const prefix = Number(national.slice(0, 3));
++  return SAFARICOM_PREFIX_RANGES.some(([lo, hi]) => prefix >= lo && prefix <= hi) ? null : NOT_SAFARICOM;
++}
++
++/** Any common Safaricom spelling -> +2547XXXXXXXX / +2541XXXXXXXX. Throws (with a user-facing message) on anything else. */
+ export function normalizeKenyaPhone(raw: string): string {
+-  let p = raw.replace(/[\s()-]/g, "");
+-  if (p.startsWith("+254")) p = p.slice(1);
+-  else if (p.startsWith("0")) p = "254" + p.slice(1);
+-  else if (/^[17]\d{8}$/.test(p)) p = "254" + p;
+-  if (!/^254[17]\d{8}$/.test(p)) throw new DeskError("invalid_argument", "Enter a valid Kenyan phone number");
+-  return "+" + p;
++  const problem = phoneProblem(raw);
++  if (problem) throw new DeskError("invalid_argument", problem);
++  return "+254" + String(raw).replace(/\D/g, "").slice(-9);
+ }
+ export function maskPhone(e164: string): string {
+   return `${e164.slice(0, 5)}•• ••• ${e164.slice(-3)}`;
+diff --git a/functions-desk/src/requests/requests.flow.test.ts b/functions-desk/src/requests/requests.flow.test.ts
+index c75e432..08cf85c 100644
+--- a/functions-desk/src/requests/requests.flow.test.ts
++++ b/functions-desk/src/requests/requests.flow.test.ts
+@@ -199,13 +199,13 @@ test("updateRequest on a pms or desk request needs no write-back", async () => {
+   assert.equal(((await col("requests").doc("p1").get()).data() as RequestDoc).writeBackPending, false);
+ });
+ test("createRequest: a desk asks COG-0000; validated, rate limited, audited; the top desk cannot ask itself", async () => {
+-  await seedTop(); await seedAgent("5", { name: "Wanjiru", phone: "+254733000111" });
++  await seedTop(); await seedAgent("5", { name: "Wanjiru", phone: "+254713000111" });
+   clock = 777;
+   const { id } = await createRequest(deps, "5", { category: "other", subject: "Need help", message: "Customer dispute" });
+   assert.match(id, /^desk_COG-0005_/);
+   const r = (await col("requests").doc(id).get()).data() as RequestDoc;
+   assert.equal(r.source, "desk"); assert.equal(r.entityCode, "COG-0005"); assert.deepEqual(r.targetDeskCodes, ["COG-0000"]); assert.equal(r.status, "new");
+-  assert.equal(r.requesterName, "Wanjiru"); assert.equal(r.requesterPhone, "+254733000111"); assert.equal(r.createdAt, 777);
++  assert.equal(r.requesterName, "Wanjiru"); assert.equal(r.requesterPhone, "+254713000111"); assert.equal(r.createdAt, 777);
+   assert.equal((await col("audit").where("action", "==", "request_created").get()).size, 1);
+   assert.equal((await listRequests("top1", {})).requests.length, 1);
+   await rejects(createRequest(deps, "5", { category: "bogus", subject: "s", message: "m" }), "invalid_argument");
+diff --git a/functions/src/config/mychama.config.ts b/functions/src/config/mychama.config.ts
+index d5a66a2..52da084 100644
+--- a/functions/src/config/mychama.config.ts
++++ b/functions/src/config/mychama.config.ts
+@@ -112,20 +112,24 @@ export const mcPath = {
+ export const FEES = {
+   PAYSTACK_FEE_RATE: 0.015,
+   PAYSTACK_FEE_CAP: 3000,
+-  CONTRIBUTION_MARKUP_RATE: 0.005,
++  /** Plain contributions: no markup; the all-in transaction cost is a flat 1.7% (capped). */
++  CONTRIBUTION_MARKUP_RATE: 0,
++  CONTRIBUTION_TRANSACTION_RATE: 0.017,
++  /** Loan repayments: flat markup per plan, on top of Paystack's 1.5%. */
+   LOAN_MARKUP_RATE: {
+     free: null,
+-    starter: 0.015,
+-    basic: 0.011,
+-    growth: 0.007,
+-    max: 0.007,
++    starter: 0.008,
++    basic: 0.008,
++    growth: 0.0045,
++    max: 0.0025,
+   } as Record<string, number | null>,
++  /** MGR collections: dynamic markup per plan, on top of Paystack's 1.5%. */
+   MGR_PAYOUT_MARKUP_RATE: {
+     free: null,
+-    starter: 0.015,
+-    basic: 0.011,
+-    growth: 0.007,
+-    max: 0.007,
++    starter: 0.007,
++    basic: 0.006,
++    growth: 0.004,
++    max: 0.002,
+   } as Record<string, number | null>,
+ } as const;
+ 
+diff --git a/functions/src/constants/mychama.messages.ts b/functions/src/constants/mychama.messages.ts
+index bbdc7ea..bb8f062 100644
+--- a/functions/src/constants/mychama.messages.ts
++++ b/functions/src/constants/mychama.messages.ts
+@@ -342,18 +342,17 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+   PAY_ASK_PHONE: {
+     en:
+       'Which number should we send the payment prompt to?\n\n' +
+-      'Reply *1* to use {registered}, or type another number (07XXXXXXXX):',
++      'Reply *1* to use {registered}, or type another Safaricom number (07XXXXXXXX or 01XXXXXXXX):',
+     sw:
+       'Tutume ombi la malipo kwa namba gani?\n\n' +
+-      'Jibu *1* kutumia {registered}, au andika namba nyingine (07XXXXXXXX):',
++      'Jibu *1* kutumia {registered}, au andika namba nyingine ya Safaricom (07XXXXXXXX au 01XXXXXXXX):',
+   },
+   PAY_CONFIRM: {
+     en:
+       '*Confirm payment*\n\n' +
+       '{label}\n\n' +
+       '🏦 Goes to {chamaName}: *{net}*\n' +
+-      '💳 Paystack fee: {paystackFee}\n' +
+-      '⚙️ MyChama fee: {ourFee}\n' +
++      '💳 Transaction cost: {transactionCost}\n' +
+       '━━━━━━━━━━━━━━\n' +
+       '📱 You will be charged: *{gross}*\n' +
+       '📞 On: {phone} ({provider})\n\n' +
+@@ -363,8 +362,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
+       '*Thibitisha malipo*\n\n' +
+       '{label}\n\n' +
+       '🏦 Inakwenda {chamaName}: *{net}*\n' +
+-      '💳 Ada ya Paystack: {paystackFee}\n' +
+-      '⚙️ Ada ya MyChama: {ourFee}\n' +
++      '💳 Gharama ya muamala: {transactionCost}\n' +
+       '━━━━━━━━━━━━━━\n' +
+       '📱 Utatozwa: *{gross}*\n' +
+       '📞 Kwa: {phone} ({provider})\n\n' +
+diff --git a/functions/src/handlers/mychama.handler.ts b/functions/src/handlers/mychama.handler.ts
+index 067d390..5caf7b7 100644
+--- a/functions/src/handlers/mychama.handler.ts
++++ b/functions/src/handlers/mychama.handler.ts
+@@ -60,6 +60,8 @@ import {
+   normalizePhone,
+   localPhone,
+   detectProvider,
++  isSafaricomPhone,
++  SAFARICOM_ONLY_MESSAGE,
+   kes,
+   fmtDate,
+   auditWhatsApp,
+@@ -2022,11 +2024,11 @@ export async function handlePayPhone(
+     if (cleaned === '1') {
+       target = getMc(session).memberPhone || normalizePhone(session.phone);
+     } else {
+-      const normalized = normalizePhone(cleaned);
+-      if (!/^\+254[17]\d{8}$/.test(normalized)) {
+-        return renderPayPhonePrompt(session);
+-      }
+-      target = normalized;
++      target = normalizePhone(cleaned);
++    }
++    // Safaricom only: format, length and network. Say so, then ask again.
++    if (!isSafaricomPhone(cleaned === '1' ? target : cleaned)) {
++      return `⚠️ ${SAFARICOM_ONLY_MESSAGE}\n\n` + renderPayPhonePrompt(session);
+     }
+ 
+     await pushState(phone, session, STATE.MYCHAMA_PAY_PROVIDER, {
+@@ -2089,11 +2091,10 @@ async function renderPayConfirm(phone: string, session: Session): Promise<string
+     label: mc.payLabel || '',
+     chamaName: ctx.chama.name,
+     net: kes(fees.net),
+-    paystackFee: kes(fees.paystackFee),
+-    ourFee: kes(fees.ourFee),
++    transactionCost: kes(Math.round((fees.paystackFee + fees.ourFee) * 100) / 100),
+     gross: kes(fees.gross),
+     phone: localPhone(mc.payPhone || ''),
+-    provider: mc.provider === 'airtel' ? 'Airtel Money' : 'M-Pesa',
++    provider: 'M-Pesa',
+   });
+ }
+ 
+diff --git a/functions/src/services/mychama.payment.service.ts b/functions/src/services/mychama.payment.service.ts
+index 63c3d53..61968d5 100644
+--- a/functions/src/services/mychama.payment.service.ts
++++ b/functions/src/services/mychama.payment.service.ts
+@@ -27,7 +27,7 @@ import {
+   IntentPurpose,
+   PaymentIntent,
+ } from '../types/mychama.types';
+-import { mainAccountChargeSubunits, normalizePhone } from './mychama.service';
++import { isSafaricomPhone, mainAccountChargeSubunits, normalizePhone } from './mychama.service';
+ import { logger } from '../utils/logger';
+ 
+ interface PaystackChargeResponse {
+@@ -178,6 +178,7 @@ export async function initiateMyChamaPayment(params: {
+   }
+ 
+   const reference = buildReference(chamaId, target.purpose);
++  if (!isSafaricomPhone(phone)) throw new Error('Only Safaricom numbers are supported.');
+   const normalized = normalizePhone(phone);
+   const now = Date.now();
+ 
+diff --git a/functions/src/services/mychama.service.ts b/functions/src/services/mychama.service.ts
+index 6a4c712..a06aa91 100644
+--- a/functions/src/services/mychama.service.ts
++++ b/functions/src/services/mychama.service.ts
+@@ -78,11 +78,31 @@ export function localPhone(e164: string): string {
+   return digits.startsWith('254') ? '0' + digits.substring(3) : digits;
+ }
+ 
+-export function detectProvider(phone: string): 'mpesa' | 'airtel' {
+-  const local = localPhone(normalizePhone(phone));
+-  const prefix3 = local.slice(0, 3);
+-  const airtel = ['073', '075', '078'];
+-  return airtel.includes(prefix3) ? 'airtel' : 'mpesa';
++/**
++ * Every current Safaricom prefix as the 3-digit national prefix (digits after the leading 0 / +254), inclusive
++ * ranges. MUST match PAY functions/src/phone/safaricom.ts and Chama functions/shared/phone.py.
++ */
++const SAFARICOM_PREFIX_RANGES: ReadonlyArray<readonly [number, number]> = [
++  [700, 729], [740, 743], [745, 746], [757, 759], [768, 769], [790, 799],
++  [110, 115], [118, 119], [140, 143], [180, 182],
++];
++
++export const SAFARICOM_ONLY_MESSAGE =
++  'Only Safaricom numbers are supported, e.g. 0712 345 678 or 0110 123 456. Please use a Safaricom number.';
++
++/** True only for a Safaricom mobile number in a spelling normalizePhone() understands (letters etc. rejected). */
++export function isSafaricomPhone(phone: string): boolean {
++  const raw = String(phone || '').trim();
++  if (raw.length > 17 || /[^\d\s+\-()]/.test(raw)) return false;
++  const n = normalizePhone(raw);
++  if (!/^\+254[17]\d{8}$/.test(n)) return false;
++  const prefix = Number(n.slice(4, 7));
++  return SAFARICOM_PREFIX_RANGES.some(([lo, hi]) => prefix >= lo && prefix <= hi);
++}
++
++/** Every accepted number is Safaricom, so the provider is always M-Pesa. */
++export function detectProvider(_phone: string): 'mpesa' | 'airtel' {
++  return 'mpesa';
+ }
+ 
+ /** Human month key used to sort contribution periods reliably. */
+@@ -104,9 +124,9 @@ export function paystackFeeFor(amount: number): number {
+  * Gross-up: find the charge that leaves exactly `net` in the chama account
+  * after Paystack's fee and the MyChama markup are both taken from the charge.
+  */
+-export function grossUpForFees(net: number, ourRate: number): FeeBreakdown {
+-  let gross = net / (1 - FEES.PAYSTACK_FEE_RATE - ourRate);
+-  let pFee = gross * FEES.PAYSTACK_FEE_RATE;
++export function grossUpForFees(net: number, ourRate: number, baseRate: number = FEES.PAYSTACK_FEE_RATE): FeeBreakdown {
++  let gross = net / (1 - baseRate - ourRate);
++  let pFee = gross * baseRate;
+ 
+   if (pFee > FEES.PAYSTACK_FEE_CAP) {
+     gross = (net + FEES.PAYSTACK_FEE_CAP) / (1 - ourRate);
+@@ -133,8 +153,14 @@ export function mainAccountChargeSubunits(gross: number, net: number): number {
+   return Math.round(gross * 100) - Math.round(net * 100);
+ }
+ 
++/** Contributions: no markup; the whole transaction cost is FEES.CONTRIBUTION_TRANSACTION_RATE (1.7%). */
+ export function contributionFees(net: number): FeeBreakdown {
+-  return grossUpForFees(net, FEES.CONTRIBUTION_MARKUP_RATE);
++  return grossUpForFees(net, FEES.CONTRIBUTION_MARKUP_RATE, FEES.CONTRIBUTION_TRANSACTION_RATE);
++}
++
++/** MGR collections: Paystack's 1.5% plus the plan's dynamic MGR markup. */
++export function mgrContributionFees(net: number, plan: ChamaPlan): FeeBreakdown {
++  return grossUpForFees(net, FEES.MGR_PAYOUT_MARKUP_RATE[plan] ?? 0);
+ }
+ 
+ export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
+@@ -145,11 +171,13 @@ export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
+ /**
+  * Single entry point for every payable flow so the quote shown on the confirm
+  * screen and the amount actually charged can never come from two different
+- * formulas. MGR collections use the contribution markup (see the app's
+- * mgr_contribution_fees).
++ * formulas. Mirrors the app's contribution_fees / loan_repayment_fees /
++ * mgr_contribution_fees exactly.
+  */
+ export function feesFor(purpose: IntentPurpose, net: number, plan: ChamaPlan): FeeBreakdown {
+-  return purpose === 'loan_repayment' ? loanRepaymentFees(net, plan) : contributionFees(net);
++  if (purpose === 'loan_repayment') return loanRepaymentFees(net, plan);
++  if (purpose === 'mgr_contribution') return mgrContributionFees(net, plan);
++  return contributionFees(net);
+ }
+ 
+ export function canCollectOnline(plan: ChamaPlan): boolean {
+diff --git a/src/desk/access/index.ts b/src/desk/access/index.ts
+index 736d20f..3df5b59 100644
+--- a/src/desk/access/index.ts
++++ b/src/desk/access/index.ts
+@@ -2,4 +2,4 @@
+ export { ActionOtpDialog } from "./ActionOtpDialog";
+ export type { ActionOtpDialogProps } from "./ActionOtpDialog";
+ export { useActiveSession, useActiveSessionDetail, useSessionView, useNow } from "./useActiveSession";
+-export { normalizeKenyaPhone } from "./phone";
++export { normalizeKenyaPhone, phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "./phone";
+diff --git a/src/desk/access/phone.ts b/src/desk/access/phone.ts
+index a6ec2a0..5fc05dc 100644
+--- a/src/desk/access/phone.ts
++++ b/src/desk/access/phone.ts
+@@ -1,10 +1,37 @@
+ /** Mirrors functions-desk/src/paystack/phone.ts so the UI rejects bad numbers before a round trip. The server re-validates. */
+ 
+-/** Any common Kenyan format -> "+2547XXXXXXXX" / "+2541XXXXXXXX", or null when it is not a valid Kenyan mobile number. */
++/** Every current Safaricom prefix (3 digits after the leading 0 / +254), inclusive. Same list as PAY safaricom.ts. */
++const SAFARICOM_PREFIX_RANGES: ReadonlyArray<readonly [number, number]> = [
++  [700, 729], [740, 743], [745, 746], [757, 759], [768, 769], [790, 799],
++  [110, 115], [118, 119], [140, 143], [180, 182],
++];
++export const PHONE_MAX_INPUT_LENGTH = 17;
++export const PHONE_EXAMPLE = "Enter a Safaricom number such as 0712 345 678 or 0110 123 456.";
++export const NOT_SAFARICOM = "Only Safaricom numbers are supported (for example 0712 345 678 or 0110 123 456).";
++
++/** Drops anything a phone number cannot contain, so pasted junk never reaches state. */
++export function sanitizePhoneInput(raw: string): string {
++  return raw.replace(/[^\d\s+()-]/g, "").slice(0, PHONE_MAX_INPUT_LENGTH);
++}
++
++/** null when `raw` is a valid Safaricom number, else a message saying what to fix. */
++export function phoneProblem(raw: string): string | null {
++  const t = String(raw ?? "").trim();
++  if (!t) return PHONE_EXAMPLE;
++  if (t.length > PHONE_MAX_INPUT_LENGTH) return `That number is too long. ${PHONE_EXAMPLE}`;
++  if (!/^\+?[\d\s()-]+$/.test(t)) return `Phone numbers can only contain digits (and a + at the start). ${PHONE_EXAMPLE}`;
++  const digits = t.replace(/\D/g, "");
++  if (!/^(?:254|0)?[17]\d{8}$/.test(digits)) {
++    const expected = digits.startsWith("254") ? 12 : digits.startsWith("0") ? 10 : 9;
++    if (digits.length < expected) return `That number is too short — a Safaricom number has 10 digits. ${PHONE_EXAMPLE}`;
++    if (digits.length > expected) return `That number is too long — a Safaricom number has 10 digits. ${PHONE_EXAMPLE}`;
++    return `That doesn't look like a Kenyan mobile number. ${PHONE_EXAMPLE}`;
++  }
++  const prefix = Number(digits.slice(-9, -6));
++  return SAFARICOM_PREFIX_RANGES.some(([lo, hi]) => prefix >= lo && prefix <= hi) ? null : NOT_SAFARICOM;
++}
++
++/** Any common Safaricom spelling -> "+2547XXXXXXXX" / "+2541XXXXXXXX", or null when it is not a valid Safaricom number. */
+ export function normalizeKenyaPhone(raw: string): string | null {
+-  let p = raw.replace(/[\s()-]/g, "");
+-  if (p.startsWith("+254")) p = p.slice(1);
+-  else if (p.startsWith("0")) p = "254" + p.slice(1);
+-  else if (/^[17]\d{8}$/.test(p)) p = "254" + p;
+-  return /^254[17]\d{8}$/.test(p) ? "+" + p : null;
++  return phoneProblem(raw) ? null : "+254" + String(raw).replace(/\D/g, "").slice(-9);
+ }
+diff --git a/src/desk/access/service/ServiceCheckout.tsx b/src/desk/access/service/ServiceCheckout.tsx
+index 1ef289d..d20435e 100644
+--- a/src/desk/access/service/ServiceCheckout.tsx
++++ b/src/desk/access/service/ServiceCheckout.tsx
+@@ -3,7 +3,7 @@ import { deskApi, formatDateTime, formatKes } from "../../api";
+ import type { QuoteServiceOut, ServiceType } from "../../api";
+ import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
+ import { errorMessage } from "../errors";
+-import { normalizeKenyaPhone } from "../phone";
++import { normalizeKenyaPhone, phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../phone";
+ import { useNow } from "../useActiveSession";
+ import { payloadProblem } from "./payload";
+ import { useTicket } from "./useTicket";
+@@ -68,7 +68,7 @@ export function ServiceCheckout(p: ServiceCheckoutProps) {
+   const pay = async (q: QuoteServiceOut) => {
+     if (busy.current) return;
+     const normal = normalizeKenyaPhone(phone.trim());
+-    if (!normal) { setPhoneError("Enter the M-Pesa number that will pay, for example 0712 345 678."); return; }
++    if (!normal) { setPhoneError(phoneProblem(phone)); return; }
+     setPhoneError(null); setError(null); busy.current = true;
+     setPrep({ k: "charging", quote: q });
+     try {
+@@ -134,7 +134,7 @@ export function ServiceCheckout(p: ServiceCheckoutProps) {
+           <div className="min-w-0 space-y-3">
+             <FormField label="Customer's M-Pesa number" htmlFor="pay-phone" hint="They get a prompt on this phone and enter their M-Pesa PIN." error={phoneError}>
+               <input id="pay-phone" className={inputClass} type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678"
+-                value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneError(null); }} disabled={prep.k === "charging"} />
++                value={phone} onChange={(e) => { setPhone(sanitizePhoneInput(e.target.value)); setPhoneError(null); }} maxLength={PHONE_MAX_INPUT_LENGTH} disabled={prep.k === "charging"} />
+             </FormField>
+             {error && <p role="alert" className="break-words rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+             <div className="flex min-w-0 flex-wrap gap-2">
+diff --git a/src/desk/modules/comms/ServiceCheckout.tsx b/src/desk/modules/comms/ServiceCheckout.tsx
+index e2aefb6..7a70ecd 100644
+--- a/src/desk/modules/comms/ServiceCheckout.tsx
++++ b/src/desk/modules/comms/ServiceCheckout.tsx
+@@ -3,10 +3,10 @@ import { deskApi, formatKes, type QuoteServiceOut } from "../../api";
+ import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
+ import { ActionOtpDialog } from "./lib/access";
+ import { messageOf } from "./lib/messages";
++import { phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../../access/phone";
+ import { useTicketDoc } from "./useTicketDoc";
+ 
+-const PHONE = /^(?:\+?254|0)?[17]\d{8}$/;
+-const isKenyanPhone = (v: string): boolean => PHONE.test(v.replace(/[\s()-]/g, ""));
++const isKenyanPhone = (v: string): boolean => phoneProblem(v) === null;
+ 
+ interface Props {
+   sessionId: string;
+@@ -79,8 +79,8 @@ export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, o
+           ))}
+           <li className="flex min-w-0 justify-between gap-3 bg-gray-50 px-3 py-2 font-semibold"><span>You pay</span><span className="tabular-nums">{formatKes(quote.amountMinor)}</span></li>
+         </ul>
+-        <FormField label="Your M-PESA number" htmlFor="checkout-phone" hint="The M-PESA prompt is sent to this number." error={phone && !phoneOk ? "Enter a valid Kenyan number, e.g. 0712 345 678" : null}>
+-          <input id="checkout-phone" inputMode="tel" autoComplete="tel" className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} disabled={busy} />
++        <FormField label="Your M-PESA number" htmlFor="checkout-phone" hint="The M-PESA prompt is sent to this number." error={phone && !phoneOk ? phoneProblem(phone) : null}>
++          <input id="checkout-phone" inputMode="tel" autoComplete="tel" className={inputClass} value={phone} onChange={(e) => setPhone(sanitizePhoneInput(e.target.value))} maxLength={PHONE_MAX_INPUT_LENGTH} disabled={busy} />
+         </FormField>
+         {error && <p role="alert" className="break-words text-sm text-red-700">{error}</p>}
+         <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+diff --git a/src/desk/onboarding/OnboardingScreen.tsx b/src/desk/onboarding/OnboardingScreen.tsx
+index 1736d6f..c2dad7d 100644
+--- a/src/desk/onboarding/OnboardingScreen.tsx
++++ b/src/desk/onboarding/OnboardingScreen.tsx
+@@ -12,6 +12,7 @@ import { Spinner } from "../access/gates";
+ import { errorMessage } from "../access/errors";
+ import { AGENT_TERMS } from "./terms";
+ import { JOURNEY, journeyIndex, nextSteps } from "./steps";
++import { sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../access/phone";
+ import { cleanApplication, validateApplication } from "./validation";
+ import type { ApplicationErrors, ApplicationFields } from "./validation";
+ 
+@@ -90,8 +91,8 @@ function ApplicationForm() {
+         <FormField label="Full name" htmlFor="ob-name" error={show("name")}>
+           <input id="ob-name" className={inputClass} value={f.name} onChange={set("name")} autoComplete="name" maxLength={80} />
+         </FormField>
+-        <FormField label="Mobile phone" htmlFor="ob-phone" hint="We send customer codes and payouts to this number." error={show("phone")}>
+-          <input id="ob-phone" className={inputClass} value={f.phone} onChange={set("phone")} type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678" />
++        <FormField label="Mobile phone" htmlFor="ob-phone" hint="Safaricom numbers only (07xx or 01xx). We send customer codes and payouts to this number." error={show("phone")}>
++          <input id="ob-phone" className={inputClass} value={f.phone} onChange={(e) => set("phone")({ target: { value: sanitizePhoneInput(e.target.value) } })} type="tel" inputMode="tel" autoComplete="tel" maxLength={PHONE_MAX_INPUT_LENGTH} placeholder="0712 345 678" />
+         </FormField>
+         <FormField label="National ID number" htmlFor="ob-id" hint="Only the last 4 digits are ever shown again." error={show("idNumber")}>
+           <input id="ob-id" className={inputClass} value={f.idNumber} onChange={set("idNumber")} inputMode="numeric" autoComplete="off" maxLength={12} />
+diff --git a/src/desk/onboarding/validation.ts b/src/desk/onboarding/validation.ts
+index e3fa6f3..c07c7c9 100644
+--- a/src/desk/onboarding/validation.ts
++++ b/src/desk/onboarding/validation.ts
+@@ -1,4 +1,4 @@
+-import { normalizeKenyaPhone } from "../access/phone";
++import { normalizeKenyaPhone, phoneProblem } from "../access/phone";
+ 
+ export interface ApplicationFields { name: string; phone: string; idNumber: string; ward: string }
+ export type ApplicationErrors = Partial<Record<keyof ApplicationFields, string>>;
+@@ -8,7 +8,7 @@ export function validateApplication(f: ApplicationFields): ApplicationErrors {
+   const e: ApplicationErrors = {};
+   const name = f.name.trim().replace(/\s+/g, " ");
+   if (name.length < 2 || name.length > 80) e.name = "Enter your full name (2 to 80 characters).";
+-  if (!normalizeKenyaPhone(f.phone.trim())) e.phone = "Enter a valid Kenyan mobile number, for example 0712 345 678.";
++  { const p = phoneProblem(f.phone); if (p) e.phone = p; }
+   if (!/^\d{6,12}$/.test(f.idNumber.trim())) e.idNumber = "Your ID number is 6 to 12 digits, numbers only.";
+   const ward = f.ward.trim();
+   if (ward.length < 1 || ward.length > 40) e.ward = "Enter your ward (up to 40 characters).";

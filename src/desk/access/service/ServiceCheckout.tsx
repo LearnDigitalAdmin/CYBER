@@ -3,7 +3,7 @@ import { deskApi, formatDateTime, formatKes } from "../../api";
 import type { QuoteServiceOut, ServiceType } from "../../api";
 import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
 import { errorMessage } from "../errors";
-import { normalizeKenyaPhone } from "../phone";
+import { normalizeKenyaPhone, phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../phone";
 import { useNow } from "../useActiveSession";
 import { payloadProblem } from "./payload";
 import { useTicket } from "./useTicket";
@@ -68,7 +68,7 @@ export function ServiceCheckout(p: ServiceCheckoutProps) {
   const pay = async (q: QuoteServiceOut) => {
     if (busy.current) return;
     const normal = normalizeKenyaPhone(phone.trim());
-    if (!normal) { setPhoneError("Enter the M-Pesa number that will pay, for example 0712 345 678."); return; }
+    if (!normal) { setPhoneError(phoneProblem(phone)); return; }
     setPhoneError(null); setError(null); busy.current = true;
     setPrep({ k: "charging", quote: q });
     try {
@@ -134,7 +134,7 @@ export function ServiceCheckout(p: ServiceCheckoutProps) {
           <div className="min-w-0 space-y-3">
             <FormField label="Customer's M-Pesa number" htmlFor="pay-phone" hint="They get a prompt on this phone and enter their M-Pesa PIN." error={phoneError}>
               <input id="pay-phone" className={inputClass} type="tel" inputMode="tel" autoComplete="tel" placeholder="0712 345 678"
-                value={phone} onChange={(e) => { setPhone(e.target.value); setPhoneError(null); }} disabled={prep.k === "charging"} />
+                value={phone} onChange={(e) => { setPhone(sanitizePhoneInput(e.target.value)); setPhoneError(null); }} maxLength={PHONE_MAX_INPUT_LENGTH} disabled={prep.k === "charging"} />
             </FormField>
             {error && <p role="alert" className="break-words rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
             <div className="flex min-w-0 flex-wrap gap-2">

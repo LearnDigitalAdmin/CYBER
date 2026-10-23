@@ -78,11 +78,31 @@ export function localPhone(e164: string): string {
   return digits.startsWith('254') ? '0' + digits.substring(3) : digits;
 }
 
-export function detectProvider(phone: string): 'mpesa' | 'airtel' {
-  const local = localPhone(normalizePhone(phone));
-  const prefix3 = local.slice(0, 3);
-  const airtel = ['073', '075', '078'];
-  return airtel.includes(prefix3) ? 'airtel' : 'mpesa';
+/**
+ * Every current Safaricom prefix as the 3-digit national prefix (digits after the leading 0 / +254), inclusive
+ * ranges. MUST match PAY functions/src/phone/safaricom.ts and Chama functions/shared/phone.py.
+ */
+const SAFARICOM_PREFIX_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [700, 729], [740, 743], [745, 746], [757, 759], [768, 769], [790, 799],
+  [110, 115], [118, 119], [140, 143], [180, 182],
+];
+
+export const SAFARICOM_ONLY_MESSAGE =
+  'Only Safaricom numbers are supported, e.g. 0712 345 678 or 0110 123 456. Please use a Safaricom number.';
+
+/** True only for a Safaricom mobile number in a spelling normalizePhone() understands (letters etc. rejected). */
+export function isSafaricomPhone(phone: string): boolean {
+  const raw = String(phone || '').trim();
+  if (raw.length > 17 || /[^\d\s+\-()]/.test(raw)) return false;
+  const n = normalizePhone(raw);
+  if (!/^\+254[17]\d{8}$/.test(n)) return false;
+  const prefix = Number(n.slice(4, 7));
+  return SAFARICOM_PREFIX_RANGES.some(([lo, hi]) => prefix >= lo && prefix <= hi);
+}
+
+/** Every accepted number is Safaricom, so the provider is always M-Pesa. */
+export function detectProvider(_phone: string): 'mpesa' | 'airtel' {
+  return 'mpesa';
 }
 
 /** Human month key used to sort contribution periods reliably. */
@@ -104,9 +124,9 @@ export function paystackFeeFor(amount: number): number {
  * Gross-up: find the charge that leaves exactly `net` in the chama account
  * after Paystack's fee and the MyChama markup are both taken from the charge.
  */
-export function grossUpForFees(net: number, ourRate: number): FeeBreakdown {
-  let gross = net / (1 - FEES.PAYSTACK_FEE_RATE - ourRate);
-  let pFee = gross * FEES.PAYSTACK_FEE_RATE;
+export function grossUpForFees(net: number, ourRate: number, baseRate: number = FEES.PAYSTACK_FEE_RATE): FeeBreakdown {
+  let gross = net / (1 - baseRate - ourRate);
+  let pFee = gross * baseRate;
 
   if (pFee > FEES.PAYSTACK_FEE_CAP) {
     gross = (net + FEES.PAYSTACK_FEE_CAP) / (1 - ourRate);
@@ -133,8 +153,14 @@ export function mainAccountChargeSubunits(gross: number, net: number): number {
   return Math.round(gross * 100) - Math.round(net * 100);
 }
 
+/** Contributions: no markup; the whole transaction cost is FEES.CONTRIBUTION_TRANSACTION_RATE (1.7%). */
 export function contributionFees(net: number): FeeBreakdown {
-  return grossUpForFees(net, FEES.CONTRIBUTION_MARKUP_RATE);
+  return grossUpForFees(net, FEES.CONTRIBUTION_MARKUP_RATE, FEES.CONTRIBUTION_TRANSACTION_RATE);
+}
+
+/** MGR collections: Paystack's 1.5% plus the plan's dynamic MGR markup. */
+export function mgrContributionFees(net: number, plan: ChamaPlan): FeeBreakdown {
+  return grossUpForFees(net, FEES.MGR_PAYOUT_MARKUP_RATE[plan] ?? 0);
 }
 
 export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
@@ -145,11 +171,13 @@ export function loanRepaymentFees(net: number, plan: ChamaPlan): FeeBreakdown {
 /**
  * Single entry point for every payable flow so the quote shown on the confirm
  * screen and the amount actually charged can never come from two different
- * formulas. MGR collections use the contribution markup (see the app's
- * mgr_contribution_fees).
+ * formulas. Mirrors the app's contribution_fees / loan_repayment_fees /
+ * mgr_contribution_fees exactly.
  */
 export function feesFor(purpose: IntentPurpose, net: number, plan: ChamaPlan): FeeBreakdown {
-  return purpose === 'loan_repayment' ? loanRepaymentFees(net, plan) : contributionFees(net);
+  if (purpose === 'loan_repayment') return loanRepaymentFees(net, plan);
+  if (purpose === 'mgr_contribution') return mgrContributionFees(net, plan);
+  return contributionFees(net);
 }
 
 export function canCollectOnline(plan: ChamaPlan): boolean {

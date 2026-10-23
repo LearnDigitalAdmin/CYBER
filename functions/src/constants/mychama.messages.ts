@@ -342,18 +342,17 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   PAY_ASK_PHONE: {
     en:
       'Which number should we send the payment prompt to?\n\n' +
-      'Reply *1* to use {registered}, or type another number (07XXXXXXXX):',
+      'Reply *1* to use {registered}, or type another Safaricom number (07XXXXXXXX or 01XXXXXXXX):',
     sw:
       'Tutume ombi la malipo kwa namba gani?\n\n' +
-      'Jibu *1* kutumia {registered}, au andika namba nyingine (07XXXXXXXX):',
+      'Jibu *1* kutumia {registered}, au andika namba nyingine ya Safaricom (07XXXXXXXX au 01XXXXXXXX):',
   },
   PAY_CONFIRM: {
     en:
       '*Confirm payment*\n\n' +
       '{label}\n\n' +
       '🏦 Goes to {chamaName}: *{net}*\n' +
-      '💳 Paystack fee: {paystackFee}\n' +
-      '⚙️ MyChama fee: {ourFee}\n' +
+      '💳 Transaction cost: {transactionCost}\n' +
       '━━━━━━━━━━━━━━\n' +
       '📱 You will be charged: *{gross}*\n' +
       '📞 On: {phone} ({provider})\n\n' +
@@ -363,8 +362,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '*Thibitisha malipo*\n\n' +
       '{label}\n\n' +
       '🏦 Inakwenda {chamaName}: *{net}*\n' +
-      '💳 Ada ya Paystack: {paystackFee}\n' +
-      '⚙️ Ada ya MyChama: {ourFee}\n' +
+      '💳 Gharama ya muamala: {transactionCost}\n' +
       '━━━━━━━━━━━━━━\n' +
       '📱 Utatozwa: *{gross}*\n' +
       '📞 Kwa: {phone} ({provider})\n\n' +

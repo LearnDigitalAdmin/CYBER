@@ -1,4 +1,4 @@
-import { normalizeKenyaPhone } from "../access/phone";
+import { normalizeKenyaPhone, phoneProblem } from "../access/phone";
 
 export interface ApplicationFields { name: string; phone: string; idNumber: string; ward: string }
 export type ApplicationErrors = Partial<Record<keyof ApplicationFields, string>>;
@@ -8,7 +8,7 @@ export function validateApplication(f: ApplicationFields): ApplicationErrors {
   const e: ApplicationErrors = {};
   const name = f.name.trim().replace(/\s+/g, " ");
   if (name.length < 2 || name.length > 80) e.name = "Enter your full name (2 to 80 characters).";
-  if (!normalizeKenyaPhone(f.phone.trim())) e.phone = "Enter a valid Kenyan mobile number, for example 0712 345 678.";
+  { const p = phoneProblem(f.phone); if (p) e.phone = p; }
   if (!/^\d{6,12}$/.test(f.idNumber.trim())) e.idNumber = "Your ID number is 6 to 12 digits, numbers only.";
   const ward = f.ward.trim();
   if (ward.length < 1 || ward.length > 40) e.ward = "Enter your ward (up to 40 characters).";
