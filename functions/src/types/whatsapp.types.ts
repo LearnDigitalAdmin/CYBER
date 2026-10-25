@@ -7,10 +7,16 @@ export interface WhatsAppMessage {
   from: string;
   id: string;
   timestamp: string;
-  text: {
+  text?: {
     body: string;
   };
-  type: 'text';
+  type: string;
+  /** Present when the user tapped a reply button or chose a list row. */
+  interactive?: {
+    type?: string;
+    button_reply?: { id: string; title?: string };
+    list_reply?: { id: string; title?: string };
+  };
 }
 
 export interface WhatsAppWebhookPayload {

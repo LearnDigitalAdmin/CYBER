@@ -16,7 +16,8 @@ import {
   Settings,
   ImagePlay,
   FileArchive,
-  Headset} from 'lucide-react';
+  Headset,
+  Eye} from 'lucide-react';
 import PlotTab from '../components/plotYangu/PlotTab';
 import PaymentModal from '../components/PaymentModal';
 import { type Invoice } from '../services/firebaseService';
@@ -30,6 +31,7 @@ import { Paystack } from '../services/paystackService';
 import { Screening } from '../services/Screening';
 import TerminalModal from '../components/global/Terminal';
 import IncomeTab from '../components/income/IncomeTab';
+import LandlordWatchTab from '../components/landlordWatch/LandlordWatchTab';
 import { useNavigate } from 'react-router-dom';
 import { PassportPhotoModal } from '../components/PassportPhotoModal';
 import { downloadFile } from '../services/firebaseStorage';
@@ -276,7 +278,8 @@ const Dashboard = () => {
   const tabs = [
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-4 h-4" /> },
     { id: 'cyber', label: 'Desk Services', icon: <Printer className="w-4 h-4" /> },
-    { id: 'income', label: 'Income', icon: <BarChart3 className="w-4 h-4" /> }
+    { id: 'income', label: 'Income', icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'watch', label: 'Landlord Watch', icon: <Eye className="w-4 h-4" /> }
   ];
 
   return (
@@ -430,6 +433,7 @@ const Dashboard = () => {
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'income' && <IncomeTab />}
+        {activeTab === 'watch' && <LandlordWatchTab />}
       </main>
 
       {['plot', 'cyber'].includes(activeTab) && (

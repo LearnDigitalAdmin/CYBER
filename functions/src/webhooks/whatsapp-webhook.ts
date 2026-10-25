@@ -45,6 +45,9 @@ import {
   handleGetInvoiceId,
   handleGetInvoiceMenu,
 } from '../handlers/rent.handler';
+import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../handlers/watch.entry';
+import { isWatchState } from '../handlers/watch.handler';
+import { claimMessage } from '../services/message-dedup.service';
 import { logger } from '../utils/logger';
 import { STATE } from '../constants/states';
 import { getMessage } from '../constants/messages';
@@ -106,7 +109,9 @@ export async function handleIncomingMessage(req: Request, res: Response): Promis
 async function processMessage(message: WhatsAppMessage): Promise<void> {
   try {
     const phone = message.from;
-    const text = message.text?.body || '';
+    // Reply-button / list-row taps arrive as `interactive`; typed text as `text`.
+    const interactiveId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id || '';
+    const text = message.text?.body || interactiveId || '';
     const messageId = message.id;
 
     logger.setContext({ phone });
@@ -114,12 +119,18 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       messageId,
       phone,
       textLength: text.length,
-      textPreview: text.substring(0, 50),
+      // The message body is deliberately not logged: it can be an OTP code, an ID number or a phone number.
       messageType: message.type,
     });
 
     // Get or create session
     let session = await createOrGetSession(phone);
+
+    // WhatsApp retries a delivery it thinks failed; handle each message id once.
+    if (!(await claimMessage(phone, messageId))) {
+      logger.info('Duplicate WhatsApp message ignored', { messageId });
+      return;
+    }
     logger.info('Session retrieved/created', {
       phone,
       sessionId: phone,
@@ -130,6 +141,17 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
 
     // Route to appropriate handler based on current state
     let response: string | null = null;
+
+    // ── Landlord Watch: replies are sent by the module itself (buttons, lists, documents) ──
+    if (isWatchState(session.currentState)) {
+      await handleWatchMessage(phone, { text, interactiveId: interactiveId || undefined }, session, message.timestamp);
+      return;
+    }
+    if (isWatchButtonId(interactiveId)) {
+      // A Landlord Watch button tapped after the user already left the module
+      await handleStaleWatchTap(phone, session);
+      return;
+    }
 
     switch (session.currentState) {
       case STATE.LANGUAGE_SELECTION:
@@ -326,7 +348,8 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       await sendWhatsAppMessage(formattedPhone, response);
       logger.info('Message sent successfully');
     } else {
-      logger.warn('No response generated from handler');
+      // Handlers such as Landlord Watch send their own replies and return an empty string.
+      logger.info('Handler returned no direct reply');
     }
   } catch (error) {
     logger.error('Error processing message', error);

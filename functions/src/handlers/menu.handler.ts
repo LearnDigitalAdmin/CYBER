@@ -11,6 +11,8 @@ import { getMenu } from '../constants/menus';
 import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { beginMyChama } from './mychama.handler';
+import { beginWatch } from './watch.entry';
+import { isWatchKeyword } from '../utils/watch.format';
 
 /**
  * Handle main menu selection
@@ -18,8 +20,14 @@ import { beginMyChama } from './mychama.handler';
  */
 export async function handleMainMenu(phone: string, input: string, session: Session): Promise<string> {
   try {
-    // Validate input (1-6)
-    const validation = validateMenuSelection(input, 1, 6);
+    // Landlord Watch keyword shortcuts (WATCH / LANDLORD / MWENYE NYUMBA)
+    if (isWatchKeyword(input)) {
+      logger.info('Navigating to Landlord Watch (keyword)');
+      return await beginWatch(phone, session);
+    }
+
+    // Validate input (1-7)
+    const validation = validateMenuSelection(input, 1, 7);
 
     if (!validation.valid || validation.option === undefined) {
       return getMenu('MAIN_MENU', session.language);
@@ -59,6 +67,10 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
         await updateSessionState(phone, STATE.HELP_MENU, {});
         logger.info('Navigating to Help');
         return getMenu('HELP_MENU', session.language);
+
+      case 7: // Landlord Watch
+        logger.info('Navigating to Landlord Watch');
+        return await beginWatch(phone, session);
 
       default:
         return getMenu('MAIN_MENU', session.language);

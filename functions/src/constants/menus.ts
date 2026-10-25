@@ -10,8 +10,8 @@ export const MENUS = {
   },
 
   MAIN_MENU: {
-    en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. My Chama\n4. Manage My Plot\n5. Exit\n6. Help',
-    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. My Chama\n4. Simamia Kipande Changu\n5. Toka\n6. Msaada',
+    en: '*Main Menu*\n\n1. Pay Rent\n2. Get Rent Invoice\n3. My Chama\n4. Manage My Plot\n5. Exit\n6. Help\n7. Landlord Watch',
+    sw: '*Menuu Kuu*\n\n1. Lipa Kodi\n2. Pata Ankara ya Kodi\n3. My Chama\n4. Simamia Kipande Changu\n5. Toka\n6. Msaada\n7. Landlord Watch – Fuatilia mali yako',
   },
 
   HELP_MENU: {
