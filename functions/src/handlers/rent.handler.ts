@@ -1,20 +1,22 @@
 /**
  * Rent Payment Handler
- * Handles complete rent payment flow: tenant lookup, invoice retrieval, payment processing, PDF generation
+ * Handles complete rent payment flow: tenant lookup, invoice retrieval, payment processing.
+ *
+ * Presentation is interactive (buttons, see utils/ui.ts); the business logic (Firestore lookup, payment initiation)
+ * is unchanged. Tapping a button is the same as typing its value: CONTINUE, EDIT, FULL, YES, NEW, 0 (back), # (menu).
  */
 
 import { Session } from '../types/session.types';
 import { updateSessionState, updateSessionContext, clearSessionContext } from '../services/session.service';
-import {
-  validateNationalId,
-  validatePhoneNumber,
-  checkNavigationCommand,
-} from '../utils/validator';
+import { validateNationalId, validatePhoneNumber, checkNavigationCommand } from '../utils/validator';
 import { getMessage } from '../constants/messages';
+import { ulabel } from '../constants/ui.messages';
 import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { db } from '../config/firebase.config';
 import { initiatePayment, hasPaymentInfo, getAssetContactInfo } from '../services/payment.service';
+import { btn, mainButton, mainMenuReply, Reply, uiButtons, uiText, welcomeReply, withNotice } from '../utils/ui';
+import { Outbound } from '../types/watch.types';
 
 interface TenantData {
   id: string;
@@ -43,55 +45,7 @@ interface InvoiceData {
   pdfUrl?: string;
 }
 
-/**
- * Helper: Handle navigation commands (0, 00, 000)
- */
-async function handleNavigation(
-  phone: string,
-  input: string,
-  session: Session,
-  previousState?: STATE
-): Promise<{ response: string | null; handled: boolean }> {
-  const nav = checkNavigationCommand(input);
-
-  if (nav.type === 'exit') {
-    logger.info('User exiting to language selection', { phone });
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
-    return {
-      response: getMenu('WELCOME', session.language),
-      handled: true,
-    };
-  }
-
-  if (nav.type === 'restart') {
-    logger.info('User restarting rent payment', { phone });
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
-    return {
-      response: getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language),
-      handled: true,
-    };
-  }
-
-  if (nav.type === 'back') {
-    if (!previousState) {
-      return {
-        response: getMessage('INVALID_INPUT', session.language),
-        handled: true,
-      };
-    }
-
-    logger.info('User going back', { phone, from: session.currentState, to: previousState });
-    await updateSessionState(phone, previousState, {});
-    return {
-      response: null,
-      handled: true,
-    };
-  }
-
-  return { response: null, handled: false };
-}
+type Lang = Session['language'];
 
 /**
  * Format currency for display
@@ -104,31 +58,173 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+const outstandingOf = (invoice: InvoiceData): number => invoice.totalAmount - invoice.amountPaid;
+
+/* ================================================================== *
+ * Screens
+ * ================================================================== */
+
+const backButton = (lang: Lang) => btn('0', ulabel('BACK', lang));
+
+/** First prompt, from the main menu. */
+export function promptNationalId(lang: Lang): Outbound {
+  return uiButtons(getMessage('ENTER_NATIONAL_ID', lang), [mainButton(lang)]);
+}
+
+/** Re-prompt for the tenant ID (after an error, "search again" or a restart). */
+function promptTenantId(lang: Lang): Outbound {
+  return uiButtons(getMessage('ENTER_TENANT_ID', lang), [mainButton(lang)]);
+}
+
+function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outbound {
+  return uiButtons(
+    getMessage('TENANT_FOUND', lang, {
+      name: tenant.name,
+      outstanding: formatCurrency(outstandingOf(invoice)),
+      billing: String(invoice.billingMonth),
+    }),
+    [btn('CONTINUE', ulabel('CONTINUE', lang)), btn('EDIT', ulabel('SEARCH_AGAIN', lang)), mainButton(lang)]
+  );
+}
+
+function promptPhone(lang: Lang): Outbound {
+  return uiButtons(getMessage('ENTER_MPESA_PHONE', lang), [backButton(lang), mainButton(lang)]);
+}
+
+function promptAmount(lang: Lang, invoice: InvoiceData): Outbound {
+  return uiButtons(getMessage('ENTER_PAYMENT_AMOUNT', lang, { outstanding: formatCurrency(outstandingOf(invoice)) }), [
+    btn('FULL', ulabel('PAY_FULL', lang)),
+    backButton(lang),
+    mainButton(lang),
+  ]);
+}
+
+function paymentSummary(lang: Lang, amount: number, mpesaPhone: string): Outbound {
+  return uiButtons(getMessage('PAY_SUMMARY', lang, { amount: formatCurrency(amount), phone: mpesaPhone }), [
+    btn('YES', ulabel('CONFIRM', lang)),
+    backButton(lang),
+    mainButton(lang),
+  ]);
+}
+
+/** A result message followed by the main menu, so the user is never left at a dead end. */
+const thenMenu = (message: string, lang: Lang): Reply => [uiText(message), mainMenuReply(lang)];
+
+/** Unexpected error: say so, reset to the main menu, and show it. */
+async function failToMenu(phone: string, session: Session): Promise<Reply> {
+  await clearSessionContext(phone);
+  await updateSessionState(phone, STATE.MAIN_MENU, {});
+  return thenMenu(getMessage('SYSTEM_ERROR', session.language), session.language);
+}
+
+/* ================================================================== *
+ * Navigation
+ * ================================================================== */
+
+/** Where "Back" (0) goes from each step. A step without an entry goes to the main menu. */
+const RENT_BACK: Partial<Record<string, STATE>> = {
+  [STATE.PAY_RENT_CONFIRM]: STATE.PAY_RENT_WAITING_ID,
+  [STATE.PAY_RENT_MPESA]: STATE.PAY_RENT_WAITING_ID,
+  [STATE.PAY_RENT_AMOUNT]: STATE.PAY_RENT_MPESA,
+  [STATE.PAY_RENT_PROCESSING]: STATE.PAY_RENT_AMOUNT,
+  [STATE.PAY_RENT_CONFIRM_AMOUNT]: STATE.PAY_RENT_PROCESSING,
+};
+
+function readSaved(session: Session): { tenant: TenantData | null; invoice: InvoiceData | null } {
+  const ctx = session.context || {};
+  try {
+    return {
+      tenant: ctx.foundTenant ? (JSON.parse(ctx.foundTenant as string) as TenantData) : null,
+      invoice: ctx.foundInvoice ? (JSON.parse(ctx.foundInvoice as string) as InvoiceData) : null,
+    };
+  } catch {
+    return { tenant: null, invoice: null };
+  }
+}
+
 /**
- * Import menus
+ * The screen for a Pay Rent step, rebuilt from the saved session. Returns null when what the step needs is missing
+ * (the caller then falls back to the first step).
  */
-import { getMenu } from '../constants/menus';
+function renderRentStep(state: string, session: Session): Outbound | null {
+  const lang = session.language;
+  const { tenant, invoice } = readSaved(session);
+  switch (state) {
+    case STATE.PAY_RENT_WAITING_ID:
+      return promptTenantId(lang);
+    case STATE.PAY_RENT_MPESA:
+      return tenant && invoice ? tenantFound(lang, tenant, invoice) : null;
+    case STATE.PAY_RENT_AMOUNT:
+      return promptPhone(lang);
+    case STATE.PAY_RENT_PROCESSING:
+      return invoice ? promptAmount(lang, invoice) : null;
+    case STATE.PAY_RENT_CONFIRM_AMOUNT: {
+      const ctx = session.context || {};
+      return typeof ctx.paymentAmount === 'number' && ctx.mpesaPhone ? paymentSummary(lang, ctx.paymentAmount, String(ctx.mpesaPhone)) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Typed navigation shared by Pay Rent and Get Invoice: 0 back, 00 start over, 000 exit to the language screen.
+ * Returns the reply when the input was a navigation command, otherwise null.
+ */
+async function handleNavigation(phone: string, input: string, session: Session): Promise<Reply | null> {
+  const lang = session.language;
+  const nav = checkNavigationCommand(input);
+
+  if (nav.type === 'exit') {
+    logger.info('User exiting to language selection', { phone });
+    await clearSessionContext(phone);
+    await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
+    return welcomeReply();
+  }
+
+  if (nav.type === 'restart') {
+    logger.info('User restarting', { phone });
+    const first = session.currentState === STATE.GET_INVOICE_WAITING_ID ? STATE.GET_INVOICE_WAITING_ID : STATE.PAY_RENT_WAITING_ID;
+    await clearSessionContext(phone);
+    await updateSessionState(phone, first, {});
+    return promptTenantId(lang);
+  }
+
+  if (nav.type === 'back') {
+    const target = RENT_BACK[session.currentState];
+    const screen = target ? renderRentStep(target, session) : null;
+    if (!target || !screen) {
+      // First step (or nothing saved to go back to): leave to the main menu
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.MAIN_MENU, {});
+      return mainMenuReply(lang);
+    }
+    logger.info('User going back', { phone, from: session.currentState, to: target });
+    await updateSessionState(phone, target, {});
+    return screen;
+  }
+
+  return null;
+}
+
+/* ================================================================== *
+ * Pay Rent
+ * ================================================================== */
 
 /**
  * Handle tenant ID for pay rent
  */
-export async function handlePayRentId(phone: string, input: string, session: Session): Promise<string> {
+export async function handlePayRentId(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
     const nav = await handleNavigation(phone, input, session);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
+    if (nav) return nav;
 
     // Validate tenant ID format
     if (!validateNationalId(input)) {
-      return (
-        getMessage('INVALID_ID', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('INVALID_ID', lang));
     }
 
     const tenantId = input.trim();
@@ -172,12 +268,7 @@ export async function handlePayRentId(phone: string, input: string, session: Ses
 
     if (!foundTenant) {
       logger.warn('Tenant not found', { tenantId });
-      return (
-        getMessage('TENANT_NOT_FOUND', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('TENANT_NOT_FOUND', lang));
     }
 
     // Find unpaid invoice or last paid invoice
@@ -203,12 +294,7 @@ export async function handlePayRentId(phone: string, input: string, session: Ses
 
     if (!foundInvoice) {
       logger.warn('No invoice found for tenant', { tenantId });
-      return (
-        getMessage('INVOICE_NOT_FOUND', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('INVOICE_NOT_FOUND', lang));
     }
 
     // Store found data in session
@@ -222,82 +308,32 @@ export async function handlePayRentId(phone: string, input: string, session: Ses
     // Move to next state
     await updateSessionState(phone, STATE.PAY_RENT_MPESA, {});
 
-    const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-
-    return (
-      session.language === 'en'
-        ? `*Tenant Found! 🎯*\n\n📱 Name: ${foundTenant.name}\n💰 Outstanding: ${formatCurrency(outstanding)}\n📅 Billing: ${foundInvoice.billingMonth}\n\nReply *CONTINUE* to proceed`
-        : `*Mkokoteni Aliyepatikana! 🎯*\n\n📱 Jina: ${foundTenant.name}\n💰 Unajifunguka: ${formatCurrency(outstanding)}\n📅 Billi: ${foundInvoice.billingMonth}\n\nJibu *ENDELEA* kuendelea`
-    );
+    return tenantFound(lang, foundTenant, foundInvoice);
   } catch (error) {
     logger.error('Error handling rent ID', error);
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }
 
 /**
- * Step 2: Confirm tenant found and move to payment
+ * Legacy step: the tenant-found screen now lives in PAY_RENT_MPESA. A session parked here (for example mid-deploy)
+ * is moved across and handled as if it had been there all along.
  */
-export async function handlePayRentConfirm(phone: string, input: string, session: Session): Promise<string> {
-  try {
-    // Check navigation
-    const nav = await handleNavigation(phone, input, session, STATE.PAY_RENT_WAITING_ID);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
-
-    const context = session.context;
-    const foundTenant = context.foundTenant ? JSON.parse(context.foundTenant as string) : null;
-    const foundInvoice = context.foundInvoice ? JSON.parse(context.foundInvoice as string) : null;
-
-    if (!foundTenant || !foundInvoice) {
-      // Search was not completed or failed, go back
-      await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
-
-    const response = input.trim().toUpperCase();
-
-    // Handle user response
-    if (response === 'CONTINUE' || response === 'ENDELEA') {
-      // Proceed to M-Pesa phone entry
-      await updateSessionState(phone, STATE.PAY_RENT_MPESA, {});
-
-      return (
-        getMessage('ENTER_MPESA_PHONE', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
-    } else {
-      // Invalid response - stay on same screen
-      const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-      const confirmMessage = session.language === 'en'
-        ? `*Tenant Found! 🎯*\n\n📱 Name: ${foundTenant.name}\n💰 Outstanding: ${formatCurrency(outstanding)}\n📅 Billing: ${foundInvoice.billingMonth}\n\nReply *CONTINUE* to pay${getMessage('NAVIGATION_HELP', session.language)}`
-        : `*Mkokoteni Aliyepatikana! 🎯*\n\n📱 Jina: ${foundTenant.name}\n💰 Unajifunguka: ${formatCurrency(outstanding)}\n📅 Billi: ${foundInvoice.billingMonth}\n\nJibu *ENDELEA* kulipa${getMessage('NAVIGATION_HELP', session.language)}`;
-
-      return confirmMessage;
-    }
-  } catch (error) {
-    logger.error('Error searching for tenant/invoice', error);
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return getMessage('SYSTEM_ERROR', session.language);
-  }
+export async function handlePayRentConfirm(phone: string, input: string, session: Session): Promise<Reply> {
+  await updateSessionState(phone, STATE.PAY_RENT_MPESA, {});
+  return handlePayRentMpesa(phone, input, { ...session, currentState: STATE.PAY_RENT_MPESA });
 }
 
 /**
- * Step 3: Confirm and collect M-Pesa details
+ * Step 2: tenant found. Continue to payment, or search again.
  */
-export async function handlePayRentMpesa(phone: string, input: string, session: Session): Promise<string> {
+export async function handlePayRentMpesa(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
-    const nav = await handleNavigation(phone, input, session, STATE.PAY_RENT_CONFIRM);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
+    const nav = await handleNavigation(phone, input, session);
+    if (nav) return nav;
 
     const response = input.trim().toUpperCase();
 
@@ -306,161 +342,126 @@ export async function handlePayRentMpesa(phone: string, input: string, session: 
       logger.info('User requested to edit tenant', { phone });
       await clearSessionContext(phone);
       await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
+      return promptTenantId(lang);
     }
 
     // Handle CONTINUE
     if (['CONTINUE', 'ENDELEA', 'YES', 'NDIO'].includes(response)) {
       logger.info('User proceeding to payment', { phone });
       await updateSessionState(phone, STATE.PAY_RENT_AMOUNT, {});
-      return (
-        getMessage('ENTER_MPESA_PHONE', session.language) +
-        '\n\n' +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return promptPhone(lang);
     }
 
-    // Invalid response - show options again
-    const context = session.context;
-    const foundTenant = JSON.parse(context.foundTenant as string);
-    const foundInvoice = JSON.parse(context.foundInvoice as string);
-    const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-
-    return (
-      getMessage('INVALID_INPUT', session.language) +
-      '\n\n' +
-      `*Tenant Found! 🎯*\n\n📱 Name: ${foundTenant.name}\n💰 Outstanding: ${formatCurrency(outstanding)}\n📅 Billing: ${foundInvoice.billingMonth}\n\nReply *CONTINUE* to pay or *EDIT* to search again` +
-      getMessage('NAVIGATION_HELP', session.language)
-    );
+    // Anything else: show the choices again
+    const screen = renderRentStep(STATE.PAY_RENT_MPESA, session);
+    if (!screen) {
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
+      return promptTenantId(lang);
+    }
+    return withNotice(screen, getMessage('INVALID_INPUT', lang));
   } catch (error) {
     logger.error('Error handling rent confirmation', error);
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }
 
 /**
- * Step 4: Collect M-Pesa phone and amount
+ * Step 3: collect the M-Pesa phone number
  */
-export async function handlePayRentAmount(phone: string, input: string, session: Session): Promise<string> {
+export async function handlePayRentAmount(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
-    const nav = await handleNavigation(phone, input, session, STATE.PAY_RENT_CONFIRM);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
+    const nav = await handleNavigation(phone, input, session);
+    if (nav) return nav;
 
     const mpesaPhone = input.trim();
     const validation = validatePhoneNumber(mpesaPhone);
 
     if (!validation.valid || !validation.formatted) {
-      return (
-        getMessage('INVALID_PHONE', session.language) +
-        '\n\n' +
-        getMessage('ENTER_MPESA_PHONE', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptPhone(lang), getMessage('INVALID_PHONE', lang));
+    }
+
+    const { invoice } = readSaved(session);
+    if (!invoice) {
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
+      return promptTenantId(lang);
     }
 
     // Store raw phone in 07/01 format for payment service to format
     await updateSessionContext(phone, { mpesaPhone });
-    const context = session.context;
-    const foundInvoice = JSON.parse(context.foundInvoice as string);
-    const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-
-    const amountPrompt =
-      getMessage('ENTER_PAYMENT_AMOUNT', session.language, {
-        outstanding: formatCurrency(outstanding),
-      }) + getMessage('NAVIGATION_HELP', session.language);
-
     await updateSessionState(phone, STATE.PAY_RENT_PROCESSING, {});
-    return amountPrompt;
+    return promptAmount(lang, invoice);
   } catch (error) {
     logger.error('Error handling M-Pesa phone', error);
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }
 
 /**
- * Step 5: Process payment
+ * Step 4: collect the amount
  */
-export async function handlePayRentProcessing(phone: string, input: string, session: Session): Promise<string> {
+export async function handlePayRentProcessing(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
-    const nav = await handleNavigation(phone, input, session, STATE.PAY_RENT_AMOUNT);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      const context = session.context;
-      const foundInvoice = JSON.parse(context.foundInvoice as string);
-      const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-      return (
-        getMessage('ENTER_PAYMENT_AMOUNT', session.language, {
-          outstanding: formatCurrency(outstanding),
-        }) + getMessage('NAVIGATION_HELP', session.language)
-      );
+    const nav = await handleNavigation(phone, input, session);
+    if (nav) return nav;
+
+    const { invoice } = readSaved(session);
+    if (!invoice) {
+      await clearSessionContext(phone);
+      await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
+      return promptTenantId(lang);
     }
+    const outstanding = outstandingOf(invoice);
 
     const amountInput = input.trim();
-    const amount = parseFloat(amountInput);
+    const wantsFull = ['FULL', 'ZOTE', 'YOTE'].includes(amountInput.toUpperCase());
+    const amount = wantsFull ? outstanding : parseFloat(amountInput);
 
     if (isNaN(amount) || amount <= 0) {
-      return (
-        getMessage('INVALID_AMOUNT', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptAmount(lang, invoice), getMessage('INVALID_AMOUNT', lang));
     }
 
-    const context = session.context;
-    const foundInvoice = JSON.parse(context.foundInvoice as string);
-    const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-
     if (amount > outstanding) {
-      return (
-        getMessage('INVALID_AMOUNT_EXCEEDS', session.language, {
-          outstanding: formatCurrency(outstanding),
-        }) + getMessage('NAVIGATION_HELP', session.language)
+      return withNotice(
+        promptAmount(lang, invoice),
+        getMessage('INVALID_AMOUNT_EXCEEDS', lang, { outstanding: formatCurrency(outstanding) })
       );
     }
 
     await updateSessionContext(phone, { paymentAmount: amount });
     await updateSessionState(phone, STATE.PAY_RENT_CONFIRM_AMOUNT, {});
 
-    const summaryMessage = `*Payment Summary* 💳\n\n💰 Amount: ${formatCurrency(amount)}\n📱 Phone: ${context.mpesaPhone}\n✅ Reply *YES* to confirm or *BACK* to edit${getMessage('NAVIGATION_HELP', session.language)}`;
-
-    return summaryMessage;
+    return paymentSummary(lang, amount, String(session.context.mpesaPhone ?? ''));
   } catch (error) {
     logger.error('Error processing payment amount', error);
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }
 
 /**
- * Step 6: Confirm and complete payment
+ * Step 5: Confirm and complete payment
  */
-export async function handlePayRentConfirmAmount(phone: string, input: string, session: Session): Promise<string> {
+export async function handlePayRentConfirmAmount(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
-    const nav = await handleNavigation(phone, input, session, STATE.PAY_RENT_PROCESSING);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      const context = session.context;
-      const foundInvoice = JSON.parse(context.foundInvoice as string);
-      const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-      return (
-        getMessage('ENTER_PAYMENT_AMOUNT', session.language, {
-          outstanding: formatCurrency(outstanding),
-        }) + getMessage('NAVIGATION_HELP', session.language)
-      );
-    }
+    const nav = await handleNavigation(phone, input, session);
+    if (nav) return nav;
 
     const response = input.trim().toUpperCase();
 
     if (!['YES', 'Y', 'NDIO', 'NDIYO'].includes(response)) {
-      return (
-        getMessage('INVALID_INPUT', session.language) +
-        '\n\n*Confirm Payment* ✅\n\nReply *YES* to proceed' +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      const screen = renderRentStep(STATE.PAY_RENT_CONFIRM_AMOUNT, session);
+      if (!screen) return failToMenu(phone, session);
+      return withNotice(screen, getMessage('INVALID_INPUT', lang));
     }
 
     logger.info('Processing rent payment', { phone });
@@ -517,11 +518,7 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
         await clearSessionContext(phone);
         await updateSessionState(phone, STATE.MAIN_MENU, {});
 
-        const fallbackMessage = session.language === 'en'
-          ? `*Payment Processing Not Available* ⚠️\n\nPayment processing is currently unavailable for this property.\n\n📱 Please contact the property manager:\n*${assetName}*\n📞 ${assetPhone}\n\nThey will assist you with the payment process.\n\nReturning to Main Menu...`
-          : `*Malipo Hayana Available* ⚠️\n\nMalipo hayawezi kusindikwa kwa sasa kwa mali hii.\n\n📱 Tafadhali wasiliana na mkadhi wa mali:\n*${assetName}*\n📞 ${assetPhone}\n\nWatakutulia na mchakato wa malipo.\n\nKurudi kwenye Menuu Kuu...`;
-
-        return fallbackMessage;
+        return thenMenu(getMessage('PAY_NOT_AVAILABLE', lang, { name: assetName, phone: assetPhone }), lang);
       }
 
       // Step 3: Initiate payment with asset details
@@ -549,11 +546,7 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
           await clearSessionContext(phone);
           await updateSessionState(phone, STATE.MAIN_MENU, {});
 
-          const errorMsg = session.language === 'en'
-            ? `*Payment Failed* ❌\n\n${paymentResult.message}\n\nPlease try again later or contact support.\n\nReturning to Main Menu...`
-            : `*Malipo Yameshindwa* ❌\n\n${paymentResult.message}\n\nTafadhali jaribu tena au wasiliana na msaada.\n\nKurudi kwenye Menuu Kuu...`;
-
-          return errorMsg;
+          return thenMenu(getMessage('PAY_FAILED_DETAIL', lang, { reason: paymentResult.message }), lang);
         }
 
         paymentReference = paymentResult.reference;
@@ -571,26 +564,27 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
         await clearSessionContext(phone);
         await updateSessionState(phone, STATE.MAIN_MENU, {});
 
-        const errorMsg = session.language === 'en'
-          ? `*Payment Failed* ❌\n\nAn unexpected error occurred. Please try again later.\n\nReturning to Main Menu...`
-          : `*Malipo Yameshindwa* ❌\n\nKulikuwa na hitilafu. Tafadhali jaribu baadaye.\n\nKurudi kwenye Menuu Kuu...`;
-
-        return errorMsg;
+        return thenMenu(getMessage('PAY_FAILED_UNEXPECTED', lang), lang);
       }
 
       // The invoice is NOT touched here. Initiating an M-Pesa prompt is not a payment: PAY's webhook credits the invoice
       // (users/{agent}/invoices/{id}) when Paystack confirms it — full => paid, part-payment => partial with the balance
       // as arrears — and sends the payment SMS. A prompt that is never completed leaves the invoice as it was.
 
-      // Step 7: Clear session and return to main menu
+      // Step 4: Clear session and return to main menu
       await clearSessionContext(phone);
       await updateSessionState(phone, STATE.MAIN_MENU, {});
 
-      const successMessage = session.language === 'en'
-        ? `*Payment Initiated! ✅*\n\n💰 Amount: ${formatCurrency(paymentAmount)}\n📱 Tenant: ${foundTenant.name}\n📱 Phone: ${mpesaPhone}\n📅 Date: ${new Date().toLocaleDateString('en-KE')}\n\n*Reference:* ${paymentReference}\n\n📲 You will receive an M-Pesa prompt shortly.\nPlease enter your M-Pesa PIN to complete the payment.\n\nInvoice has been updated in the system.\n\nReturning to Main Menu...`
-        : `*Malipo Umeingia! ✅*\n\n💰 Kiasi: ${formatCurrency(paymentAmount)}\n📱 Mkokoteni: ${foundTenant.name}\n📱 Simu: ${mpesaPhone}\n📅 Tarehe: ${new Date().toLocaleDateString('en-KE')}\n\n*Kumbuka:* ${paymentReference}\n\n📲 Utapokea ujumbe wa M-Pesa karibuni.\nTafadhali ingiza namba yako ya M-Pesa kwa kummaliza malipo.\n\nAnkara imebadilishwa katika mfumo.\n\nKurudi kwenye Menuu Kuu...`;
-
-      return successMessage;
+      return thenMenu(
+        getMessage('PAY_INITIATED', lang, {
+          amount: formatCurrency(paymentAmount),
+          name: foundTenant.name,
+          phone: mpesaPhone,
+          date: new Date().toLocaleDateString('en-KE'),
+          reference: paymentReference,
+        }),
+        lang
+      );
     } catch (paymentError) {
       logger.error('Payment processing failed', paymentError);
 
@@ -598,23 +592,25 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
       await clearSessionContext(phone);
       await updateSessionState(phone, STATE.MAIN_MENU, {});
 
-      const errorMessage =
-        paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
-      const errorMsg = session.language === 'en'
-        ? `*Payment Failed* ❌\n\n${errorMessage}\n\nPlease try again later or contact support.\n\nReturning to Main Menu...`
-        : `*Malipo Yameshindwa* ❌\n\n${errorMessage}\n\nTafadhali jaribu tena au wasiliana na msaada.\n\nKurudi kwenye Menuu Kuu...`;
-
-      return errorMsg;
+      const errorMessage = paymentError instanceof Error ? paymentError.message : 'Payment processing failed';
+      return thenMenu(getMessage('PAY_FAILED_DETAIL', lang, { reason: errorMessage }), lang);
     }
   } catch (error) {
     logger.error('Error confirming rent payment', error);
-
-    // Clear session on error
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.MAIN_MENU, {});
-
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
+}
+
+/* ================================================================== *
+ * Get Invoice
+ * ================================================================== */
+
+/**
+ * Entry for GET_INVOICE_WAITING_ID. The first message is the tenant ID; once an invoice has been shown (tenantId is
+ * saved) later messages are navigation, "Another invoice", or a new ID typed straight away.
+ */
+export async function handleGetInvoice(phone: string, input: string, session: Session): Promise<Reply> {
+  return session.context?.tenantId === undefined ? handleGetInvoiceId(phone, input, session) : handleGetInvoiceMenu(phone, input, session);
 }
 
 /**
@@ -622,23 +618,17 @@ export async function handlePayRentConfirmAmount(phone: string, input: string, s
  * Fetch and display tenant invoice with PDF link if available
  * Similar to Pay Rent flow but only retrieves and displays invoice
  */
-export async function handleGetInvoiceId(phone: string, input: string, session: Session): Promise<string> {
+export async function handleGetInvoiceId(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation
     const nav = await handleNavigation(phone, input, session);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
-    }
+    if (nav) return nav;
 
     // Validate tenant ID format
     if (!validateNationalId(input)) {
-      return (
-        getMessage('INVALID_ID', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('INVALID_ID', lang));
     }
 
     const tenantId = input.trim();
@@ -681,12 +671,7 @@ export async function handleGetInvoiceId(phone: string, input: string, session: 
 
     if (!foundTenant) {
       logger.warn('❌ Tenant not found for invoice', { tenantId });
-      return (
-        getMessage('TENANT_NOT_FOUND', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('TENANT_NOT_FOUND', lang));
     }
 
     // Find unpaid invoice or last paid invoice
@@ -712,12 +697,7 @@ export async function handleGetInvoiceId(phone: string, input: string, session: 
 
     if (!foundInvoice) {
       logger.warn('❌ No invoice found for tenant', { tenantId });
-      return (
-        getMessage('INVOICE_NOT_FOUND', session.language) +
-        '\n\n' +
-        getMessage('ENTER_TENANT_ID', session.language) +
-        getMessage('NAVIGATION_HELP', session.language)
-      );
+      return withNotice(promptTenantId(lang), getMessage('INVOICE_NOT_FOUND', lang));
     }
 
     // Store found data in session for potential future use
@@ -735,64 +715,56 @@ export async function handleGetInvoiceId(phone: string, input: string, session: 
     });
 
     // Format invoice display
-    const outstanding = foundInvoice.totalAmount - foundInvoice.amountPaid;
-    const invoiceDetailsEn = `*Invoice Retrieved! 📄*\n\n👤 Tenant: ${foundTenant.name}\n💰 Rent Amount: ${formatCurrency(foundInvoice.rentAmount)}\n💧 Water: ${formatCurrency(foundInvoice.waterCharges || 0)}\n⚡ Power: ${formatCurrency(foundInvoice.powerCharges || 0)}\n🏷️ Other: ${formatCurrency(foundInvoice.otherCharges || 0)}\n📊 Total: ${formatCurrency(foundInvoice.totalAmount)}\n✅ Paid: ${formatCurrency(foundInvoice.amountPaid)}\n⏳ Outstanding: ${formatCurrency(outstanding)}\n📅 Billing Month: ${foundInvoice.billingMonth}${foundInvoice.dueDate ? `\n📆 Due Date: ${foundInvoice.dueDate}` : ''}${foundInvoice.paidDate ? `\n✔️ Paid Date: ${foundInvoice.paidDate}` : ''}`;
+    const body =
+      getMessage('INVOICE_DETAILS', lang, {
+        name: foundTenant.name,
+        billing: String(foundInvoice.billingMonth),
+        rent: formatCurrency(foundInvoice.rentAmount),
+        water: formatCurrency(foundInvoice.waterCharges || 0),
+        power: formatCurrency(foundInvoice.powerCharges || 0),
+        other: formatCurrency(foundInvoice.otherCharges || 0),
+        total: formatCurrency(foundInvoice.totalAmount),
+        paid: formatCurrency(foundInvoice.amountPaid),
+        outstanding: formatCurrency(outstandingOf(foundInvoice)),
+      }) +
+      (foundInvoice.dueDate ? getMessage('INVOICE_DUE', lang, { date: foundInvoice.dueDate }) : '') +
+      (foundInvoice.paidDate ? getMessage('INVOICE_PAID_ON', lang, { date: foundInvoice.paidDate }) : '') +
+      (foundInvoice.pdfUrl ? getMessage('INVOICE_PDF', lang, { url: foundInvoice.pdfUrl }) : getMessage('INVOICE_NO_PDF', lang));
 
-    const invoiceDetailsSw = `*Ankara Imepatikana! 📄*\n\n👤 Mkokoteni: ${foundTenant.name}\n💰 Kodi: ${formatCurrency(foundInvoice.rentAmount)}\n💧 Maji: ${formatCurrency(foundInvoice.waterCharges || 0)}\n⚡ Umeme: ${formatCurrency(foundInvoice.powerCharges || 0)}\n🏷️ Mengine: ${formatCurrency(foundInvoice.otherCharges || 0)}\n📊 Jumla: ${formatCurrency(foundInvoice.totalAmount)}\n✅ Lilipwa: ${formatCurrency(foundInvoice.amountPaid)}\n⏳ Linabaki: ${formatCurrency(outstanding)}\n📅 Mwezi wa Billi: ${foundInvoice.billingMonth}${foundInvoice.dueDate ? `\n📆 Tarehe ya Mwisho: ${foundInvoice.dueDate}` : ''}${foundInvoice.paidDate ? `\n✔️ Tarehe ya Malipo: ${foundInvoice.paidDate}` : ''}`;
-
-    // Add PDF link if available
-    const pdfSection = foundInvoice.pdfUrl
-      ? (session.language === 'en'
-          ? `\n\n📥 *Download Invoice:*\n${foundInvoice.pdfUrl}`
-          : `\n\n📥 *Pakua Ankara:*\n${foundInvoice.pdfUrl}`)
-      : (session.language === 'en'
-          ? '\n\n⚠️ *PDF not yet generated*'
-          : '\n\n⚠️ *PDF haijabadilishwa bado*');
-
-    // Add navigation back to menu
-    const navigationMsg = session.language === 'en'
-      ? `\n\n*Navigation:*\n*0* = Back to Main Menu\n*000* = Exit`
-      : `\n\n*Matembezi:*\n*0* = Kurudi kwenye Menuu Kuu\n*000* = Toka`;
-
-    // Move to next state to handle back navigation
+    // Stay in this state: follow-up messages are handled by handleGetInvoiceMenu
     await updateSessionState(phone, STATE.GET_INVOICE_WAITING_ID, {});
 
-    return (session.language === 'en' ? invoiceDetailsEn : invoiceDetailsSw) + pdfSection + navigationMsg;
+    return uiButtons(body, [btn('NEW', ulabel('ANOTHER_INVOICE', lang)), mainButton(lang)]);
   } catch (error) {
     logger.error('Error handling get invoice', error);
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }
 
 /**
- * Handle GET_INVOICE_WAITING_ID state
- * Allows user to navigate back to main menu or repeat the request
+ * Handle GET_INVOICE_WAITING_ID once an invoice has been shown:
+ * "Another invoice" (NEW) or a new tenant ID starts a fresh lookup; 0 / # return to the main menu.
  */
-export async function handleGetInvoiceMenu(phone: string, input: string, session: Session): Promise<string> {
+export async function handleGetInvoiceMenu(phone: string, input: string, session: Session): Promise<Reply> {
   try {
+    const lang = session.language;
+
     // Check navigation commands
-    const nav = await handleNavigation(phone, input, session, STATE.MAIN_MENU);
-    if (nav.handled && nav.response) return nav.response;
-    if (nav.handled) {
-      return getMenu('MAIN_MENU', session.language);
-    }
+    const nav = await handleNavigation(phone, input, session);
+    if (nav) return nav;
 
-    // If user pressed 0 but it wasn't detected as back nav, treat as back to main menu
-    if (input.trim() === '0') {
-      logger.info('👈 User navigating back from get invoice to main menu', { phone });
-      await clearSessionContext(phone);
-      await updateSessionState(phone, STATE.MAIN_MENU, {});
-      return getMenu('MAIN_MENU', session.language);
-    }
+    // Start over: forget the previous lookup so the next message is treated as a tenant ID
+    await clearSessionContext(phone);
 
-    // Any other input: ask for tenant ID again
-    return getMessage('ENTER_TENANT_ID', session.language) + getMessage('NAVIGATION_HELP', session.language);
+    if (input.trim().toUpperCase() === 'NEW') {
+      return promptTenantId(lang);
+    }
+    if (validateNationalId(input)) {
+      return handleGetInvoiceId(phone, input, { ...session, context: {} });
+    }
+    return promptTenantId(lang);
   } catch (error) {
     logger.error('Error in get invoice menu', error);
-    await clearSessionContext(phone);
-    await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return getMessage('SYSTEM_ERROR', session.language);
+    return failToMenu(phone, session);
   }
 }

@@ -16,7 +16,7 @@ Main menu option **7. Landlord Watch** (Kiswahili: *Landlord Watch – Fuatilia 
 | `handlers/watch.entry.ts` | Production wiring: session store, WhatsApp sender, real clock. Called by the menu handler and the webhook. |
 | `services/watch.api.ts` | Typed client for `lwBotApi` + error normalisation + `createWatchApi()` (mock switch). |
 | `services/watch.mock.ts` | In-memory backend for `LW_MOCK=1`. |
-| `services/watch.sender.ts` | Buttons, list messages and documents via the Cloud API (limits enforced, numbered-text fallback). |
+| `services/wa.sender.ts` | Buttons, list messages and documents via the Cloud API (limits enforced, numbered-text fallback). |
 | `services/message-dedup.service.ts`, `utils/dedup.ts` | Handle each WhatsApp message id once (webhook retries). |
 | `utils/watch.format.ts` | Owner-ID / phone normalisation, pagination, dates (Nairobi, Swahili months), nav commands. |
 | `utils/watch.render.ts` | Snapshot to text (summary, lists, money, trend). |

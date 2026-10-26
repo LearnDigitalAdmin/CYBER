@@ -278,8 +278,10 @@ export interface MyChamaSessionContext {
   memberPhone?: string;
   /** Navigation back-stack of STATE values. */
   stack?: string[];
-  /** Options rendered on the last numbered list, in display order. */
+  /** Options rendered on the last list, in display order (a tap or a typed number is the 1-based position). */
   options?: string[];
+  /** Page of the picker on screen (0-based). Reset whenever the state changes. */
+  page?: number;
   /** Working values for the in-flight sub-flow. */
   contributionId?: string;
   loanId?: string;

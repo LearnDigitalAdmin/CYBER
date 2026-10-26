@@ -5,7 +5,7 @@ import { LwError } from '../../services/watch.api';
 import { TranscriptRequest, Outbound, Snapshot } from '../../types/watch.types';
 import { MockBackend } from '../../services/watch.mock';
 import { renderMoney, renderSummary, renderTenantList, renderTrend, selectTenants, TENANT_PAGE_SIZE } from '../../utils/watch.render';
-import { buildCloudPayload, expandOutbound, sendWatchOutbound, toNumberedText, META_WINDOW_CLOSED } from '../../services/watch.sender';
+import { buildCloudPayload, expandOutbound, sendOutbound, toNumberedText, META_WINDOW_CLOSED } from '../../services/wa.sender';
 import { WATCH_ERRORS, WATCH_LABELS, WATCH_MESSAGES, lwErrorMessage, waitText } from '../../constants/watch.messages';
 import { LW_ERROR_CODES } from '../../types/watch.types';
 import { FakeClock } from './harness';
@@ -249,13 +249,13 @@ describe('sender respects WhatsApp limits', () => {
       posted.push(payload);
       return payload.type === 'interactive' ? { status: 400, data: { error: { code: 131009 } } } : { status: 200, data: {} };
     };
-    const r = await sendWatchOutbound('254712345678', { kind: 'buttons', body: 'Pick', buttons: [{ id: 'lw:a', title: 'A' }] }, { post: rejectInteractive });
+    const r = await sendOutbound('254712345678', { kind: 'buttons', body: 'Pick', buttons: [{ id: 'lw:a', title: 'A' }] }, { post: rejectInteractive });
     assert.equal(r.ok, true);
     assert.deepEqual(posted.map((p) => p.type), ['interactive', 'text']);
 
     posted.length = 0;
     const closed = async (_u: string, payload: any) => (posted.push(payload), { status: 400, data: { error: { code: META_WINDOW_CLOSED } } });
-    const r2 = await sendWatchOutbound('254712345678', { kind: 'buttons', body: 'Pick', buttons: [{ id: 'lw:a', title: 'A' }] }, { post: closed });
+    const r2 = await sendOutbound('254712345678', { kind: 'buttons', body: 'Pick', buttons: [{ id: 'lw:a', title: 'A' }] }, { post: closed });
     assert.deepEqual([r2.ok, r2.errorCode, posted.length], [false, META_WINDOW_CLOSED, 1]);
   });
 });

@@ -5,14 +5,13 @@
 import { Session } from '../types/session.types';
 import { Lang, Outbound, WatchCtx } from '../types/watch.types';
 import { STATE } from '../constants/states';
-import { getMenu } from '../constants/menus';
 import { wmsg } from '../constants/watch.messages';
 import { getSession, updateSessionLanguage, updateSessionState } from '../services/session.service';
 import { formatPhoneForWhatsApp } from '../services/whatsapp.service';
-import { getWhatsAppApiUrl, getWhatsAppHeaders } from '../config/whatsapp.config';
 import { createWatchApi } from '../services/watch.api';
-import { sendWatchOutbound } from '../services/watch.sender';
-import { recordWhatsAppUsage } from '../utils/whatsapp.usage';
+import { sendOutbound } from '../services/wa.sender';
+import { cloudSenderDeps } from '../services/outbound.service';
+import { mainMenuReply } from '../utils/ui';
 import { insideServiceWindow, toE164 } from '../utils/watch.format';
 import { realSleep } from '../utils/watch.poll';
 import { ACTION_PREFIX, Incoming, WatchDeps, WatchFlow, WatchStore } from './watch.handler';
@@ -42,17 +41,12 @@ function buildDeps(phone: string, session: Session): WatchDeps {
   const to = formatPhoneForWhatsApp(phone);
   return {
     api: createWatchApi(toE164(phone)),
-    send: (o: Outbound) =>
-      sendWatchOutbound(to, o, {
-        url: getWhatsAppApiUrl,
-        headers: getWhatsAppHeaders,
-        meter: (ok) => recordWhatsAppUsage({ kind: 'outbound', ok }),
-      }),
+    send: (o: Outbound) => sendOutbound(to, o, cloudSenderDeps()),
     store,
     now: () => Date.now(),
     sleep: realSleep,
     actorPhone: toE164(phone),
-    mainMenuText: (lang) => getMenu('MAIN_MENU', lang),
+    mainMenu: mainMenuReply,
   };
 }
 
@@ -86,7 +80,7 @@ export async function handleWatchMessage(
 export async function handleStaleWatchTap(phone: string, session: Session): Promise<void> {
   const deps = buildDeps(phone, session);
   await deps.send({ kind: 'text', text: wmsg('STALE_BUTTON', session.language) });
-  await deps.send({ kind: 'text', text: getMenu('MAIN_MENU', session.language) });
+  await deps.send(mainMenuReply(session.language));
 }
 
 export const isWatchButtonId = (id: string | undefined): boolean => !!id && id.startsWith(ACTION_PREFIX);

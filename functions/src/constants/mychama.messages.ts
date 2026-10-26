@@ -8,50 +8,63 @@
 
 export type Lang = 'en' | 'sw';
 
+/** Bodies of the My Chama menus. The choices themselves are list rows: see MC_ROWS. */
 export const MC_MENUS: Record<string, Record<Lang, string>> = {
   MYCHAMA_MENU: {
-    en:
-      '*My Chama* — {chamaName}\n' +
-      'Signed in as {memberName}\n\n' +
-      '1. Pay Contribution 💰\n' +
-      '2. Apply for a Loan 📝\n' +
-      '3. Repay a Loan 💳\n' +
-      '4. Loan Balance 📊\n' +
-      '5. Merry-Go-Round 🔄\n' +
-      '6. Get Statement 📄\n' +
-      '7. Switch Chama 🔁\n' +
-      '8. Back to Main Menu',
-    sw:
-      '*My Chama* — {chamaName}\n' +
-      'Umeingia kama {memberName}\n\n' +
-      '1. Lipa Mchango 💰\n' +
-      '2. Omba Mkopo 📝\n' +
-      '3. Lipa Mkopo 💳\n' +
-      '4. Salio la Mkopo 📊\n' +
-      '5. Mzunguko (Merry-Go-Round) 🔄\n' +
-      '6. Pata Taarifa 📄\n' +
-      '7. Badilisha Chama 🔁\n' +
-      '8. Rudi kwenye Menyu Kuu',
+    en: '*My Chama* — {chamaName}\nSigned in as {memberName}\n\nWhat would you like to do?',
+    sw: '*My Chama* — {chamaName}\nUmeingia kama {memberName}\n\nUngependa kufanya nini?',
   },
 
   STATEMENT_TYPE: {
-    en:
-      '*Get Statement*\n\nWhat would you like a statement of?\n\n' +
-      '1. Contributions\n2. Loans\n3. Merry-Go-Round\n4. Everything',
-    sw:
-      '*Pata Taarifa*\n\nUnataka taarifa ya nini?\n\n' +
-      '1. Michango\n2. Mikopo\n3. Mzunguko\n4. Yote',
+    en: '*Get Statement*\n\nWhat would you like a statement of?',
+    sw: '*Pata Taarifa*\n\nUnataka taarifa ya nini?',
   },
 
   STATEMENT_PERIOD: {
-    en: '*Choose a period:*\n\n1. This month\n2. Last 3 months\n3. This year\n4. All time',
-    sw: '*Chagua kipindi:*\n\n1. Mwezi huu\n2. Miezi 3 iliyopita\n3. Mwaka huu\n4. Muda wote',
+    en: '*Choose a period*\n\nWhich period should the statement cover?',
+    sw: '*Chagua kipindi*\n\nTaarifa ifunike kipindi gani?',
   },
 
   PROVIDER: {
-    en: '*Which mobile money network is {phone} on?*\n\n1. M-Pesa (Safaricom)\n2. Airtel Money',
-    sw: '*{phone} iko kwenye mtandao gani?*\n\n1. M-Pesa (Safaricom)\n2. Airtel Money',
+    en: '*Which mobile money network is {phone} on?*',
+    sw: '*{phone} iko kwenye mtandao gani?*',
   },
+};
+
+type Bi = Record<Lang, string>;
+export interface McRow {
+  value: string;
+  title: Bi;
+  desc?: Bi;
+}
+
+/**
+ * List rows for the fixed menus (title max 24, description max 72). `value` is the number the handler has always
+ * parsed, so a tap and a typed number are the same thing.
+ */
+export const MC_ROWS: Record<'MYCHAMA_MENU' | 'STATEMENT_TYPE' | 'STATEMENT_PERIOD', McRow[]> = {
+  MYCHAMA_MENU: [
+    { value: '1', title: { en: 'Pay Contribution', sw: 'Lipa Mchango' }, desc: { en: 'Pay what is due for a period', sw: 'Lipa deni la kipindi' } },
+    { value: '2', title: { en: 'Apply for a Loan', sw: 'Omba Mkopo' }, desc: { en: 'Choose a product and request it', sw: 'Chagua aina ya mkopo na uombe' } },
+    { value: '3', title: { en: 'Repay a Loan', sw: 'Lipa Mkopo' }, desc: { en: 'Pay an instalment or clear the loan', sw: 'Lipa awamu au maliza mkopo' } },
+    { value: '4', title: { en: 'Loan Balance', sw: 'Salio la Mkopo' }, desc: { en: 'See what you owe', sw: 'Ona unachodaiwa' } },
+    { value: '5', title: { en: 'Merry-Go-Round', sw: 'Mzunguko' }, desc: { en: 'Your pots, queue and payments', sw: 'Mizunguko yako, foleni na malipo' } },
+    { value: '6', title: { en: 'Get Statement', sw: 'Pata Taarifa' }, desc: { en: 'Contributions, loans, merry-go-round', sw: 'Michango, mikopo, mzunguko' } },
+    { value: '7', title: { en: 'Switch Chama', sw: 'Badilisha Chama' }, desc: { en: 'Move to another of your chamas', sw: 'Hamia chama kingine chako' } },
+    { value: '8', title: { en: 'Main Menu', sw: 'Menyu Kuu' }, desc: { en: 'Back to the SAMUHIA menu', sw: 'Rudi kwenye menyu ya SAMUHIA' } },
+  ],
+  STATEMENT_TYPE: [
+    { value: '1', title: { en: 'Contributions', sw: 'Michango' } },
+    { value: '2', title: { en: 'Loans', sw: 'Mikopo' } },
+    { value: '3', title: { en: 'Merry-Go-Round', sw: 'Mzunguko' } },
+    { value: '4', title: { en: 'Everything', sw: 'Yote' } },
+  ],
+  STATEMENT_PERIOD: [
+    { value: '1', title: { en: 'This month', sw: 'Mwezi huu' } },
+    { value: '2', title: { en: 'Last 3 months', sw: 'Miezi 3 iliyopita' } },
+    { value: '3', title: { en: 'This year', sw: 'Mwaka huu' } },
+    { value: '4', title: { en: 'All time', sw: 'Muda wote' } },
+  ],
 };
 
 export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
@@ -134,8 +147,8 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
     sw: '🔒 Umekaa kimya kwa muda. Ingiza tarakimu 4 za mwisho za Kitambulisho chako ili kuendelea:',
   },
   SELECT_CHAMA: {
-    en: 'You belong to more than one chama. Which one?\n\n{list}',
-    sw: 'Wewe ni mwanachama wa chama zaidi ya kimoja. Kipi?\n\n{list}',
+    en: 'You belong to more than one chama. Which one?',
+    sw: 'Wewe ni mwanachama wa chama zaidi ya kimoja. Kipi?',
   },
 
   /* ---------------- contributions ---------------- */
@@ -151,17 +164,17 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   },
   CONTRIB_SELECT: {
     en:
-      '*Pay Contribution*\n\nOutstanding periods:\n\n{list}\n\nReply with a number to pay that period.',
+      '*Pay Contribution*\n\nOutstanding periods — choose one to pay:',
     sw:
-      '*Lipa Mchango*\n\nVipindi ambavyo havijalipwa:\n\n{list}\n\nJibu kwa namba kulipa kipindi hicho.',
+      '*Lipa Mchango*\n\nVipindi ambavyo havijalipwa — chagua kimoja kulipa:',
   },
   CONTRIB_AMOUNT: {
     en:
       '*{period}*\nAmount due: *{due}*\n\n' +
-      'How much do you want to pay? Enter any amount in KES (a part payment is fine), or reply *FULL* to pay {due}.',
+      'How much do you want to pay? Enter any amount in KES (a part payment is fine), or tap *Pay full amount* to pay {due}.',
     sw:
       '*{period}*\nDeni: *{due}*\n\n' +
-      'Unataka kulipa kiasi gani? Ingiza kiasi chochote kwa KES (unaweza kulipa kidogo kidogo), au jibu *ZOTE* kulipa {due}.',
+      'Unataka kulipa kiasi gani? Ingiza kiasi chochote kwa KES (unaweza kulipa kidogo kidogo), au gusa *Lipa kiasi chote* kulipa {due}.',
   },
   CONTRIB_AMOUNT_TOO_HIGH: {
     en: 'That is more than this period needs. Maximum for *{period}* is *{due}*.\n\nEnter an amount up to {due}:',
@@ -170,8 +183,8 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
 
   /* ---------------- loans ---------------- */
   LOAN_PRODUCTS: {
-    en: '*Apply for a Loan*\n\nChoose a loan product:\n\n{list}',
-    sw: '*Omba Mkopo*\n\nChagua aina ya mkopo:\n\n{list}',
+    en: '*Apply for a Loan*\n\nChoose a loan product:',
+    sw: '*Omba Mkopo*\n\nChagua aina ya mkopo:',
   },
   LOAN_NO_PRODUCTS: {
     en: 'Your chama has no active loan products yet. Ask your treasurer to set one up.',
@@ -208,8 +221,8 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
     sw: 'Ingiza idadi ya miezi kati ya 1 na {maxTerm}:',
   },
   LOAN_ASK_PURPOSE: {
-    en: 'What is the loan for? (Short description, or reply *SKIP*):',
-    sw: 'Mkopo ni wa nini? (Maelezo mafupi, au jibu *RUKA*):',
+    en: 'What is the loan for? Type a short description, or tap *Skip*.',
+    sw: 'Mkopo ni wa nini? Andika maelezo mafupi, au gusa *Ruka*.',
   },
   LOAN_CONFIRM: {
     en:
@@ -223,7 +236,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📆 Monthly instalment: *{installment}*\n' +
       '🎯 Purpose: {purpose}\n\n' +
       'This goes to your chair and treasurer for approval — no money moves yet.\n\n' +
-      'Reply *YES* to submit, or *0* to go back.',
+      'Tap *Submit* to send it, or *Back* to change it.',
     sw:
       '*Thibitisha ombi lako la mkopo*\n\n' +
       '📄 Aina: {productName}\n' +
@@ -235,7 +248,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📆 Malipo ya mwezi: *{installment}*\n' +
       '🎯 Madhumuni: {purpose}\n\n' +
       'Hili litaenda kwa mwenyekiti na mweka hazina kwa idhini — hakuna pesa inayohama bado.\n\n' +
-      'Jibu *NDIYO* kutuma, au *0* kurudi nyuma.',
+      'Gusa *Tuma* kuwasilisha, au *Nyuma* kubadilisha.',
   },
   LOAN_SUBMITTED: {
     en:
@@ -256,8 +269,8 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
     sw: 'Huna mikopo inayoendelea ya kulipa kwa sasa. 🎉',
   },
   LOAN_PAY_SELECT: {
-    en: '*Repay a Loan*\n\nYour loans:\n\n{list}\n\nReply with a number to choose.',
-    sw: '*Lipa Mkopo*\n\nMikopo yako:\n\n{list}\n\nJibu kwa namba kuchagua.',
+    en: '*Repay a Loan*\n\nChoose the loan to repay:',
+    sw: '*Lipa Mkopo*\n\nChagua mkopo wa kulipa:',
   },
   LOAN_PAY_AMOUNT: {
     en:
@@ -265,13 +278,13 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       'Due on: {dueDate}\n' +
       'Instalment balance: *{due}*\n' +
       'Loan balance: *{loanBalance}*\n\n' +
-      'How much do you want to pay? Enter an amount, reply *FULL* for {due}, or *CLEAR* to settle the whole loan ({loanBalance}).',
+      'How much do you want to pay? Enter an amount, or tap *Pay instalment* for {due} or *Clear the loan* to settle everything ({loanBalance}).',
     sw:
       '*{productName}* — awamu {n} kati ya {total}\n' +
       'Inatakiwa: {dueDate}\n' +
       'Salio la awamu: *{due}*\n' +
       'Salio la mkopo: *{loanBalance}*\n\n' +
-      'Unataka kulipa kiasi gani? Ingiza kiasi, jibu *ZOTE* kwa {due}, au *MALIZA* kumaliza mkopo wote ({loanBalance}).',
+      'Unataka kulipa kiasi gani? Ingiza kiasi, au gusa *Lipa awamu* kwa {due} au *Maliza mkopo* kumaliza deni lote ({loanBalance}).',
   },
   LOAN_PAY_TOO_HIGH: {
     en: 'That is more than the loan balance of *{loanBalance}*.\n\nEnter an amount up to {loanBalance}:',
@@ -288,8 +301,8 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
     sw: 'Bado hujaingia kwenye mzunguko wowote katika {chamaName}.',
   },
   MGR_SELECT: {
-    en: '*Merry-Go-Round*\n\nYour pots:\n\n{list}\n\nReply with a number to open one.',
-    sw: '*Mzunguko*\n\nMizunguko yako:\n\n{list}\n\nJibu kwa namba kufungua mmoja.',
+    en: '*Merry-Go-Round*\n\nChoose a pot to open:',
+    sw: '*Mzunguko*\n\nChagua mzunguko wa kufungua:',
   },
   MGR_DETAIL: {
     en:
@@ -301,8 +314,9 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📍 Your queue position: {position}\n' +
       '💵 Estimated pool: {pool}\n\n' +
       '*This period:* {myStatus}\n' +
-      '📊 You have paid {paidCount} and missed {missedCount} period(s)\n\n' +
-      '{actions}',
+      '📊 You have paid {paidCount} and missed {missedCount} period(s)\n' +
+      '{arrearLine}\n' +
+      'What would you like to do?',
     sw:
       '*{name}*\n' +
       '💰 Kwa kipindi: *{amount}* ({frequency})\n' +
@@ -312,8 +326,9 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📍 Nafasi yako kwenye foleni: {position}\n' +
       '💵 Makadirio ya jumla: {pool}\n\n' +
       '*Kipindi hiki:* {myStatus}\n' +
-      '📊 Umelipa vipindi {paidCount} na umekosa {missedCount}\n\n' +
-      '{actions}',
+      '📊 Umelipa vipindi {paidCount} na umekosa {missedCount}\n' +
+      '{arrearLine}\n' +
+      'Ungependa kufanya nini?',
   },
   MGR_PAY_AMOUNT: {
     en:
@@ -321,17 +336,31 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       'This period: *{amount}*\n' +
       'Paid so far: *{paid}*\n' +
       'Still due: *{remaining}*\n\n' +
-      'How much do you want to pay? Enter an amount in KES, or reply *FULL* for {remaining}.',
+      'How much do you want to pay? Enter an amount in KES, or tap *Pay full amount* for {remaining}.',
     sw:
       '*{name}* — kipindi {period}\n' +
       'Kipindi hiki: *{amount}*\n' +
       'Umelipa hadi sasa: *{paid}*\n' +
       'Bado inadaiwa: *{remaining}*\n\n' +
-      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au jibu *ZOTE* kwa {remaining}.',
+      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au gusa *Lipa kiasi chote* kwa {remaining}.',
   },
   MGR_PAY_TOO_HIGH: {
     en: 'That is more than what is still due this period (*{remaining}*).\n\nEnter an amount up to {remaining}:',
     sw: 'Hiyo ni zaidi ya kinachodaiwa kwa kipindi hiki (*{remaining}*).\n\nIngiza kiasi hadi {remaining}:',
+  },
+  MGR_ARREAR_LINE: {
+    en: '⚠️ You have unpaid arrears of *{amount}* in this pot.\n',
+    sw: '⚠️ Una malimbikizo ya *{amount}* kwenye mzunguko huu.\n',
+  },
+  MGR_ARREAR_PAY_AMOUNT: {
+    en:
+      '*{name}* — arrears\n' +
+      'Still owed: *{remaining}*\n\n' +
+      'How much do you want to pay? Enter an amount in KES, or tap *Pay full amount* for {remaining}.',
+    sw:
+      '*{name}* — malimbikizo\n' +
+      'Bado yanadaiwa: *{remaining}*\n\n' +
+      'Unataka kulipa kiasi gani? Ingiza kiasi kwa KES, au gusa *Lipa kiasi chote* kwa {remaining}.',
   },
   MGR_DRAFT: {
     en: 'This pot is still a draft — the queue draw has not been done, so contributions are not open yet.',
@@ -342,10 +371,10 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   PAY_ASK_PHONE: {
     en:
       'Which number should we send the payment prompt to?\n\n' +
-      'Reply *1* to use {registered}, or type another Safaricom number (07XXXXXXXX or 01XXXXXXXX):',
+      'Tap *Use {registered}*, or type another Safaricom number (07XXXXXXXX or 01XXXXXXXX):',
     sw:
       'Tutume ombi la malipo kwa namba gani?\n\n' +
-      'Jibu *1* kutumia {registered}, au andika namba nyingine ya Safaricom (07XXXXXXXX au 01XXXXXXXX):',
+      'Gusa *Tumia {registered}*, au andika namba nyingine ya Safaricom (07XXXXXXXX au 01XXXXXXXX):',
   },
   PAY_CONFIRM: {
     en:
@@ -357,7 +386,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📱 You will be charged: *{gross}*\n' +
       '📞 On: {phone} ({provider})\n\n' +
       'Exactly {net} reaches the chama — fees are never taken from what you owe.\n\n' +
-      'Reply *PAY* to send the prompt, or *0* to go back.',
+      'Tap *Pay now* to send the prompt, or *Back* to change it.',
     sw:
       '*Thibitisha malipo*\n\n' +
       '{label}\n\n' +
@@ -367,7 +396,7 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
       '📱 Utatozwa: *{gross}*\n' +
       '📞 Kwa: {phone} ({provider})\n\n' +
       'Kiasi cha {net} haswa kinafika chamani — ada hazikatwi kwenye deni lako.\n\n' +
-      'Jibu *LIPA* kutuma ombi, au *0* kurudi nyuma.',
+      'Gusa *Lipa sasa* kutuma ombi, au *Nyuma* kubadilisha.',
   },
   PAY_SENT: {
     en:
@@ -432,8 +461,12 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
 
   /* ---------------- generic ---------------- */
   PICK_NUMBER: {
-    en: 'Please reply with one of the numbers shown above.',
-    sw: 'Tafadhali jibu kwa mojawapo ya namba zilizoonyeshwa hapo juu.',
+    en: 'Please choose one of the options shown.',
+    sw: 'Tafadhali chagua mojawapo ya chaguo zilizoonyeshwa.',
+  },
+  STATEMENT_DONE: {
+    en: '📄 That is your statement. What next?',
+    sw: '📄 Hiyo ndiyo taarifa yako. Tufanye nini sasa?',
   },
   ENTER_VALID_AMOUNT: {
     en: 'Please enter a valid amount in KES (numbers only, minimum 10):',
@@ -442,14 +475,6 @@ export const MC_MESSAGES: Record<string, Record<Lang, string>> = {
   UNAVAILABLE: {
     en: '⚠️ My Chama is temporarily unreachable. Please try again in a few minutes.',
     sw: '⚠️ My Chama haipatikani kwa muda. Tafadhali jaribu tena baada ya dakika chache.',
-  },
-  NAV_HINT: {
-    en: '\n\n*0* Back  •  *00* My Chama menu  •  *000* Exit',
-    sw: '\n\n*0* Nyuma  •  *00* Menyu ya My Chama  •  *000* Toka',
-  },
-  NAV_HINT_TOP: {
-    en: '\n\n*0* Main menu  •  *000* Exit',
-    sw: '\n\n*0* Menyu kuu  •  *000* Toka',
   },
   BACK_TO_MYCHAMA: {
     en: '↩️ Back to My Chama.',

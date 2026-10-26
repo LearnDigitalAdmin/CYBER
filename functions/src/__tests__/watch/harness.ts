@@ -108,7 +108,7 @@ export function makeRig(opts: { actor?: string; lang?: Lang; mock?: MockOptions 
       await sleepHook(sleeps);
     },
     actorPhone: actor,
-    mainMenuText: (l) => `MAIN_MENU_${l}`,
+    mainMenu: (l) => ({ kind: 'text', text: `MAIN_MENU_${l}` }),
   });
   const flow = () => new WatchFlow(deps(), { lang, state, ctx });
 

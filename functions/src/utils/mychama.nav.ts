@@ -2,7 +2,8 @@
  * MyChama Navigation & Session Helpers
  *
  * Every MyChama state gets identical navigation semantics, so it is
- * implemented once here rather than copy-pasted into twenty handlers:
+ * implemented once here rather than copy-pasted into twenty handlers.
+ * The Back / My Chama menu / Main menu buttons send these same values:
  *
  *   0    → back one step (true back-stack, not a hardcoded parent)
  *   00   → back to the My Chama menu
@@ -85,7 +86,7 @@ export async function pushState(
     stack.push(session.currentState);
   }
 
-  await setMc(phone, session, { ...patch, stack: stack.slice(-12) });
+  await setMc(phone, session, { ...patch, stack: stack.slice(-12), page: 0 });
   await updateSessionState(phone, nextState, {});
   session.currentState = String(nextState);
 }
@@ -100,9 +101,7 @@ export async function replaceState(
   nextState: STATE,
   patch: Partial<MyChamaSessionContext> = {}
 ): Promise<void> {
-  if (Object.keys(patch).length > 0) {
-    await setMc(phone, session, patch);
-  }
+  await setMc(phone, session, { ...patch, page: 0 });
   await updateSessionState(phone, nextState, {});
   session.currentState = String(nextState);
 }
@@ -113,7 +112,7 @@ export async function popState(phone: string, session: Session): Promise<string 
   const stack = Array.isArray(mc.stack) ? mc.stack.slice() : [];
   const previous = stack.pop();
 
-  await setMc(phone, session, { stack });
+  await setMc(phone, session, { stack, page: 0 });
 
   if (!previous) {
     return null;
@@ -145,9 +144,9 @@ export function checkMcNavigation(input: string): McNavType {
 }
 
 /**
- * Store the option list that was just rendered, so the next numeric reply can
- * be mapped back to a document ID. This is what makes "reply 3" safe: the user
- * never types a document ID, and we never trust a raw index against a freshly
+ * Store the option list that was just rendered, so the next reply (a tapped
+ * row or a typed number) can be mapped back to a document ID. The user never
+ * types a document ID, and we never trust a raw index against a freshly
  * re-queried list that may have shifted.
  */
 export async function setOptions(
@@ -185,9 +184,4 @@ export function parseChoice(input: string, min: number, max: number): number | n
   }
   const num = parseInt(cleaned, 10);
   return num >= min && num <= max ? num : null;
-}
-
-/** Numbered list renderer used by every picker in the flow. */
-export function numberedList(lines: string[]): string {
-  return lines.map((line, i) => `${i + 1}. ${line}`).join('\n');
 }

@@ -1,24 +1,26 @@
 /**
  * Main Menu Handler
- * Routes user selections from the SAMUHIA main menu
+ * Routes user selections from the SAMUHIA main menu (a WhatsApp list; typed option numbers still work)
  */
 
 import { Session } from '../types/session.types';
 import { updateSessionState } from '../services/session.service';
 import { validateMenuSelection } from '../utils/validator';
 import { getMessage } from '../constants/messages';
-import { getMenu } from '../constants/menus';
 import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { beginMyChama } from './mychama.handler';
 import { beginWatch } from './watch.entry';
+import { promptNationalId } from './rent.handler';
 import { isWatchKeyword } from '../utils/watch.format';
+import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
 
 /**
  * Handle main menu selection
- * User can select from 1-6
+ * Option values are the numbers the menu has always used: 1 Pay Rent, 2 Invoice, 3 My Chama, 4 Plot, 5 Exit, 6 Help,
+ * 7 Landlord Watch (the list shows them in a friendlier order).
  */
-export async function handleMainMenu(phone: string, input: string, session: Session): Promise<string> {
+export async function handleMainMenu(phone: string, input: string, session: Session): Promise<Reply> {
   try {
     // Landlord Watch keyword shortcuts (WATCH / LANDLORD / MWENYE NYUMBA)
     if (isWatchKeyword(input)) {
@@ -30,7 +32,7 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
     const validation = validateMenuSelection(input, 1, 7);
 
     if (!validation.valid || validation.option === undefined) {
-      return getMenu('MAIN_MENU', session.language);
+      return mainMenuReply(session.language);
     }
 
     const option = validation.option;
@@ -39,12 +41,12 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
       case 1: // Pay Rent
         await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
         logger.info('Navigating to Pay Rent');
-        return getMessage('ENTER_NATIONAL_ID', session.language);
+        return promptNationalId(session.language);
 
       case 2: // Get Rent Invoice
         await updateSessionState(phone, STATE.GET_INVOICE_WAITING_ID, {});
         logger.info('Navigating to Get Invoice');
-        return getMessage('ENTER_NATIONAL_ID', session.language);
+        return promptNationalId(session.language);
 
       case 3: // My Chama (cross-project: mychama1)
         logger.info('Navigating to My Chama');
@@ -52,11 +54,7 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
 
       case 4: // Manage My Plot
         logger.info('Showing PMS links');
-        const label = session.language === 'en' ? 'Manage Your Property' : 'Simamia Ploti Yako';
-        const message = session.language === 'en'
-          ? `${label}\n\nCall Us On: 0791286165 or 0111538613\n\n📱 Mobile App: https://plot.samuhia.co.ke\n\n🌐 Web Portal: https://plot.samuhia.co.ke\n\n💻 Desk Portal: https://desk.samuhia.co.ke`
-          : `${label}\n\nTupigie Simu Kupitia: 0791286165 au 0111538613\n\n📱 Programu ya Simu: https://plot.samuhia.co.ke\n\n🌐 Portali ya Web: https://plot.samuhia.co.ke\n\n💻 Portali ya Desk: https://desk.samuhia.co.ke`;
-        return message + '\n\n' + (session.language === 'en' ? 'Reply 0 to return to Main Menu' : 'Jibu 0 kurudi kwenye Menuu Kuu');
+        return plotReply(session.language);
 
       case 5: // Exit
         await updateSessionState(phone, STATE.IDLE, {});
@@ -66,14 +64,14 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
       case 6: // Help
         await updateSessionState(phone, STATE.HELP_MENU, {});
         logger.info('Navigating to Help');
-        return getMenu('HELP_MENU', session.language);
+        return helpReply(session.language);
 
       case 7: // Landlord Watch
         logger.info('Navigating to Landlord Watch');
         return await beginWatch(phone, session);
 
       default:
-        return getMenu('MAIN_MENU', session.language);
+        return mainMenuReply(session.language);
     }
   } catch (error) {
     logger.error('Error handling main menu', error);
@@ -82,13 +80,27 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
 }
 
 /**
- * Handle returning to main menu (when user enters 0 from sub-menus)
+ * Help screen: its only exit is the Main menu button, so any message (0, #, "hi") returns to the main menu.
  */
-export async function returnToMainMenu(phone: string, session: Session): Promise<string> {
+export async function handleHelpMenu(phone: string, _input: string, session: Session): Promise<Reply> {
+  return returnToMainMenu(phone, session);
+}
+
+/**
+ * A message from a user who chose Exit (or whose chat was left idle): welcome them back with the main menu.
+ */
+export async function handleIdle(phone: string, _input: string, session: Session): Promise<Reply> {
+  return returnToMainMenu(phone, session);
+}
+
+/**
+ * Handle returning to main menu
+ */
+export async function returnToMainMenu(phone: string, session: Session): Promise<Reply> {
   try {
     await updateSessionState(phone, STATE.MAIN_MENU, {});
     logger.info('Returning to main menu');
-    return getMenu('MAIN_MENU', session.language);
+    return mainMenuReply(session.language);
   } catch (error) {
     logger.error('Error returning to main menu', error);
     return getMessage('SYSTEM_ERROR', session.language);

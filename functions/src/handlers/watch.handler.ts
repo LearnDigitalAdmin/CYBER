@@ -48,7 +48,7 @@ import {
 import { renderMoney, renderSummary, renderTenantList, renderTrend, TenantListKind } from '../utils/watch.render';
 import { pollTranscript } from '../utils/watch.poll';
 import { LwError, isLwError } from '../services/watch.api';
-import { META_WINDOW_CLOSED } from '../services/watch.sender';
+import { META_WINDOW_CLOSED } from '../services/wa.sender';
 import { logger } from '../utils/logger';
 
 export const isWatchState = (state: string | undefined): boolean => !!state && state.startsWith('WATCH_');
@@ -73,7 +73,8 @@ export interface WatchDeps {
   sleep: (ms: number) => Promise<void>;
   /** The WhatsApp sender in E.164 (`+2547...`). */
   actorPhone: string;
-  mainMenuText: (lang: Lang) => string;
+  /** The SAMUHIA main menu, shown whenever the user leaves Landlord Watch. */
+  mainMenu: (lang: Lang) => Outbound;
 }
 
 export interface Incoming {
@@ -164,7 +165,7 @@ export class WatchFlow {
     this.left = true;
     await this.d.store.leave();
     this.state = STATE.MAIN_MENU;
-    await this.text(this.d.mainMenuText(this.lang));
+    await this.emit(this.d.mainMenu(this.lang));
   }
 
   // ── entry points ───────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ export class WatchFlow {
       this.left = true;
       await this.d.store.leave();
       await this.text(lwErrorMessage(e.code, this.lang, e));
-      await this.text(this.d.mainMenuText(this.lang));
+      await this.emit(this.d.mainMenu(this.lang));
     } finally {
       await this.save();
     }

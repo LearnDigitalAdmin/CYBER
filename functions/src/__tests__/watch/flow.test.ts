@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRig, connectFirst, textOf, Rig } from './harness';
 import { STATE } from '../../constants/states';
-import { MENUS } from '../../constants/menus';
+import { mainMenuReply } from '../../utils/ui';
 import { isWatchState } from '../../handlers/watch.handler';
 import { Outbound } from '../../types/watch.types';
 
@@ -11,9 +11,13 @@ const docs = (r: Rig) => r.sent.filter((o): o is Extract<Outbound, { kind: 'docu
 const rowsOf = (o: Outbound) => (o.kind === 'list' ? o.rows : []);
 
 describe('entry and routing', () => {
-  test('main menu lists Landlord Watch as option 7 in both languages; WATCH_* states are routed to the module', () => {
-    assert.match(MENUS.MAIN_MENU.en, /7\. Landlord Watch/);
-    assert.match(MENUS.MAIN_MENU.sw, /7\. Landlord Watch – Fuatilia mali yako/);
+  test('main menu lists Landlord Watch (value 7) in both languages; WATCH_* states are routed to the module', () => {
+    for (const lang of ['en', 'sw'] as const) {
+      const menu = mainMenuReply(lang);
+      assert.equal(menu.kind, 'list');
+      const watch = rowsOf(menu).find((r) => r.id === 'ui:MAIN_MENU:7');
+      assert.ok(watch && /Landlord Watch/.test(watch.title), lang);
+    }
     for (const s of Object.values(STATE).filter((v) => v.startsWith('WATCH_'))) assert.ok(isWatchState(s), s);
     assert.ok(!isWatchState(STATE.MAIN_MENU) && !isWatchState(STATE.MYCHAMA_MENU) && !isWatchState(undefined));
   });

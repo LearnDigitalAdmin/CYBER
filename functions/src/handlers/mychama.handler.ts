@@ -4,17 +4,36 @@
  * The complete WhatsApp state machine for the My Chama option:
  *   auth → chama picker → menu → { contributions | loans | MGR | statements }
  *
+ * Presentation is interactive (lists and reply buttons, see utils/ui.ts). A tap is the same as typing its value, so
+ * the typed commands (0 back, 00 My Chama menu, 000 exit, # main menu, option numbers, FULL, PAY...) all still work.
+ *
  * Shared behaviour lives in helpers at the top of the file rather than being
  * repeated per state:
- *   - guard()          navigation, lockout and idle re-auth, in that order
+ *   - guard()          navigation, paging, lockout and idle re-auth
  *   - startPayment()   the one payment sub-flow used by all three payable flows
  *   - failSoft()       never strands a member in a dead state on an error
  */
 
 import { Session } from '../types/session.types';
 import { STATE } from '../constants/states';
-import { getMenu } from '../constants/menus';
-import { mcMsg, mcMenu, Lang } from '../constants/mychama.messages';
+import { mcMsg, mcMenu, MC_ROWS, Lang } from '../constants/mychama.messages';
+import { ulabel } from '../constants/ui.messages';
+import { Outbound, WaButton } from '../types/watch.types';
+import {
+  btn,
+  mainButton,
+  mainMenuReply,
+  pickerRows,
+  PickItem,
+  Reply,
+  row,
+  uiButtons,
+  uiList,
+  toOutbounds,
+  uiText,
+  welcomeReply,
+  withNotice,
+} from '../utils/ui';
 import { updateSessionState } from '../services/session.service';
 import { logger } from '../utils/logger';
 import {
@@ -28,7 +47,6 @@ import {
   setOptions,
   resolveOption,
   parseChoice,
-  numberedList,
 } from '../utils/mychama.nav';
 import { MC_SECURITY } from '../config/mychama.config';
 import {
@@ -106,9 +124,33 @@ const MIN_PAYMENT = 10;
  * Shared helpers
  * ================================================================== */
 
-function nav(lang: Lang): string {
-  return mcMsg('NAV_HINT', lang);
+const backBtn = (lang: Lang): WaButton => btn('0', ulabel('BACK', lang));
+const chamaMenuBtn = (lang: Lang): WaButton => btn('00', ulabel('CHAMA_MENU', lang));
+
+/** A message with the standard footer (Back, My Chama menu). `extra` buttons come first: WhatsApp allows 3, the footer yields. */
+function prompt(lang: Lang, body: string, ...extra: WaButton[]): Outbound {
+  return uiButtons(body, [...extra, backBtn(lang), chamaMenuBtn(lang)]);
 }
+
+/** A list of choices, paged 7 at a time. A row's value is its 1-based position, so typing the number also works. */
+function picker(session: Session, body: string, items: PickItem[]): Outbound {
+  const lang = session.language;
+  const { rows } = pickerRows(items.slice(0, 30), getMc(session).page ?? 0, lang, { back: true });
+  return uiList(body, ulabel('LIST_BUTTON', lang), rows);
+}
+
+/** Identity prompts: the only way out before the ID is verified is a full cancel. */
+const authPrompt = (lang: Lang, body: string): Outbound => uiButtons(body, [btn('#', ulabel('CANCEL', lang))]);
+
+/** A result message followed by the My Chama menu. */
+const thenChamaMenu = (session: Session, body: string): Reply => [uiText(body), myChamaMenu(session)];
+
+/** Put a notice above whatever was rendered (one bubble when it is a single interactive message). */
+const noticed = (reply: Reply, notice: string): Reply =>
+  typeof reply === 'string' || Array.isArray(reply) ? [uiText(notice), ...toOutbounds(reply)] : withNotice(reply, notice);
+
+/** A result message followed by the main menu. */
+const thenMainMenu = (lang: Lang, body: string): Reply => [uiText(body), mainMenuReply(lang)];
 
 function now(): number {
   return Math.floor(Date.now() / 1000);
@@ -138,7 +180,7 @@ async function pendingNote(
   ctx: { chama: Chama; member: ChamaMember },
   lang: Lang,
   purposes: IntentPurpose[]
-): Promise<string> {
+): Promise<Reply> {
   try {
     const pending = (await getPendingIntents(ctx.chama.id, ctx.member.memberId, 5)).filter((i) =>
       purposes.includes(i.purpose)
@@ -202,10 +244,10 @@ async function paymentTargetStillValid(
 }
 
 /** Error exit that always leaves the member somewhere they can act. */
-async function failSoft(phone: string, session: Session, where: string, error: unknown): Promise<string> {
+async function failSoft(phone: string, session: Session, where: string, error: unknown): Promise<Reply> {
   logger.error(`MyChama error in ${where}`, error);
   await updateSessionState(phone, STATE.MYCHAMA_MENU, {});
-  return mcMsg('UNAVAILABLE', session.language) + nav(session.language);
+  return [uiText(mcMsg('UNAVAILABLE', session.language)), myChamaMenu(session)];
 }
 
 /** Minutes left on a durable lock, rounded up, never below 1. */
@@ -222,14 +264,14 @@ async function lockedResponse(
   phone: string,
   session: Session,
   lockedUntilMs: number
-): Promise<string> {
+): Promise<Reply> {
   await clearMc(phone, session);
   await updateSessionState(phone, STATE.MAIN_MENU, {});
-  return mcMsg('AUTH_LOCKED', session.language, { minutes: lockMinutes(lockedUntilMs) });
+  return thenMainMenu(session.language, mcMsg('AUTH_LOCKED', session.language, { minutes: lockMinutes(lockedUntilMs) }));
 }
 
 type GuardResult =
-  | { done: true; response: string }
+  | { done: true; response: Reply }
   | { done: false };
 
 /**
@@ -249,7 +291,7 @@ async function guard(
   // 1. Lockout
   if (mc.lockedUntil && mc.lockedUntil > now()) {
     const minutes = Math.ceil((mc.lockedUntil - now()) / 60);
-    return { done: true, response: mcMsg('AUTH_LOCKED', lang, { minutes }) };
+    return { done: true, response: thenMainMenu(lang, mcMsg('AUTH_LOCKED', lang, { minutes })) };
   }
 
   // 2. Navigation
@@ -258,13 +300,13 @@ async function guard(
   if (command === 'exit') {
     await clearMc(phone, session);
     await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
-    return { done: true, response: getMenu('WELCOME', lang) };
+    return { done: true, response: welcomeReply() };
   }
 
   if (command === 'mainmenu') {
     await clearMc(phone, session);
     await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return { done: true, response: getMenu('MAIN_MENU', lang) };
+    return { done: true, response: mainMenuReply(lang) };
   }
 
   // While the identity prompt is on screen — whether this is first entry or a
@@ -279,7 +321,7 @@ async function guard(
   ) {
     await clearMc(phone, session);
     await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return { done: true, response: getMenu('MAIN_MENU', lang) };
+    return { done: true, response: mainMenuReply(lang) };
   }
 
   if (command === 'mychama') {
@@ -295,7 +337,7 @@ async function guard(
     if (!previous) {
       await clearMc(phone, session);
       await updateSessionState(phone, STATE.MAIN_MENU, {});
-      return { done: true, response: getMenu('MAIN_MENU', lang) };
+      return { done: true, response: mainMenuReply(lang) };
     }
     return { done: true, response: await renderState(phone, session, previous) };
   }
@@ -305,11 +347,18 @@ async function guard(
     const stale = !mc.authAt || now() - mc.authAt > MC_SECURITY.REAUTH_AFTER_SECONDS;
     if (stale && mc.memberId) {
       await pushState(phone, session, STATE.MYCHAMA_AUTH_ID, { authAttempts: 0 });
-      return { done: true, response: mcMsg('AUTH_REAUTH', lang) };
+      return { done: true, response: authPrompt(lang, mcMsg('AUTH_REAUTH', lang)) };
     }
     if (stale && !mc.memberId) {
       return { done: true, response: await beginMyChama(phone, session) };
     }
+  }
+
+  // 4. Paging: "More ›" / "‹ Previous" on a picker re-renders the state on screen at the requested page
+  const paged = /^pg:(\d{1,3})$/.exec(input.trim());
+  if (paged) {
+    await setMc(phone, session, { page: parseInt(paged[1], 10) });
+    return { done: true, response: await renderState(phone, session, session.currentState) };
   }
 
   return { done: false };
@@ -320,7 +369,7 @@ async function guard(
  * Every state that displays a list must be re-derivable from the session, so
  * "back" shows live data rather than a stale snapshot.
  */
-async function renderState(phone: string, session: Session, state: string): Promise<string> {
+async function renderState(phone: string, session: Session, state: string): Promise<Reply> {
   switch (state) {
     case STATE.MYCHAMA_MENU:
       return myChamaMenu(session);
@@ -328,6 +377,8 @@ async function renderState(phone: string, session: Session, state: string): Prom
       return await renderChamaPicker(phone, session);
     case STATE.MYCHAMA_CONTRIB_SELECT:
       return await renderContributionPicker(phone, session);
+    case STATE.MYCHAMA_CONTRIB_AMOUNT:
+      return await renderContributionAmount(phone, session);
     case STATE.MYCHAMA_LOAN_PRODUCT:
       return await renderLoanProducts(phone, session);
     case STATE.MYCHAMA_LOAN_AMOUNT:
@@ -335,9 +386,13 @@ async function renderState(phone: string, session: Session, state: string): Prom
     case STATE.MYCHAMA_LOAN_TERM:
       return await renderLoanTermPrompt(session);
     case STATE.MYCHAMA_LOAN_PURPOSE:
-      return mcMsg('LOAN_ASK_PURPOSE', session.language) + nav(session.language);
+      return loanPurposePrompt(session.language);
+    case STATE.MYCHAMA_LOAN_CONFIRM:
+      return await renderLoanConfirm(session);
     case STATE.MYCHAMA_LOAN_PAY_SELECT:
       return await renderLoanPayPicker(phone, session);
+    case STATE.MYCHAMA_LOAN_PAY_AMOUNT:
+      return await renderLoanPayAmount(phone, session);
     case STATE.MYCHAMA_MGR_SELECT:
       return await renderPotPicker(phone, session);
     case STATE.MYCHAMA_MGR_DETAIL:
@@ -345,9 +400,9 @@ async function renderState(phone: string, session: Session, state: string): Prom
     case STATE.MYCHAMA_MGR_PAY_AMOUNT:
       return await renderMgrPayAmount(phone, session);
     case STATE.MYCHAMA_STATEMENT_TYPE:
-      return mcMenu('STATEMENT_TYPE', session.language) + nav(session.language);
+      return statementTypeMenu(session.language);
     case STATE.MYCHAMA_STATEMENT_PERIOD:
-      return mcMenu('STATEMENT_PERIOD', session.language) + nav(session.language);
+      return statementPeriodMenu(session.language);
     case STATE.MYCHAMA_PAY_PHONE:
       return renderPayPhonePrompt(session);
     case STATE.MYCHAMA_PAY_PROVIDER:
@@ -360,12 +415,33 @@ async function renderState(phone: string, session: Session, state: string): Prom
   }
 }
 
-function myChamaMenu(session: Session): string {
+/** Rows for one of the fixed menus; `value` is the option number the handler parses. */
+function menuRows(key: keyof typeof MC_ROWS, lang: Lang, skip: string[] = []) {
+  return MC_ROWS[key].filter((r) => !skip.includes(r.value)).map((r) => row(r.value, r.title[lang], r.desc?.[lang]));
+}
+
+function myChamaMenu(session: Session): Outbound {
+  const lang = session.language;
   const mc = getMc(session);
-  return mcMenu('MYCHAMA_MENU', session.language, {
-    chamaName: mc.chamaName || '',
-    memberName: mc.memberName || '',
-  });
+  // "Switch Chama" only exists for members of more than one chama
+  const skip = (mc.candidates || []).length < 2 ? ['7'] : [];
+  return uiList(
+    mcMenu('MYCHAMA_MENU', lang, { chamaName: mc.chamaName || '', memberName: mc.memberName || '' }),
+    ulabel('LIST_BUTTON', lang),
+    menuRows('MYCHAMA_MENU', lang, skip)
+  );
+}
+
+function statementTypeMenu(lang: Lang): Outbound {
+  return uiList(mcMenu('STATEMENT_TYPE', lang), ulabel('LIST_BUTTON', lang), [...menuRows('STATEMENT_TYPE', lang), row('0', ulabel('BACK', lang))]);
+}
+
+function statementPeriodMenu(lang: Lang): Outbound {
+  return uiList(mcMenu('STATEMENT_PERIOD', lang), ulabel('LIST_BUTTON', lang), [...menuRows('STATEMENT_PERIOD', lang), row('0', ulabel('BACK', lang))]);
+}
+
+function loanPurposePrompt(lang: Lang): Outbound {
+  return prompt(lang, mcMsg('LOAN_ASK_PURPOSE', lang), btn('SKIP', ulabel('SKIP', lang)));
 }
 
 /** Load chama + member fresh on every action that needs them. */
@@ -416,7 +492,7 @@ function candidatesFrom(
  * if that number is unknown, asks for the number registered in the chama
  * before continuing to the ID check.
  */
-export async function beginMyChama(phone: string, session: Session): Promise<string> {
+export async function beginMyChama(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
 
   try {
@@ -434,7 +510,7 @@ export async function beginMyChama(phone: string, session: Session): Promise<str
       await setMc(phone, session, { phoneAttempts: 0, stack: [], options: [] });
       await updateSessionState(phone, STATE.MYCHAMA_AUTH_PHONE, {});
       session.currentState = STATE.MYCHAMA_AUTH_PHONE;
-      return mcMsg('AUTH_ASK_PHONE', lang) + mcMsg('NAV_HINT_TOP', lang);
+      return authPrompt(lang, mcMsg('AUTH_ASK_PHONE', lang));
     }
 
     const active = memberships.filter((m) => m.member.status === 'active');
@@ -442,13 +518,12 @@ export async function beginMyChama(phone: string, session: Session): Promise<str
     if (active.length === 0) {
       const first = memberships[0];
       await updateSessionState(phone, STATE.MAIN_MENU, {});
-      return (
+      return thenMainMenu(
+        lang,
         mcMsg('AUTH_INACTIVE', lang, {
           chamaName: first.chamaName,
           status: first.member.status,
-        }) +
-        '\n\n' +
-        getMenu('MAIN_MENU', lang)
+        })
       );
     }
 
@@ -473,11 +548,11 @@ export async function beginMyChama(phone: string, session: Session): Promise<str
     await updateSessionState(phone, STATE.MYCHAMA_AUTH_ID, {});
     session.currentState = STATE.MYCHAMA_AUTH_ID;
 
-    return mcMsg('AUTH_ASK_ID', lang, { memberName: primary.member.name.split(' ')[0] });
+    return authPrompt(lang, mcMsg('AUTH_ASK_ID', lang, { memberName: primary.member.name.split(' ')[0] }));
   } catch (error) {
     logger.error('MyChama entry failed', error);
     await updateSessionState(phone, STATE.MAIN_MENU, {});
-    return mcMsg('UNAVAILABLE', lang) + '\n\n' + getMenu('MAIN_MENU', lang);
+    return thenMainMenu(lang, mcMsg('UNAVAILABLE', lang));
   }
 }
 
@@ -494,7 +569,7 @@ export async function handleMyChamaAuthPhone(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session, { skipReauth: true });
@@ -508,7 +583,7 @@ export async function handleMyChamaAuthPhone(
 
     const claimed = normalizePhone(input.trim());
     if (!/^\+254[17]\d{8}$/.test(claimed)) {
-      return mcMsg('AUTH_PHONE_FORMAT', lang);
+      return authPrompt(lang, mcMsg('AUTH_PHONE_FORMAT', lang));
     }
 
     // The WhatsApp number itself already came back empty; retyping it can only fail.
@@ -534,7 +609,7 @@ export async function handleMyChamaAuthPhone(
       if (failure.lockedUntil) {
         return await lockedResponse(phone, session, failure.lockedUntil);
       }
-      return mcMsg('AUTH_PHONE_NOT_MATCHED', lang, { remaining: failure.remaining });
+      return authPrompt(lang, mcMsg('AUTH_PHONE_NOT_MATCHED', lang, { remaining: failure.remaining }));
     }
 
     const primary = usable[0];
@@ -567,7 +642,7 @@ export async function handleMyChamaAuthPhone(
     await updateSessionState(phone, STATE.MYCHAMA_AUTH_ID, {});
     session.currentState = STATE.MYCHAMA_AUTH_ID;
 
-    return mcMsg('AUTH_ASK_ID_CLAIM', lang);
+    return authPrompt(lang, mcMsg('AUTH_ASK_ID_CLAIM', lang));
   } catch (error) {
     return await failSoft(phone, session, 'handleMyChamaAuthPhone', error);
   }
@@ -577,7 +652,7 @@ export async function handleMyChamaAuthId(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session, { skipReauth: true });
@@ -593,7 +668,7 @@ export async function handleMyChamaAuthId(
     const cleaned = input.trim();
 
     if (!/^\d{4}$/.test(cleaned)) {
-      return mcMsg('AUTH_ID_FORMAT', lang);
+      return authPrompt(lang, mcMsg('AUTH_ID_FORMAT', lang));
     }
 
     if (!mc.chamaId || !mc.memberId) {
@@ -647,7 +722,7 @@ export async function handleMyChamaAuthId(
       }
 
       await setMc(phone, session, { authAttempts: failure.attempts });
-      return mcMsg('AUTH_ID_INVALID', lang, { remaining: failure.remaining });
+      return authPrompt(lang, mcMsg('AUTH_ID_INVALID', lang, { remaining: failure.remaining }));
     }
 
     await clearAuthFailures(phone);
@@ -702,21 +777,20 @@ export async function handleMyChamaAuthId(
   }
 }
 
-async function renderChamaPicker(phone: string, session: Session): Promise<string> {
+async function renderChamaPicker(phone: string, session: Session): Promise<Reply> {
   const mc = getMc(session);
   const candidates = mc.candidates || [];
 
   await setOptions(phone, session, candidates.map((c) => c.chamaId));
 
-  const list = numberedList(candidates.map((c) => c.chamaName));
-  return mcMsg('SELECT_CHAMA', session.language, { list }) + mcMsg('NAV_HINT_TOP', session.language);
+  return picker(session, mcMsg('SELECT_CHAMA', session.language), candidates.map((c) => ({ title: c.chamaName })));
 }
 
 export async function handleMyChamaSelectChama(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const g = await guard(phone, input, session);
   if (g.done) return g.response;
 
@@ -764,7 +838,7 @@ export async function handleMyChamaMenu(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -773,7 +847,7 @@ export async function handleMyChamaMenu(
   try {
     const choice = parseChoice(input, 1, 8);
     if (choice === null) {
-      return mcMsg('PICK_NUMBER', lang) + '\n\n' + myChamaMenu(session);
+      return withNotice(myChamaMenu(session), mcMsg('PICK_NUMBER', lang));
     }
 
     switch (choice) {
@@ -799,12 +873,12 @@ export async function handleMyChamaMenu(
 
       case 6:
         await pushState(phone, session, STATE.MYCHAMA_STATEMENT_TYPE);
-        return mcMenu('STATEMENT_TYPE', lang) + nav(lang);
+        return statementTypeMenu(lang);
 
       case 7: {
         const mc = getMc(session);
         if ((mc.candidates || []).length < 2) {
-          return mcMsg('PICK_NUMBER', lang) + '\n\n' + myChamaMenu(session);
+          return withNotice(myChamaMenu(session), mcMsg('PICK_NUMBER', lang));
         }
         await pushState(phone, session, STATE.MYCHAMA_SELECT_CHAMA);
         return await renderChamaPicker(phone, session);
@@ -814,7 +888,7 @@ export async function handleMyChamaMenu(
       default:
         await clearMc(phone, session);
         await updateSessionState(phone, STATE.MAIN_MENU, {});
-        return getMenu('MAIN_MENU', lang);
+        return mainMenuReply(lang);
     }
   } catch (error) {
     return await failSoft(phone, session, 'handleMyChamaMenu', error);
@@ -825,7 +899,7 @@ export async function handleMyChamaMenu(
  * Contributions
  * ================================================================== */
 
-async function renderContributionPicker(phone: string, session: Session): Promise<string> {
+async function renderContributionPicker(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const ctx = await loadContext(session);
   if (!ctx) return await beginMyChama(phone, session);
@@ -837,31 +911,44 @@ async function renderContributionPicker(phone: string, session: Session): Promis
       (ctx.member.creditBalance || 0) > 0.5
         ? (lang === 'en' ? 'Credit on file: ' : 'Salio la ziada: ') + kes(ctx.member.creditBalance)
         : '';
-    return (
+    return prompt(
+      lang,
       mcMsg('CONTRIB_NONE_DUE', lang, {
         total: kes(ctx.member.totalContributed || 0),
         credit,
-      }) +
-      (await pendingNote(ctx, lang, ['contribution'])) +
-      nav(lang)
+      }) + (await pendingNote(ctx, lang, ['contribution']))
     );
   }
 
   await setOptions(phone, session, outstanding.map((c) => c.id));
 
-  const list = numberedList(
+  return picker(
+    session,
+    mcMsg('CONTRIB_SELECT', lang) + (await pendingNote(ctx, lang, ['contribution'])),
     outstanding.map((c) => {
       const due = contributionDue(c);
-      const partial =
-        (c.paidAmount || 0) > 0 ? ` (${kes(c.paidAmount)} ${lang === 'en' ? 'paid' : 'imelipwa'})` : '';
-      return `${c.period} — ${kes(due)}${partial}`;
+      const partial = (c.paidAmount || 0) > 0 ? ` (${kes(c.paidAmount)} ${lang === 'en' ? 'paid' : 'imelipwa'})` : '';
+      return { title: String(c.period), description: `${kes(due)} ${lang === 'en' ? 'due' : 'inadaiwa'}${partial}` };
     })
   );
+}
 
-  return (
-    mcMsg('CONTRIB_SELECT', lang, { list }) +
-    (await pendingNote(ctx, lang, ['contribution'])) +
-    nav(lang)
+/** Amount prompt for the contribution chosen in the session (also what "Back" returns to from the payment steps). */
+async function renderContributionAmount(phone: string, session: Session): Promise<Reply> {
+  const lang = session.language;
+  const mc = getMc(session);
+  const ctx = await loadContext(session);
+  if (!ctx || !mc.contributionId) return await beginMyChama(phone, session);
+
+  const contribution = await getContribution(ctx.chama.id, mc.contributionId);
+  if (!contribution || contribution.memberId !== ctx.member.memberId) {
+    return await renderContributionPicker(phone, session);
+  }
+
+  return prompt(
+    lang,
+    mcMsg('CONTRIB_AMOUNT', lang, { period: contribution.period, due: kes(contributionDue(contribution)) }),
+    btn('FULL', ulabel('PAY_FULL', lang))
   );
 }
 
@@ -869,7 +956,7 @@ export async function handleContributionSelect(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -885,7 +972,7 @@ export async function handleContributionSelect(
     if (!ctx) return await beginMyChama(phone, session);
 
     if (!canCollectOnline(ctx.chama.plan)) {
-      return mcMsg('PAY_NOT_ON_PLAN', lang) + nav(lang);
+      return prompt(lang, mcMsg('PAY_NOT_ON_PLAN', lang));
     }
 
     const contribution = await getContribution(ctx.chama.id, contributionId);
@@ -900,9 +987,7 @@ export async function handleContributionSelect(
       amount: due,
     });
 
-    return (
-      mcMsg('CONTRIB_AMOUNT', lang, { period: contribution.period, due: kes(due) }) + nav(lang)
-    );
+    return await renderContributionAmount(phone, session);
   } catch (error) {
     return await failSoft(phone, session, 'handleContributionSelect', error);
   }
@@ -912,7 +997,7 @@ export async function handleContributionAmount(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -937,17 +1022,19 @@ export async function handleContributionAmount(
     } else {
       const parsed = Number(input.trim());
       if (!Number.isFinite(parsed) || parsed < MIN_PAYMENT) {
-        return mcMsg('ENTER_VALID_AMOUNT', lang) + nav(lang);
+        return prompt(lang, mcMsg('ENTER_VALID_AMOUNT', lang), btn('FULL', ulabel('PAY_FULL', lang)));
       }
       amount = Math.round(parsed);
     }
 
     if (amount > due + 0.01) {
-      return (
+      return prompt(
+        lang,
         mcMsg('CONTRIB_AMOUNT_TOO_HIGH', lang, {
           period: contribution.period,
           due: kes(due),
-        }) + nav(lang)
+        }),
+        btn('FULL', ulabel('PAY_FULL', lang))
       );
     }
 
@@ -971,7 +1058,7 @@ export async function handleContributionAmount(
  * Loan application
  * ================================================================== */
 
-async function renderLoanProducts(phone: string, session: Session): Promise<string> {
+async function renderLoanProducts(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const ctx = await loadContext(session);
   if (!ctx) return await beginMyChama(phone, session);
@@ -984,24 +1071,28 @@ async function renderLoanProducts(phone: string, session: Session): Promise<stri
   if (pending.length > 0) {
     const l = pending[0];
     const summary = `${kes(l.principal)} · ${l.term}m · ${fmtDate(l.requestedOn)}`;
-    return mcMsg('LOAN_PENDING_EXISTS', lang, { summary }) + nav(lang);
+    return prompt(lang, mcMsg('LOAN_PENDING_EXISTS', lang, { summary }));
   }
 
   const products = await getLoanProducts(ctx.chama.id);
   if (products.length === 0) {
-    return mcMsg('LOAN_NO_PRODUCTS', lang) + nav(lang);
+    return prompt(lang, mcMsg('LOAN_NO_PRODUCTS', lang));
   }
 
   await setOptions(phone, session, products.map((p) => p.id));
 
-  const list = numberedList(
-    products.map(
-      (p) => `*${p.name}* — ${productRateLabel(p, lang)}\n   ${lang === 'en' ? 'Up to' : 'Hadi'} ${kes(p.maxAmount)} / ${p.maxTerm}m`
-    )
+  return picker(
+    session,
+    mcMsg('LOAN_PRODUCTS', lang),
+    products.map((p) => ({
+      title: p.name,
+      description: `${productRateLabel(p, lang)} · ${lang === 'en' ? 'up to' : 'hadi'} ${kes(p.maxAmount)} / ${p.maxTerm}m`,
+    }))
   );
-
-  return mcMsg('LOAN_PRODUCTS', lang, { list }) + nav(lang);
 }
+
+/** Quick amounts on the repayment prompt: this instalment, or the whole loan. */
+const loanPayShortcuts = (lang: Lang): WaButton[] => [btn('FULL', ulabel('PAY_INSTALMENT', lang)), btn('CLEAR', ulabel('CLEAR_LOAN', lang))];
 
 async function resolveProduct(session: Session): Promise<LoanProduct | null> {
   const mc = getMc(session);
@@ -1010,18 +1101,19 @@ async function resolveProduct(session: Session): Promise<LoanProduct | null> {
   return products.find((p) => p.id === mc.productId) || null;
 }
 
-async function renderLoanAmountPrompt(session: Session): Promise<string> {
+async function renderLoanAmountPrompt(session: Session): Promise<Reply> {
   const lang = session.language;
   const product = await resolveProduct(session);
   if (!product) return mcMsg('UNAVAILABLE', lang);
 
-  return (
+  return prompt(
+    lang,
     mcMsg('LOAN_ASK_AMOUNT', lang, {
       productName: product.name,
       rateLabel: productRateLabel(product, lang),
       maxAmount: kes(product.maxAmount),
       maxTerm: product.maxTerm,
-    }) + nav(lang)
+    })
   );
 }
 
@@ -1029,7 +1121,7 @@ export async function handleLoanProduct(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1052,7 +1144,7 @@ export async function handleLoanAmount(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1064,11 +1156,12 @@ export async function handleLoanAmount(
 
     const parsed = Number(input.trim());
     if (!Number.isFinite(parsed) || parsed < 500 || parsed > product.maxAmount) {
-      return (
+      return prompt(
+        lang,
         mcMsg('LOAN_AMOUNT_RANGE', lang, {
           min: kes(500),
           maxAmount: kes(product.maxAmount),
-        }) + nav(lang)
+        })
       );
     }
 
@@ -1080,17 +1173,18 @@ export async function handleLoanAmount(
   }
 }
 
-async function renderLoanTermPrompt(session: Session): Promise<string> {
+async function renderLoanTermPrompt(session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const product = await resolveProduct(session);
   if (!product) return mcMsg('UNAVAILABLE', lang);
 
-  return (
+  return prompt(
+    lang,
     mcMsg('LOAN_ASK_TERM', lang, {
       amount: kes(mc.amount || 0),
       maxTerm: product.maxTerm,
-    }) + nav(lang)
+    })
   );
 }
 
@@ -1098,7 +1192,7 @@ export async function handleLoanTerm(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1110,11 +1204,11 @@ export async function handleLoanTerm(
 
     const parsed = parseInt(input.trim(), 10);
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > product.maxTerm) {
-      return mcMsg('LOAN_TERM_RANGE', lang, { maxTerm: product.maxTerm }) + nav(lang);
+      return prompt(lang, mcMsg('LOAN_TERM_RANGE', lang, { maxTerm: product.maxTerm }));
     }
 
     await pushState(phone, session, STATE.MYCHAMA_LOAN_PURPOSE, { term: parsed });
-    return mcMsg('LOAN_ASK_PURPOSE', lang) + nav(lang);
+    return loanPurposePrompt(lang);
   } catch (error) {
     return await failSoft(phone, session, 'handleLoanTerm', error);
   }
@@ -1124,7 +1218,7 @@ export async function handleLoanPurpose(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1138,7 +1232,7 @@ export async function handleLoanPurpose(
     const purpose = skipped ? '' : cleaned.replace(/[<>{}$`]/g, '').slice(0, 140);
 
     if (!skipped && purpose.length < 3) {
-      return mcMsg('LOAN_ASK_PURPOSE', lang) + nav(lang);
+      return loanPurposePrompt(lang);
     }
 
     await pushState(phone, session, STATE.MYCHAMA_LOAN_CONFIRM, { purpose });
@@ -1148,7 +1242,7 @@ export async function handleLoanPurpose(
   }
 }
 
-async function renderLoanConfirm(session: Session): Promise<string> {
+async function renderLoanConfirm(session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const product = await resolveProduct(session);
@@ -1156,23 +1250,26 @@ async function renderLoanConfirm(session: Session): Promise<string> {
 
   const calc = buildSchedule(product, mc.amount, mc.term);
 
-  return mcMsg('LOAN_CONFIRM', lang, {
-    productName: product.name,
-    principal: kes(mc.amount),
-    term: mc.term,
-    rateLabel: productRateLabel(product, lang),
-    totalInterest: kes(calc.totalInterest),
-    totalPay: kes(calc.totalPay),
-    installment: kes(calc.installment),
-    purpose: mc.purpose || (lang === 'en' ? 'Not stated' : 'Haijaelezwa'),
-  });
+  return uiButtons(
+    mcMsg('LOAN_CONFIRM', lang, {
+      productName: product.name,
+      principal: kes(mc.amount),
+      term: mc.term,
+      rateLabel: productRateLabel(product, lang),
+      totalInterest: kes(calc.totalInterest),
+      totalPay: kes(calc.totalPay),
+      installment: kes(calc.installment),
+      purpose: mc.purpose || (lang === 'en' ? 'Not stated' : 'Haijaelezwa'),
+    }),
+    [btn('YES', ulabel('SUBMIT', lang)), backBtn(lang), btn('00', ulabel('CANCEL', lang))]
+  );
 }
 
 export async function handleLoanConfirm(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1201,12 +1298,11 @@ export async function handleLoanConfirm(
     if (pending.length > 0) {
       const l = pending[0];
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
-      return (
+      return thenChamaMenu(
+        session,
         mcMsg('LOAN_PENDING_EXISTS', lang, {
           summary: `${kes(l.principal)} · ${l.term}m · ${fmtDate(l.requestedOn)}`,
-        }) +
-        '\n\n' +
-        myChamaMenu(session)
+        })
       );
     }
 
@@ -1236,14 +1332,13 @@ export async function handleLoanConfirm(
       purpose: undefined,
     });
 
-    return (
+    return thenChamaMenu(
+      session,
       mcMsg('LOAN_SUBMITTED', lang, {
         ref: loanId.slice(-8).toUpperCase(),
         principal: kes(mc.amount),
         term: mc.term,
-      }) +
-      '\n\n' +
-      myChamaMenu(session)
+      })
     );
   } catch (error) {
     return await failSoft(phone, session, 'handleLoanConfirm', error);
@@ -1254,7 +1349,7 @@ export async function handleLoanConfirm(
  * Loan repayment
  * ================================================================== */
 
-async function renderLoanPayPicker(phone: string, session: Session): Promise<string> {
+async function renderLoanPayPicker(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const ctx = await loadContext(session);
   if (!ctx) return await beginMyChama(phone, session);
@@ -1262,34 +1357,68 @@ async function renderLoanPayPicker(phone: string, session: Session): Promise<str
   const loans = await getMemberLoans(ctx.chama.id, ctx.member.memberId, ['active', 'overdue']);
 
   if (loans.length === 0) {
-    return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
+    return prompt(lang, mcMsg('LOAN_NONE_REPAYABLE', lang));
   }
 
   if (!canCollectOnline(ctx.chama.plan)) {
-    return mcMsg('PAY_NOT_ON_PLAN', lang) + nav(lang);
+    return prompt(lang, mcMsg('PAY_NOT_ON_PLAN', lang));
   }
 
   await setOptions(phone, session, loans.map((l) => l.id));
+  const products = await getLoanProducts(ctx.chama.id);
 
-  const list = numberedList(
+  return picker(
+    session,
+    mcMsg('LOAN_PAY_SELECT', lang),
     loans.map((l) => {
       const next = nextUnpaidInstallment(l);
-      const flag = l.status === 'overdue' ? ' ⚠️' : '';
+      const flag = l.status === 'overdue' ? '⚠️ ' : '';
       const nextPart = next
-        ? `\n   ${lang === 'en' ? 'Next' : 'Inayofuata'}: ${kes(next.due - (next.paidAmount || 0))} · ${fmtDate(next.dueDate)}`
+        ? ` · ${lang === 'en' ? 'next' : 'ijayo'} ${kes(next.due - (next.paidAmount || 0))} ${fmtDate(next.dueDate)}`
         : '';
-      return `${l.productId}${flag} — ${lang === 'en' ? 'balance' : 'salio'} ${kes(loanOutstanding(l))}${nextPart}`;
+      return {
+        title: products.find((p) => p.id === l.productId)?.name || l.productId,
+        description: `${flag}${lang === 'en' ? 'balance' : 'salio'} ${kes(loanOutstanding(l))}${nextPart}`,
+      };
     })
   );
+}
 
-  return mcMsg('LOAN_PAY_SELECT', lang, { list }) + nav(lang);
+/** Amount prompt for the loan chosen in the session (also what "Back" returns to from the payment steps). */
+async function renderLoanPayAmount(phone: string, session: Session): Promise<Reply> {
+  const lang = session.language;
+  const mc = getMc(session);
+  const ctx = await loadContext(session);
+  if (!ctx || !mc.loanId) return await beginMyChama(phone, session);
+
+  const loan = await getLoan(ctx.chama.id, mc.loanId);
+  const next = loan ? nextUnpaidInstallment(loan) : null;
+  if (!loan || loan.memberId !== ctx.member.memberId || !next) {
+    return await renderLoanPayPicker(phone, session);
+  }
+
+  const products = await getLoanProducts(ctx.chama.id);
+  const product = products.find((p) => p.id === loan.productId);
+
+  return prompt(
+    lang,
+    mcMsg('LOAN_PAY_AMOUNT', lang, {
+      productName: product?.name || loan.productId,
+      n: next.n,
+      total: loan.schedule.length,
+      dueDate: fmtDate(next.dueDate),
+      due: kes(next.due - (next.paidAmount || 0)),
+      loanBalance: kes(loanOutstanding(loan)),
+    }),
+    ...loanPayShortcuts(lang)
+  );
 }
 
 export async function handleLoanPaySelect(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1313,27 +1442,15 @@ export async function handleLoanPaySelect(
 
     const next = nextUnpaidInstallment(loan);
     if (!next) {
-      return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
+      return prompt(lang, mcMsg('LOAN_NONE_REPAYABLE', lang));
     }
-
-    const products = await getLoanProducts(ctx.chama.id);
-    const product = products.find((p) => p.id === loan.productId);
 
     await pushState(phone, session, STATE.MYCHAMA_LOAN_PAY_AMOUNT, {
       loanId,
       installmentNo: next.n,
     });
 
-    return (
-      mcMsg('LOAN_PAY_AMOUNT', lang, {
-        productName: product?.name || loan.productId,
-        n: next.n,
-        total: loan.schedule.length,
-        dueDate: fmtDate(next.dueDate),
-        due: kes(next.due - (next.paidAmount || 0)),
-        loanBalance: kes(loanOutstanding(loan)),
-      }) + nav(lang)
-    );
+    return await renderLoanPayAmount(phone, session);
   } catch (error) {
     return await failSoft(phone, session, 'handleLoanPaySelect', error);
   }
@@ -1343,7 +1460,7 @@ export async function handleLoanPayAmount(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1357,11 +1474,11 @@ export async function handleLoanPayAmount(
     const loan = await getLoan(ctx.chama.id, mc.loanId);
     if (!loan || loan.memberId !== ctx.member.memberId) return await beginMyChama(phone, session);
     if (loan.status !== 'active' && loan.status !== 'overdue') {
-      return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
+      return prompt(lang, mcMsg('LOAN_NONE_REPAYABLE', lang));
     }
 
     const next = nextUnpaidInstallment(loan);
-    if (!next) return mcMsg('LOAN_NONE_REPAYABLE', lang) + nav(lang);
+    if (!next) return prompt(lang, mcMsg('LOAN_NONE_REPAYABLE', lang));
 
     const instalmentDue = next.due - (next.paidAmount || 0);
     const balance = loanOutstanding(loan);
@@ -1375,13 +1492,13 @@ export async function handleLoanPayAmount(
     } else {
       const parsed = Number(input.trim());
       if (!Number.isFinite(parsed) || parsed < MIN_PAYMENT) {
-        return mcMsg('ENTER_VALID_AMOUNT', lang) + nav(lang);
+        return prompt(lang, mcMsg('ENTER_VALID_AMOUNT', lang), ...loanPayShortcuts(lang));
       }
       amount = Math.round(parsed);
     }
 
     if (amount > balance + 0.01) {
-      return mcMsg('LOAN_PAY_TOO_HIGH', lang, { loanBalance: kes(balance) }) + nav(lang);
+      return prompt(lang, mcMsg('LOAN_PAY_TOO_HIGH', lang, { loanBalance: kes(balance) }), ...loanPayShortcuts(lang));
     }
 
     const label =
@@ -1405,7 +1522,7 @@ export async function handleLoanPayAmount(
  * Loan balance
  * ================================================================== */
 
-async function renderLoanBalance(session: Session): Promise<string> {
+async function renderLoanBalance(session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const ctx = await loadContext(session);
@@ -1414,7 +1531,7 @@ async function renderLoanBalance(session: Session): Promise<string> {
   const loans = await getMemberLoans(ctx.chama.id, ctx.member.memberId);
 
   if (loans.length === 0) {
-    return mcMsg('LOAN_BALANCE_NONE', lang, { chamaName: mc.chamaName || '' }) + nav(lang);
+    return prompt(lang, mcMsg('LOAN_BALANCE_NONE', lang, { chamaName: mc.chamaName || '' }));
   }
 
   const products = await getLoanProducts(ctx.chama.id);
@@ -1451,14 +1568,14 @@ async function renderLoanBalance(session: Session): Promise<string> {
     return lines.join('\n');
   });
 
-  return header + blocks.join('\n') + (await pendingNote(ctx, lang, ['loan_repayment'])) + nav(lang);
+  return prompt(lang, header + blocks.join('\n') + (await pendingNote(ctx, lang, ['loan_repayment'])));
 }
 
 export async function handleLoanBalance(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const g = await guard(phone, input, session);
   if (g.done) return g.response;
 
@@ -1474,7 +1591,7 @@ export async function handleLoanBalance(
  * Merry-go-round
  * ================================================================== */
 
-async function renderPotPicker(phone: string, session: Session): Promise<string> {
+async function renderPotPicker(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const ctx = await loadContext(session);
@@ -1483,27 +1600,26 @@ async function renderPotPicker(phone: string, session: Session): Promise<string>
   const pots = await getMemberPots(ctx.chama.id, ctx.member.memberId);
 
   if (pots.length === 0) {
-    return mcMsg('MGR_NONE', lang, { chamaName: mc.chamaName || '' }) + nav(lang);
+    return prompt(lang, mcMsg('MGR_NONE', lang, { chamaName: mc.chamaName || '' }));
   }
 
   await setOptions(phone, session, pots.map((p) => p.id));
 
-  const list = numberedList(
-    pots.map(
-      (p) =>
-        `*${p.name}* — ${kes(p.amount)} ${p.frequency}` +
-        (p.status === 'draft' ? ` (${lang === 'en' ? 'draft' : 'rasimu'})` : '')
-    )
+  return picker(
+    session,
+    mcMsg('MGR_SELECT', lang),
+    pots.map((p) => ({
+      title: p.name,
+      description: `${kes(p.amount)} ${p.frequency}` + (p.status === 'draft' ? ` (${lang === 'en' ? 'draft' : 'rasimu'})` : ''),
+    }))
   );
-
-  return mcMsg('MGR_SELECT', lang, { list }) + nav(lang);
 }
 
 export async function handleMgrSelect(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1520,7 +1636,7 @@ export async function handleMgrSelect(
   }
 }
 
-async function renderPotDetail(phone: string, session: Session): Promise<string> {
+async function renderPotDetail(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const ctx = await loadContext(session);
@@ -1530,7 +1646,7 @@ async function renderPotDetail(phone: string, session: Session): Promise<string>
   if (!pot) return await renderPotPicker(phone, session);
 
   if (pot.status === 'draft' || !pot.drawDone) {
-    return mcMsg('MGR_DRAFT', lang) + nav(lang);
+    return prompt(lang, mcMsg('MGR_DRAFT', lang));
   }
 
   // Members only ever see their OWN pots and records; a pot the member is not
@@ -1567,41 +1683,40 @@ async function renderPotDetail(phone: string, session: Session): Promise<string>
   const payable = collecting && !progress.done;
   const arrear = await getOpenArrearForMember(ctx.chama.id, pot.id, ctx.member.memberId);
 
-  // Build the numbered action list to match what's actually offered — never
-  // a fixed 1/2/3 that could point at the wrong thing once an arrear or a
-  // closed period changes which actions apply.
+  // Build the action list to match what's actually offered — never a fixed set that could point at the wrong
+  // thing once an arrear or a closed period changes which actions apply. A row's value is its position in
+  // `optionIds`, which is what resolveOption() maps back to an action.
   const optionIds: string[] = [];
-  const lines: string[] = [];
+  const actions: PickItem[] = [];
   if (payable) {
     optionIds.push('pay_period');
-    lines.push(
-      lang === 'en'
-        ? `Pay for this period — full or part (${kes(progress.remaining)} still due)`
-        : `Lipa kwa kipindi hiki — kamili au sehemu (${kes(progress.remaining)} bado inadaiwa)`
-    );
+    actions.push({
+      title: lang === 'en' ? 'Pay this period' : 'Lipa kipindi hiki',
+      description:
+        lang === 'en'
+          ? `Full or part · ${kes(progress.remaining)} still due`
+          : `Kamili au sehemu · ${kes(progress.remaining)} bado inadaiwa`,
+    });
   }
   if (arrear) {
     optionIds.push('pay_arrear');
-    lines.push(
-      lang === 'en'
-        ? `Pay arrears — full or part (${kes(arrear.amount)} owed)`
-        : `Lipa malimbikizo — kamili au sehemu (${kes(arrear.amount)} yanadaiwa)`
-    );
+    actions.push({
+      title: lang === 'en' ? 'Pay arrears' : 'Lipa malimbikizo',
+      description: lang === 'en' ? `Full or part · ${kes(arrear.amount)} owed` : `Kamili au sehemu · ${kes(arrear.amount)} yanadaiwa`,
+    });
   }
   optionIds.push('history');
-  lines.push(lang === 'en' ? 'View my payment history' : 'Angalia historia yangu ya malipo');
+  actions.push({
+    title: lang === 'en' ? 'Payment history' : 'Historia ya malipo',
+    description: lang === 'en' ? 'Your payments in this pot' : 'Malipo yako kwenye mzunguko huu',
+  });
 
   await setOptions(phone, session, optionIds);
   await setMc(phone, session, { potPeriod: pot.period });
 
-  const actionsBlock =
-    numberedList(lines) + '\n\n' + (lang === 'en' ? '*0* Back  *00* My Chama menu' : '*0* Nyuma  *00* Menyu ya My Chama');
+  const arrearLine = arrear ? mcMsg('MGR_ARREAR_LINE', lang, { amount: kes(arrear.amount) }) : '';
 
-  const arrearLine = arrear
-    ? mcMsg('MGR_ARREAR_LINE', lang, { amount: kes(arrear.amount) })
-    : '';
-
-  return (
+  return uiList(
     mcMsg('MGR_DETAIL', lang, {
       name: pot.name,
       amount: kes(pot.amount),
@@ -1615,8 +1730,10 @@ async function renderPotDetail(phone: string, session: Session): Promise<string>
       myStatus,
       paidCount,
       missedCount,
-      actions: arrearLine + actionsBlock,
-    }) + (await pendingNote(ctx, lang, ['mgr_contribution']))
+      arrearLine,
+    }) + (await pendingNote(ctx, lang, ['mgr_contribution'])),
+    ulabel('LIST_BUTTON', lang),
+    [...actions.map((a, i) => row(String(i + 1), a.title, a.description)), row('0', ulabel('BACK', lang)), row('00', ulabel('CHAMA_MENU', lang))]
   );
 }
 
@@ -1624,7 +1741,7 @@ export async function handleMgrDetail(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1642,7 +1759,7 @@ export async function handleMgrDetail(
 
     const action = resolveOption(session, input);
     if (!action) {
-      return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+      return noticed(await renderPotDetail(phone, session), mcMsg('PICK_NUMBER', lang));
     }
 
     if (action === 'history') {
@@ -1657,16 +1774,16 @@ export async function handleMgrDetail(
             }`
         );
       const head = `*${pot.name}* — ${lang === 'en' ? 'my payment history' : 'historia yangu ya malipo'}\n\n`;
-      return head + (rows.join('\n') || (lang === 'en' ? 'No records yet.' : 'Hakuna kumbukumbu.')) + nav(lang);
+      return prompt(lang, head + (rows.join('\n') || (lang === 'en' ? 'No records yet.' : 'Hakuna kumbukumbu.')));
     }
 
     if (!canCollectOnline(ctx.chama.plan)) {
-      return mcMsg('PAY_NOT_ON_PLAN', lang) + nav(lang);
+      return prompt(lang, mcMsg('PAY_NOT_ON_PLAN', lang));
     }
 
     if (action === 'pay_arrear') {
       const arrear = await getOpenArrearForMember(ctx.chama.id, pot.id, ctx.member.memberId);
-      if (!arrear) return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+      if (!arrear) return noticed(await renderPotDetail(phone, session), mcMsg('PICK_NUMBER', lang));
 
       await pushState(phone, session, STATE.MYCHAMA_MGR_PAY_AMOUNT, {
         potId: pot.id,
@@ -1680,7 +1797,7 @@ export async function handleMgrDetail(
       const records = await getPotRecordsForMember(ctx.chama.id, pot.id, ctx.member.memberId);
       const progress = mgrProgress(pot, records);
       if (pot.status !== 'active' || progress.done) {
-        return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+        return noticed(await renderPotDetail(phone, session), mcMsg('PICK_NUMBER', lang));
       }
       await pushState(phone, session, STATE.MYCHAMA_MGR_PAY_AMOUNT, {
         potId: pot.id,
@@ -1690,7 +1807,7 @@ export async function handleMgrDetail(
       return await renderMgrPayAmount(phone, session);
     }
 
-    return mcMsg('PICK_NUMBER', lang) + '\n\n' + (await renderPotDetail(phone, session));
+    return noticed(await renderPotDetail(phone, session), mcMsg('PICK_NUMBER', lang));
   } catch (error) {
     return await failSoft(phone, session, 'handleMgrDetail', error);
   }
@@ -1728,7 +1845,7 @@ async function mgrAmountTarget(
 }
 
 /** Amount prompt for a merry-go-round contribution or arrear — full or part. */
-async function renderMgrPayAmount(phone: string, session: Session): Promise<string> {
+async function renderMgrPayAmount(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const ctx = await loadContext(session);
@@ -1738,22 +1855,26 @@ async function renderMgrPayAmount(phone: string, session: Session): Promise<stri
   if (!target) return await renderPotDetail(phone, session);
 
   if (target.kind === 'arrear') {
-    return (
+    return prompt(
+      lang,
       mcMsg('MGR_ARREAR_PAY_AMOUNT', lang, {
         name: target.pot.name,
         remaining: kes(target.remaining),
-      }) + nav(lang)
+      }),
+      btn('FULL', ulabel('PAY_FULL', lang))
     );
   }
 
-  return (
+  return prompt(
+    lang,
     mcMsg('MGR_PAY_AMOUNT', lang, {
       name: target.pot.name,
       period: target.pot.period,
       amount: kes(target.pot.amount),
       paid: kes(target.paid),
       remaining: kes(target.remaining),
-    }) + nav(lang)
+    }),
+    btn('FULL', ulabel('PAY_FULL', lang))
   );
 }
 
@@ -1761,7 +1882,7 @@ export async function handleMgrPayAmount(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1782,13 +1903,13 @@ export async function handleMgrPayAmount(
     } else {
       const parsed = Number(input.trim());
       if (!Number.isFinite(parsed) || parsed < MIN_PAYMENT) {
-        return mcMsg('ENTER_VALID_AMOUNT', lang) + nav(lang);
+        return prompt(lang, mcMsg('ENTER_VALID_AMOUNT', lang), btn('FULL', ulabel('PAY_FULL', lang)));
       }
       amount = Math.round(parsed);
     }
 
     if (amount > target.remaining + 0.01) {
-      return mcMsg('MGR_PAY_TOO_HIGH', lang, { remaining: kes(target.remaining) }) + nav(lang);
+      return prompt(lang, mcMsg('MGR_PAY_TOO_HIGH', lang, { remaining: kes(target.remaining) }), btn('FULL', ulabel('PAY_FULL', lang)));
     }
 
     if (target.kind === 'arrear') {
@@ -1824,11 +1945,11 @@ export async function handleMgrHistory(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const g = await guard(phone, input, session);
   if (g.done) return g.response;
 
-  return mcMsg('PICK_NUMBER', session.language) + nav(session.language);
+  return prompt(session.language, mcMsg('PICK_NUMBER', session.language));
 }
 
 /* ================================================================== *
@@ -1839,7 +1960,7 @@ export async function handleStatementType(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1848,7 +1969,7 @@ export async function handleStatementType(
   try {
     const choice = parseChoice(input, 1, 4);
     if (choice === null) {
-      return mcMsg('PICK_NUMBER', lang) + '\n\n' + mcMenu('STATEMENT_TYPE', lang);
+      return withNotice(statementTypeMenu(lang), mcMsg('PICK_NUMBER', lang));
     }
 
     const types: StatementType[] = ['contributions', 'loans', 'mgr', 'full'];
@@ -1856,7 +1977,7 @@ export async function handleStatementType(
       statementType: types[choice - 1],
     });
 
-    return mcMenu('STATEMENT_PERIOD', lang) + nav(lang);
+    return statementPeriodMenu(lang);
   } catch (error) {
     return await failSoft(phone, session, 'handleStatementType', error);
   }
@@ -1866,7 +1987,7 @@ export async function handleStatementPeriod(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -1875,7 +1996,7 @@ export async function handleStatementPeriod(
   try {
     const choice = parseChoice(input, 1, 4);
     if (choice === null) {
-      return mcMsg('PICK_NUMBER', lang) + '\n\n' + mcMenu('STATEMENT_PERIOD', lang);
+      return withNotice(statementPeriodMenu(lang), mcMsg('PICK_NUMBER', lang));
     }
 
     const periods: StatementPeriod[] = ['month', 'quarter', 'year', 'all'];
@@ -1900,7 +2021,7 @@ export async function handleStatementPeriod(
 
     await replaceState(phone, session, STATE.MYCHAMA_STATEMENT_VIEW, {});
 
-    return statement + nav(lang);
+    return [uiText(statement), uiButtons(mcMsg('STATEMENT_DONE', lang), [chamaMenuBtn(lang), mainButton(lang)])];
   } catch (error) {
     return await failSoft(phone, session, 'handleStatementPeriod', error);
   }
@@ -1910,7 +2031,7 @@ export async function handleStatementView(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const g = await guard(phone, input, session);
   if (g.done) return g.response;
 
@@ -1981,7 +2102,7 @@ async function startPayment(
     potPeriod?: number;
     arrearId?: string;
   }
-): Promise<string> {
+): Promise<Reply> {
   await pushState(phone, session, STATE.MYCHAMA_PAY_PHONE, {
     payPurpose: params.purpose,
     payNet: params.net,
@@ -1997,21 +2118,25 @@ async function startPayment(
   return renderPayPhonePrompt(session);
 }
 
-function renderPayPhonePrompt(session: Session): string {
+function renderPayPhonePrompt(session: Session): Outbound {
   const lang = session.language;
   // Default to the number REGISTERED for the member. When they reached My
   // Chama from a different WhatsApp number (phone-claim path) those differ,
   // and the prompt must not silently charge the WhatsApp number instead.
   const mc = getMc(session);
   const registered = mc.memberPhone || normalizePhone(session.phone);
-  return mcMsg('PAY_ASK_PHONE', lang, { registered: localPhone(registered) }) + nav(lang);
+  return prompt(
+    lang,
+    mcMsg('PAY_ASK_PHONE', lang, { registered: localPhone(registered) }),
+    btn('1', ulabel('USE_NUMBER', lang, { phone: localPhone(registered) }))
+  );
 }
 
 export async function handlePayPhone(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   //const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -2028,7 +2153,7 @@ export async function handlePayPhone(
     }
     // Safaricom only: format, length and network. Say so, then ask again.
     if (!isSafaricomPhone(cleaned === '1' ? target : cleaned)) {
-      return `⚠️ ${SAFARICOM_ONLY_MESSAGE}\n\n` + renderPayPhonePrompt(session);
+      return withNotice(renderPayPhonePrompt(session), `⚠️ ${SAFARICOM_ONLY_MESSAGE}`);
     }
 
     await pushState(phone, session, STATE.MYCHAMA_PAY_PROVIDER, {
@@ -2042,19 +2167,21 @@ export async function handlePayPhone(
   }
 }
 
-function renderPayProviderPrompt(session: Session): string {
+function renderPayProviderPrompt(session: Session): Outbound {
+  const lang = session.language;
   const mc = getMc(session);
-  return (
-    mcMenu('PROVIDER', session.language, { phone: localPhone(mc.payPhone || '') }) +
-    nav(session.language)
-  );
+  return uiButtons(mcMenu('PROVIDER', lang, { phone: localPhone(mc.payPhone || '') }), [
+    btn('1', ulabel('MPESA', lang)),
+    btn('2', ulabel('AIRTEL', lang)),
+    backBtn(lang),
+  ]);
 }
 
 export async function handlePayProvider(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   //const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -2076,7 +2203,7 @@ export async function handlePayProvider(
   }
 }
 
-async function renderPayConfirm(phone: string, session: Session): Promise<string> {
+async function renderPayConfirm(phone: string, session: Session): Promise<Reply> {
   const lang = session.language;
   const mc = getMc(session);
   const ctx = await loadContext(session);
@@ -2087,22 +2214,25 @@ async function renderPayConfirm(phone: string, session: Session): Promise<string
 
   const fees = feesFor(mc.payPurpose, mc.payNet, ctx.chama.plan);
 
-  return mcMsg('PAY_CONFIRM', lang, {
-    label: mc.payLabel || '',
-    chamaName: ctx.chama.name,
-    net: kes(fees.net),
-    transactionCost: kes(Math.round((fees.paystackFee + fees.ourFee) * 100) / 100),
-    gross: kes(fees.gross),
-    phone: localPhone(mc.payPhone || ''),
-    provider: 'M-Pesa',
-  });
+  return uiButtons(
+    mcMsg('PAY_CONFIRM', lang, {
+      label: mc.payLabel || '',
+      chamaName: ctx.chama.name,
+      net: kes(fees.net),
+      transactionCost: kes(Math.round((fees.paystackFee + fees.ourFee) * 100) / 100),
+      gross: kes(fees.gross),
+      phone: localPhone(mc.payPhone || ''),
+      provider: 'M-Pesa',
+    }),
+    [btn('PAY', ulabel('PAY_NOW', lang)), backBtn(lang), btn('00', ulabel('CANCEL', lang))]
+  );
 }
 
 export async function handlePayConfirm(
   phone: string,
   input: string,
   session: Session
-): Promise<string> {
+): Promise<Reply> {
   const lang = session.language;
 
   const g = await guard(phone, input, session);
@@ -2123,19 +2253,19 @@ export async function handlePayConfirm(
 
     if (!canCollectOnline(ctx.chama.plan)) {
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
-      return mcMsg('PAY_NOT_ON_PLAN', lang) + '\n\n' + myChamaMenu(session);
+      return thenChamaMenu(session, mcMsg('PAY_NOT_ON_PLAN', lang));
     }
 
     if (!ctx.chama.settlementSplitCode) {
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
-      return mcMsg('PAY_NO_SPLIT', lang) + '\n\n' + myChamaMenu(session);
+      return thenChamaMenu(session, mcMsg('PAY_NO_SPLIT', lang));
     }
 
     // A split code without settlementSplitKeyVersion === 2 belongs to the OLD Paystack
     // account; the MyChama key can't use it, so Paystack would reject the charge.
     if (ctx.chama.settlementSplitKeyVersion !== 2 || !ctx.chama.settlementSubaccountCode) {
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
-      return mcMsg('PAY_SPLIT_RELINK', lang) + '\n\n' + myChamaMenu(session);
+      return thenChamaMenu(session, mcMsg('PAY_SPLIT_RELINK', lang));
     }
 
     // Re-validate against live data before asking Paystack for money.
@@ -2161,7 +2291,7 @@ export async function handlePayConfirm(
         potPeriod: undefined,
         arrearId: undefined,
       });
-      return mcMsg('PAY_STALE_TARGET', lang) + '\n\n' + myChamaMenu(session);
+      return thenChamaMenu(session, mcMsg('PAY_STALE_TARGET', lang));
     }
 
     const allowed = await withinIntentRateLimit(ctx.chama.id, ctx.member.memberId);
@@ -2175,7 +2305,7 @@ export async function handlePayConfirm(
         detail: { reason: 'rate_limit' },
       });
       await replaceState(phone, session, STATE.MYCHAMA_MENU, { stack: [] });
-      return mcMsg('PAY_RATE_LIMITED', lang) + '\n\n' + myChamaMenu(session);
+      return thenChamaMenu(session, mcMsg('PAY_RATE_LIMITED', lang));
     }
 
     const fees = feesFor(mc.payPurpose, mc.payNet, ctx.chama.plan);
@@ -2235,31 +2365,25 @@ export async function handlePayConfirm(
     });
 
     if (result.duplicate) {
-      return (
+      return thenChamaMenu(
+        session,
         mcMsg('PAY_DUPLICATE', lang, {
           net: kes(fees.net),
           ref: (result.reference || '').slice(-10),
-        }) +
-        '\n\n' +
-        myChamaMenu(session)
+        })
       );
     }
 
     if (!result.success) {
-      return (
-        mcMsg('PAY_FAILED', lang, { reason: result.error || 'unknown' }) +
-        '\n\n' +
-        myChamaMenu(session)
-      );
+      return thenChamaMenu(session, mcMsg('PAY_FAILED', lang, { reason: result.error || 'unknown' }));
     }
 
-    return (
+    return thenChamaMenu(
+      session,
       mcMsg('PAY_SENT', lang, {
         phone: localPhone(mc.payPhone),
         ref: (result.reference || '').slice(-10),
-      }) +
-      '\n\n' +
-      myChamaMenu(session)
+      })
     );
   } catch (error) {
     return await failSoft(phone, session, 'handlePayConfirm', error);
