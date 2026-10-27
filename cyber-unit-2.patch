@@ -1,0 +1,17 @@
+diff --git a/src/components/plotYangu/AddProp.tsx b/src/components/plotYangu/AddProp.tsx
+index 4788985..08db1a0 100644
+--- a/src/components/plotYangu/AddProp.tsx
++++ b/src/components/plotYangu/AddProp.tsx
+@@ -86,6 +86,12 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+         throw new Error(`Maximum ${limits.properties} properties allowed for ${asset.tier} tier`);
+       }
+ 
++      // A plan's tenant total is also its unit total (300 tenants = 300 units), across all properties
++      const unitsInUse = currentProperties.reduce((sum, p) => sum + (p.maxUnits || 0), 0);
++      if (limits.totalTenants !== -1 && unitsInUse + totalUnits > limits.totalTenants) {
++        throw new Error(`Maximum ${limits.totalTenants} units in total for ${asset.tier} tier (${unitsInUse} already used)`);
++      }
++
+       await assetsService.createProperty({ ...formData, maxUnits: totalUnits, units: unitSpecs }, pId);
+       onSuccess();
+       onClose();

@@ -1,0 +1,775 @@
+diff --git a/src/components/plotYangu/AddProp.tsx b/src/components/plotYangu/AddProp.tsx
+index 2ba8df8..4788985 100644
+--- a/src/components/plotYangu/AddProp.tsx
++++ b/src/components/plotYangu/AddProp.tsx
+@@ -2,6 +2,8 @@ import { useState } from 'react';
+ import { X, AlertCircle, Loader2, Home } from 'lucide-react';
+ import { assetsService, type Asset, type PropertyInput } from '../../services/Assets';
+ import { checkSafaricomPhone } from '../../utils/safaricom';
++import { validateUnitSpecs, type UnitSpec } from '../../services/Units';
++import UnitsBuilder, { newUnitSpec } from './UnitsBuilder';
+ 
+ type LimitNumber = number | -1;
+ 
+@@ -36,6 +38,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+ }) => {
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState('');
++  const [unitSpecs, setUnitSpecs] = useState<UnitSpec[]>([newUnitSpec()]);
+   const [formData, setFormData] = useState<PropertyInput>({
+     userId: asset.id,
+     name: '',
+@@ -62,8 +65,14 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+       return;
+     }
+ 
+-    // Validate max units against tier limits
+-    if (formData.maxUnits && formData.maxUnits > maxUnitsAllowed) {
++    const unitProblem = validateUnitSpecs(unitSpecs);
++    if (unitProblem) {
++      setError(`Units: ${unitProblem}`);
++      return;
++    }
++    // Validate total units against tier limits
++    const totalUnits = unitSpecs.reduce((sum, u) => sum + u.count, 0);
++    if (totalUnits > maxUnitsAllowed) {
+       setError(`Maximum ${maxUnitsAllowed} units allowed for ${asset.tier} tier`);
+       return;
+     }
+@@ -77,7 +86,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+         throw new Error(`Maximum ${limits.properties} properties allowed for ${asset.tier} tier`);
+       }
+ 
+-      await assetsService.createProperty(formData, pId);
++      await assetsService.createProperty({ ...formData, maxUnits: totalUnits, units: unitSpecs }, pId);
+       onSuccess();
+       onClose();
+       
+@@ -92,6 +101,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+         billingMode: 'full',
+         ownerPhone: ''
+       });
++      setUnitSpecs([newUnitSpec()]);
+     } catch (err: any) {
+       setError(err.message || 'Failed to create property');
+     } finally {
+@@ -182,22 +192,10 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
+               />
+             </div>
+ 
+-            <div>
+-              <label className="block text-sm font-medium text-gray-400 mb-2">
+-                Max Units * (Max: {maxUnitsAllowed})
+-              </label>
+-              <input
+-                type="number"
+-                value={formData.maxUnits}
+-                onChange={(e) => setFormData(prev => ({ ...prev, maxUnits: Number(e.target.value) }))}
+-                min="1"
+-                max={maxUnitsAllowed}
+-                required
+-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
+-              />
+-            </div>
+           </div>
+ 
++          <UnitsBuilder specs={unitSpecs} onChange={setUnitSpecs} />
++
+           <div>
+             <label className="block text-sm font-medium text-gray-400 mb-2">Billing Mode</label>
+             <div className="grid grid-cols-2 gap-3">
+diff --git a/src/components/plotYangu/AddTenant.tsx b/src/components/plotYangu/AddTenant.tsx
+index f58f3e3..a5fb8d4 100644
+--- a/src/components/plotYangu/AddTenant.tsx
++++ b/src/components/plotYangu/AddTenant.tsx
+@@ -1,6 +1,7 @@
+ import { useState, useEffect } from 'react';
+ import { X, AlertCircle, Loader2, UserPlus } from 'lucide-react';
+-import { assetsService, type Asset, type Property, type TenantInput } from '../../services/Assets';
++import { assetsService, type Asset, type Property, type TenantInput, type Unit } from '../../services/Assets';
++import { unitSizeLabel, unitConditionLabel } from '../../services/Units';
+ import { checkSafaricomPhone } from '../../utils/safaricom';
+ 
+ type LimitNumber = number | -1;
+@@ -35,6 +36,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState('');
+   const [properties, setProperties] = useState<Property[]>([]);
++  const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+   const [formData, setFormData] = useState<TenantInput>({
+     id: 0,
+     propertyId: 0,
+@@ -54,6 +56,30 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+     }
+   }, [isOpen]);
+ 
++  // Vacant units of the selected property
++  useEffect(() => {
++    let cancelled = false;
++    setAvailableUnits([]);
++    if (isOpen && formData.propertyId) {
++      assetsService.getAvailableUnits(asset.id, formData.propertyId)
++        .then(units => { if (!cancelled) setAvailableUnits(units); })
++        .catch(err => console.error('Error loading units:', err));
++    }
++    return () => { cancelled = true; };
++  }, [isOpen, formData.propertyId, asset.id]);
++
++  // Picking a unit passes its id as the unit number and its price to the form
++  const selectUnit = (value: string) => {
++    const unit = availableUnits.find(u => String(u.id) === value);
++    setFormData(prev => ({
++      ...prev,
++      unitId: unit ? unit.id : undefined,
++      unitNumber: unit ? unit.unitNumber : '',
++      rentAmount: unit ? unit.rentAmount : 0,
++      depositAmount: unit ? unit.depositAmount : 0
++    }));
++  };
++
+   const loadProperties = async () => {
+     try {
+       const props = await assetsService.getPropertiesByAsset(asset.id);
+@@ -82,6 +108,11 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+       return;
+     }
+ 
++    if (formData.unitId == null) {
++      setError('Please select a vacant unit');
++      return;
++    }
++
+     // Phone is optional here, but when given it must be a Safaricom number
+     const phoneCheck = checkSafaricomPhone(formData.phone);
+     if (formData.phone && !phoneCheck.ok) {
+@@ -126,6 +157,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+         phone: '',
+         email: '',
+         unitNumber: '',
++        unitId: undefined,
+         rentAmount: 0,
+         standingFees: 0,
+         depositAmount: 0
+@@ -164,7 +196,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+             <label className="block text-sm font-medium text-gray-400 mb-2">Select Property *</label>
+             <select
+               value={formData.propertyId}
+-              onChange={(e) => setFormData(prev => ({ ...prev, propertyId: Number(e.target.value) }))}
++              onChange={(e) => setFormData(prev => ({ ...prev, propertyId: Number(e.target.value), unitId: undefined, unitNumber: '', rentAmount: 0, depositAmount: 0 }))}
+               required
+               className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-white"
+             >
+@@ -226,14 +258,21 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+             </div>
+ 
+             <div>
+-              <label className="block text-sm font-medium text-gray-400 mb-2">Unit Number</label>
+-              <input
+-                type="text"
+-                value={formData.unitNumber}
+-                onChange={(e) => setFormData(prev => ({ ...prev, unitNumber: e.target.value }))}
+-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
+-                placeholder="A101"
+-              />
++              <label className="block text-sm font-medium text-gray-400 mb-2">Unit *</label>
++              <select
++                value={formData.unitId ?? ''}
++                onChange={(e) => selectUnit(e.target.value)}
++                disabled={!formData.propertyId}
++                required
++                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
++              >
++                <option value="">{availableUnits.length ? 'Select a vacant unit' : 'No vacant units'}</option>
++                {availableUnits.map(u => (
++                  <option key={u.id} value={u.id}>
++                    {u.unitNumber} · {unitSizeLabel(u.unitSize)} · {u.unitType} · {unitConditionLabel(u.condition)} · KES {u.rentAmount.toLocaleString()}
++                  </option>
++                ))}
++              </select>
+             </div>
+ 
+             <div>
+@@ -241,7 +280,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
+               <input
+                 type="number"
+                 value={formData.rentAmount}
+-                onChange={(e) => setFormData(prev => ({ ...prev, rentAmount: Number(e.target.value) }))}
++                readOnly
+                 required
+                 min="0"
+                 className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
+diff --git a/src/components/plotYangu/PropList.tsx b/src/components/plotYangu/PropList.tsx
+index 2176bdc..8de1d99 100644
+--- a/src/components/plotYangu/PropList.tsx
++++ b/src/components/plotYangu/PropList.tsx
+@@ -1,8 +1,6 @@
+ import { useState, useEffect } from 'react';
+-import { X, Home, Loader2, Trash2, AlertCircle, Users } from 'lucide-react';
+-import { doc, deleteDoc } from 'firebase/firestore';
+-import { db } from '../../services/firebaseService';
+-import { assetsService, type Asset, type Property, type Tenant } from '../../services/Assets';
++import { X, Home, Loader2, Trash2, AlertCircle, Users, Copy, Check } from 'lucide-react';
++import { assetsService, type Asset, type Property, type Tenant, type Unit } from '../../services/Assets';
+ 
+ interface ViewPropertyModalProps {
+   isOpen: boolean;
+@@ -21,6 +19,8 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
+ }) => {
+   const [loading, setLoading] = useState(false);
+   const [tenants, setTenants] = useState<Tenant[]>([]);
++  const [units, setUnits] = useState<Unit[]>([]);
++  const [copied, setCopied] = useState(false);
+   const [deletingTenant, setDeletingTenant] = useState<string | null>(null);
+   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+   const [tenantToDelete, setTenantToDelete] = useState<Tenant | null>(null);
+@@ -37,6 +37,7 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
+     try {
+       const tenantsData = await assetsService.getTenantsByProperty(asset.id, property.id);
+       setTenants(tenantsData);
++      setUnits(await assetsService.getUnitsByProperty(asset.id, property.id));
+     } catch (error) {
+       console.error('Error loading tenants:', error);
+       setError('Failed to load tenants');
+@@ -57,9 +58,8 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
+     setError('');
+ 
+     try {
+-      // Delete from Firestore
+-      const tenantRef = doc(db, 'users', asset.id, 'tenants', tenantToDelete.id.toString());
+-      await deleteDoc(tenantRef);
++      // Delete from Firestore; the unit they leased becomes vacant again
++      await assetsService.deleteTenant(asset.id, tenantToDelete);
+ 
+       // Reload tenants
+       await loadTenants();
+@@ -90,7 +90,20 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
+                 <h3 className="text-xl font-bold text-white">{property.name}</h3>
+                 <p className="text-sm text-gray-400">{property.address || 'No address provided'}</p>
+                 {property.ownerId && (
+-                  <p className="mt-0.5 text-xs font-mono text-cyan-400">{property.ownerId}</p>
++                  <button
++                    type="button"
++                    onClick={() => {
++                      navigator.clipboard.writeText(property.ownerId!).then(() => {
++                        setCopied(true);
++                        setTimeout(() => setCopied(false), 1500);
++                      }).catch(() => {});
++                    }}
++                    title="Copy owner ID"
++                    className="mt-0.5 flex items-center gap-1 text-xs font-mono text-cyan-400 hover:text-cyan-300 select-all"
++                  >
++                    {property.ownerId}
++                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
++                  </button>
+                 )}
+               </div>
+             </div>
+@@ -135,6 +148,11 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
+               <Users className="w-5 h-5 text-cyan-400" />
+               <h4 className="text-lg font-semibold text-white">Tenants ({tenants.length}/{property.maxUnits})</h4>
+             </div>
++            <p className="text-xs text-gray-500">
++              {units.filter(u => u.status === 'vacant').length} vacant ·{' '}
++              {units.filter(u => u.status === 'occupied').length} occupied ·{' '}
++              {units.filter(u => u.status === 'maintenance').length} maintenance
++            </p>
+           </div>
+ 
+           {error && (
+diff --git a/src/components/plotYangu/UnitsBuilder.tsx b/src/components/plotYangu/UnitsBuilder.tsx
+new file mode 100644
+index 0000000..aafe929
+--- /dev/null
++++ b/src/components/plotYangu/UnitsBuilder.tsx
+@@ -0,0 +1,76 @@
++import { Plus, Trash2 } from 'lucide-react';
++import { UNIT_CONDITIONS, sizesForType, type UnitSpec, type UnitType } from '../../services/Units';
++
++interface UnitsBuilderProps {
++  specs: UnitSpec[];
++  onChange: (specs: UnitSpec[]) => void;
++}
++
++export const newUnitSpec = (unitType: UnitType = 'residential'): UnitSpec => ({
++  unitType,
++  unitSize: sizesForType(unitType)[0].value,
++  count: 1,
++  rentAmount: 0,
++  depositAmount: 0,
++  condition: 'maintained'
++});
++
++const inputCls = 'w-full px-3 py-2 bg-gray-900/50 border border-gray-700 rounded-lg text-sm text-white focus:ring-2 focus:ring-cyan-500 focus:border-transparent';
++
++export default function UnitsBuilder({ specs, onChange }: UnitsBuilderProps) {
++  const update = (i: number, patch: Partial<UnitSpec>) =>
++    onChange(specs.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
++  const total = specs.reduce((sum, s) => sum + (s.count || 0), 0);
++
++  return (
++    <div>
++      <label className="block text-sm font-medium text-gray-400 mb-2">Units *</label>
++      <div className="space-y-3">
++        {specs.map((spec, i) => (
++          <div key={i} className="border border-gray-700 rounded-lg p-3 space-y-2">
++            <div className="grid grid-cols-2 gap-2">
++              <select value={spec.unitType} className={inputCls}
++                onChange={(e) => update(i, { unitType: e.target.value as UnitType, unitSize: sizesForType(e.target.value as UnitType)[0].value })}>
++                <option value="residential">Residential</option>
++                <option value="commercial">Commercial</option>
++              </select>
++              <select value={spec.unitSize} className={inputCls}
++                onChange={(e) => update(i, { unitSize: e.target.value as UnitSpec['unitSize'] })}>
++                {sizesForType(spec.unitType).map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
++              </select>
++            </div>
++            <div className="grid grid-cols-3 gap-2">
++              <label className="text-xs text-gray-500">How many
++                <input type="number" min={1} value={spec.count || ''} className={inputCls}
++                  onChange={(e) => update(i, { count: Math.floor(Number(e.target.value)) })} />
++              </label>
++              <label className="text-xs text-gray-500">Rent (KES)
++                <input type="number" min={0} value={spec.rentAmount || ''} className={inputCls}
++                  onChange={(e) => update(i, { rentAmount: Number(e.target.value) })} />
++              </label>
++              <label className="text-xs text-gray-500">Deposit (KES)
++                <input type="number" min={0} value={spec.depositAmount || ''} className={inputCls}
++                  onChange={(e) => update(i, { depositAmount: Number(e.target.value) })} />
++              </label>
++            </div>
++            <div className="flex items-center gap-2">
++              <select value={spec.condition} className={inputCls}
++                onChange={(e) => update(i, { condition: e.target.value as UnitSpec['condition'] })}>
++                {UNIT_CONDITIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
++              </select>
++              <button type="button" onClick={() => onChange(specs.filter((_, idx) => idx !== i))}
++                className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg" aria-label="Remove unit row">
++                <Trash2 className="w-4 h-4" />
++              </button>
++            </div>
++          </div>
++        ))}
++      </div>
++      <button type="button" onClick={() => onChange([...specs, newUnitSpec()])}
++        className="mt-3 flex items-center gap-2 text-sm font-medium text-cyan-400 hover:text-cyan-300">
++        <Plus className="w-4 h-4" /> Add unit type
++      </button>
++      <p className="text-gray-500 text-xs mt-1">{total} unit{total === 1 ? '' : 's'} will be created</p>
++    </div>
++  );
++}
+diff --git a/src/services/Assets.tsx b/src/services/Assets.tsx
+index 6d9053d..a62975c 100644
+--- a/src/services/Assets.tsx
++++ b/src/services/Assets.tsx
+@@ -9,10 +9,19 @@ import {
+   Timestamp,
+   updateDoc,
+   orderBy,
+-  limit} from 'firebase/firestore';
++  limit,
++  writeBatch,
++  deleteDoc,
++  runTransaction} from 'firebase/firestore';
+ import { httpsCallable } from 'firebase/functions';
+ import { db, functionsAfrica as functions } from './firebaseService';
+ import { checkSafaricomPhone } from '../utils/safaricom';
++import {
++  MAX_UNITS_PER_PROPERTY, unitSizeCode, validateUnitSpecs,
++  normalizeUnitType, normalizeUnitSize, normalizeUnitCondition, normalizeUnitStatus,
++  type UnitType, type UnitSize, type UnitCondition, type UnitStatus, type UnitSpec
++} from './Units';
++export type { UnitType, UnitSize, UnitCondition, UnitStatus, UnitSpec } from './Units';
+ 
+ export interface CompanyInfo {
+   name: string;
+@@ -74,6 +83,23 @@ export interface Property {
+ 
+ export type BillingMode = 'rent_only' | 'full';
+ 
++/** users/{userId}/properties/{propertyId}/units/{unitId} - PUBLIC to read, so it holds unit facts only (never tenant data). */
++export interface Unit {
++  id: number; // propertyId * 1000 + n
++  localId: number;
++  propertyId: number;
++  userId: string;
++  ownerId?: string;
++  unitNumber: string; // BS-01, 1B-03 ... passed to tenants as their unit number
++  unitType: UnitType;
++  unitSize: UnitSize;
++  condition: UnitCondition;
++  status: UnitStatus;
++  isOccupied: boolean;
++  rentAmount: number;
++  depositAmount: number;
++}
++
+ export const normalizeBillingMode = (v: unknown): BillingMode => (v === 'rent_only' ? 'rent_only' : 'full');
+ 
+ /**
+@@ -102,6 +128,8 @@ export interface PropertyInput {
+   billingMode?: BillingMode;
+   /** REQUIRED when creating a property. Must be a Safaricom number. */
+   ownerPhone?: string;
++  /** REQUIRED when creating a property: the units to create. maxUnits becomes their total. */
++  units?: UnitSpec[];
+ }
+ 
+ export interface Tenant {
+@@ -113,6 +141,7 @@ export interface Tenant {
+   phone?: string;
+   email?: string;
+   unitNumber?: string;
++  unitId?: number;
+   rentAmount: number;
+   standingFees: number;
+   depositAmount: number;
+@@ -131,6 +160,8 @@ export interface TenantInput {
+   phone?: string;
+   email?: string;
+   unitNumber?: string;
++  /** The vacant unit to lease. Rent, unit number and default deposit are taken from it. */
++  unitId?: number;
+   rentAmount: number;
+   standingFees?: number;
+   depositAmount?: number;
+@@ -316,6 +347,13 @@ public async getNextInvoiceId(userId: string): Promise<number> {
+         throw new Error(`Owner phone: ${ownerCheck.message}`);
+       }
+ 
++      const unitSpecs = propertyData.units || [];
++      const unitProblem = validateUnitSpecs(unitSpecs);
++      if (unitProblem) {
++        throw new Error(`Units: ${unitProblem}`);
++      }
++      const totalUnits = unitSpecs.reduce((sum, u) => sum + u.count, 0);
++
+       const propertyId = await this.getNextPropertyId(propertyData.userId);
+       
+       const propertyRef = doc(db, 'users', propertyData.userId, 'properties', propertyId.toString());
+@@ -334,7 +372,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
+         description: propertyData.description || '',
+         image: propertyData.image || '',
+         agentCommissionRate: propertyData.agentCommissionRate || 0,
+-        maxUnits: propertyData.maxUnits || 1,
++        maxUnits: totalUnits,
+         billingMode: normalizeBillingMode(propertyData.billingMode),
+         ownerId,
+         ownerPhone: ownerCheck.e164,
+@@ -345,13 +383,21 @@ public async getNextInvoiceId(userId: string): Promise<number> {
+       };
+       
+       await setDoc(propertyRef, property);
++
++      // No property without its units: if they cannot be written, take the property back out.
++      try {
++        await this.writeUnits(propertyData.userId, propertyId, ownerId, unitSpecs);
++      } catch (unitError) {
++        await deleteDoc(propertyRef).catch(() => {});
++        throw unitError;
++      }
+       
+       console.log('Property created successfully:', property);
+       
+       return property as Property;
+     } catch (error: any) {
+       console.error('Error creating property:', error);
+-      if (typeof error?.message === 'string' && error.message.startsWith('Owner phone:')) throw error;
++      if (typeof error?.message === 'string' && (error.message.startsWith('Owner phone:') || error.message.startsWith('Units:'))) throw error;
+       throw new Error('Failed to create property. Please try again.');
+     }
+   }
+@@ -411,54 +457,160 @@ public async getNextInvoiceId(userId: string): Promise<number> {
+     }
+   }
+ 
++  /** Writes the units of a new property. Ids are propertyId * 1000 + n; numbers are BS-01, BS-02 ... per size. */
++  private async writeUnits(userId: string, propertyId: number, ownerId: string, specs: UnitSpec[]): Promise<void> {
++    const perSize: Record<string, number> = {};
++    const docs: { id: number; data: Record<string, unknown> }[] = [];
++    let seq = 0;
++    for (const spec of specs) {
++      for (let i = 0; i < spec.count; i++) {
++        seq++;
++        if (seq > MAX_UNITS_PER_PROPERTY) throw new Error(`Units: A property can have at most ${MAX_UNITS_PER_PROPERTY} units`);
++        const size = normalizeUnitSize(spec.unitSize);
++        perSize[size] = (perSize[size] || 0) + 1;
++        const id = propertyId * 1000 + seq;
++        docs.push({
++          id,
++          data: {
++            id,
++            localId: id,
++            userId,
++            propertyId,
++            ownerId,
++            unitNumber: `${unitSizeCode(size)}-${String(perSize[size]).padStart(2, '0')}`,
++            unitType: normalizeUnitType(spec.unitType),
++            unitSize: size,
++            condition: normalizeUnitCondition(spec.condition),
++            status: 'vacant',
++            isOccupied: false,
++            rentAmount: spec.rentAmount,
++            depositAmount: spec.depositAmount || 0,
++            ...deskOriginStamp()
++          }
++        });
++      }
++    }
++    for (let i = 0; i < docs.length; i += 400) {
++      const batch = writeBatch(db);
++      for (const u of docs.slice(i, i + 400)) {
++        batch.set(doc(db, 'users', userId, 'properties', propertyId.toString(), 'units', u.id.toString()), u.data);
++      }
++      await batch.commit();
++    }
++  }
++
++  /** All units of a property, by unit number. */
++  async getUnitsByProperty(userId: string, propertyId: number): Promise<Unit[]> {
++    const snap = await getDocs(collection(db, 'users', userId, 'properties', propertyId.toString(), 'units'));
++    return snap.docs
++      .map(d => {
++        const u = d.data();
++        return {
++          ...u,
++          status: normalizeUnitStatus(u.status),
++          unitType: normalizeUnitType(u.unitType),
++          unitSize: normalizeUnitSize(u.unitSize),
++          condition: normalizeUnitCondition(u.condition)
++        } as Unit;
++      })
++      .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
++  }
++
++  /** Units a tenant can be given: vacant only. */
++  async getAvailableUnits(userId: string, propertyId: number): Promise<Unit[]> {
++    return (await this.getUnitsByProperty(userId, propertyId)).filter(u => u.status === 'vacant');
++  }
++
+   /**
+-   * Create a new tenant
++   * Create a new tenant. The tenant leases one vacant unit: the unit is checked and marked occupied in the same
++   * transaction that writes the tenant, so two tenants can never lease the same unit.
+    */
+   async createTenant(tenantData: TenantInput): Promise<Tenant> {
+     try {
+-      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
+-
+-      // The tenant ID is the National ID. Never silently overwrite an existing tenant document that reuses it.
+-      const existing = await getDoc(tenantRef);
+-      if (existing.exists()) {
+-        throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
++      if (tenantData.unitId == null) {
++        throw new Error('Select a vacant unit for this tenant.');
+       }
++      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
++      const unitRef = doc(db, 'users', tenantData.userId, 'properties', tenantData.propertyId.toString(), 'units', tenantData.unitId.toString());
+       
+       // The property's owner id travels with every tenant of that property.
+       const ownerId = await this.ensurePropertyOwnerId(tenantData.userId, tenantData.propertyId);
+ 
+-      const tenant = {
+-        id: tenantData.id,
+-        localId: tenantData.id,
+-        propertyId: tenantData.propertyId,
+-        ownerId,
+-        userId: tenantData.userId,
+-        name: tenantData.name,
+-        phone: tenantData.phone || '',
+-        email: tenantData.email || '',
+-        unitNumber: tenantData.unitNumber || '',
+-        rentAmount: tenantData.rentAmount,
+-        standingFees: tenantData.standingFees || 0,
+-        depositAmount: tenantData.depositAmount || 0,
+-        leaseStart: tenantData.leaseStart || null,
+-        leaseEnd: tenantData.leaseEnd || null,
+-        isActive: true,
+-        isRestricted: false,
+-        createdAt: Timestamp.now(),
+-        updatedAt: Timestamp.now(),
+-        ...deskOriginStamp()
+-      };
+-      
+-      await setDoc(tenantRef, tenant);
++      const tenant = await runTransaction(db, async (tx) => {
++        // The tenant ID is the National ID. Never silently overwrite an existing tenant document that reuses it.
++        if ((await tx.get(tenantRef)).exists()) {
++          throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
++        }
++
++        const unitSnap = await tx.get(unitRef);
++        const unit = unitSnap.data();
++        if (!unitSnap.exists() || !unit || unit.propertyId !== tenantData.propertyId) {
++          throw new Error('Unit does not belong to this property.');
++        }
++        if (unit.status === 'maintenance') {
++          throw new Error(`Unit ${unit.unitNumber} is under maintenance.`);
++        }
++        if (unit.status !== 'vacant') {
++          throw new Error(`Unit ${unit.unitNumber} is already occupied.`);
++        }
++
++        const newTenant = {
++          id: tenantData.id,
++          localId: tenantData.id,
++          propertyId: tenantData.propertyId,
++          ownerId,
++          userId: tenantData.userId,
++          name: tenantData.name,
++          phone: tenantData.phone || '',
++          email: tenantData.email || '',
++          unitId: tenantData.unitId,
++          unitNumber: unit.unitNumber,
++          rentAmount: unit.rentAmount,
++          standingFees: tenantData.standingFees || 0,
++          depositAmount: tenantData.depositAmount ?? unit.depositAmount ?? 0,
++          leaseStart: tenantData.leaseStart || null,
++          leaseEnd: tenantData.leaseEnd || null,
++          isActive: true,
++          isRestricted: false,
++          createdAt: Timestamp.now(),
++          updatedAt: Timestamp.now(),
++          ...deskOriginStamp()
++        };
++
++        tx.set(tenantRef, newTenant);
++        tx.update(unitRef, { status: 'occupied', isOccupied: true, ...deskUpdateStamp() });
++        return newTenant;
++      });
+       
+       return tenant as Tenant;
+     } catch (error: any) {
+       console.error('Error creating tenant:', error);
+-      if (typeof error?.message === 'string' && error.message.includes('already exists')) throw error;
++      if (typeof error?.message === 'string' && /already exists|^Unit |^Select a vacant|already occupied/.test(error.message)) throw error;
+       throw new Error('Failed to create tenant. Please try again.');
+     }
+   }
+ 
++  /** Deletes a tenant and sets the unit they leased back to vacant (a unit under maintenance is left alone). */
++  async deleteTenant(userId: string, tenant: { id: number; propertyId: number; unitId?: number | null }): Promise<void> {
++    try {
++      const tenantRef = doc(db, 'users', userId, 'tenants', tenant.id.toString());
++      const unitRef = tenant.unitId != null
++        ? doc(db, 'users', userId, 'properties', tenant.propertyId.toString(), 'units', tenant.unitId.toString())
++        : null;
++
++      await runTransaction(db, async (tx) => {
++        const unitSnap = unitRef ? await tx.get(unitRef) : null;
++        tx.delete(tenantRef);
++        if (unitRef && unitSnap?.exists() && unitSnap.data()?.status === 'occupied') {
++          tx.update(unitRef, { status: 'vacant', isOccupied: false, ...deskUpdateStamp() });
++        }
++      });
++    } catch (error) {
++      console.error('Error deleting tenant:', error);
++      throw new Error('Failed to delete tenant. Please try again.');
++    }
++  }
++
+   /**
+    * Update an existing tenant
+    */
+diff --git a/src/services/Units.ts b/src/services/Units.ts
+new file mode 100644
+index 0000000..57857d8
+--- /dev/null
++++ b/src/services/Units.ts
+@@ -0,0 +1,96 @@
++// Units.ts - shared unit vocabulary (type, size, condition, status) and helpers. Mirrors Plot Yangu (PMS) src/services/database/Units.ts.
++// A unit is the rentable thing inside a property. Price, deposit, size, type, condition and availability live on the unit;
++// a tenant only points at one (tenants.unitId).
++
++export type UnitType = 'residential' | 'commercial';
++export type UnitSize =
++  | 'single_room' | 'bedsitter' | 'studio' | 'one_bedroom' | 'two_bedroom' | 'three_bedroom' | 'maisonette'
++  | 'shop' | 'office' | 'stall' | 'warehouse'
++  | 'other';
++export type UnitCondition = 'new' | 'maintained' | 'old';
++export type UnitStatus = 'vacant' | 'occupied' | 'maintenance';
++
++export interface UnitSizeOption {
++  value: UnitSize;
++  label: string;
++  /** Prefix of the generated unit id, e.g. BS-01 */
++  code: string;
++  type: UnitType | 'any';
++}
++
++export const UNIT_SIZES: UnitSizeOption[] = [
++  { value: 'single_room', label: 'Single room', code: 'SR', type: 'residential' },
++  { value: 'bedsitter', label: 'Bedsitter', code: 'BS', type: 'residential' },
++  { value: 'studio', label: 'Studio', code: 'ST', type: 'residential' },
++  { value: 'one_bedroom', label: 'One bedroom', code: '1B', type: 'residential' },
++  { value: 'two_bedroom', label: 'Two bedroom', code: '2B', type: 'residential' },
++  { value: 'three_bedroom', label: 'Three bedroom', code: '3B', type: 'residential' },
++  { value: 'maisonette', label: 'Maisonette', code: 'MS', type: 'residential' },
++  { value: 'shop', label: 'Shop', code: 'SH', type: 'commercial' },
++  { value: 'office', label: 'Office', code: 'OF', type: 'commercial' },
++  { value: 'stall', label: 'Stall', code: 'SL', type: 'commercial' },
++  { value: 'warehouse', label: 'Warehouse', code: 'WH', type: 'commercial' },
++  { value: 'other', label: 'Other', code: 'UN', type: 'any' }
++];
++
++export const UNIT_CONDITIONS: { value: UnitCondition; label: string }[] = [
++  { value: 'new', label: 'New' },
++  { value: 'maintained', label: 'Maintained' },
++  { value: 'old', label: 'Old' }
++];
++
++export const UNIT_STATUSES: { value: UnitStatus; label: string }[] = [
++  { value: 'vacant', label: 'Vacant' },
++  { value: 'occupied', label: 'Occupied' },
++  { value: 'maintenance', label: 'Under maintenance' }
++];
++
++/** One row of the "add units" builder: `count` identical units. */
++export interface UnitSpec {
++  unitType: UnitType;
++  unitSize: UnitSize;
++  count: number;
++  rentAmount: number;
++  depositAmount: number;
++  condition: UnitCondition;
++}
++
++/** Hard cap per property. Unit ids are propertyId * 1000 + n, so n must stay below 1000. */
++export const MAX_UNITS_PER_PROPERTY = 999;
++
++export const sizesForType = (type: UnitType): UnitSizeOption[] =>
++  UNIT_SIZES.filter(s => s.type === type || s.type === 'any');
++
++export const unitSizeLabel = (size?: string | null): string =>
++  UNIT_SIZES.find(s => s.value === size)?.label ?? 'Unit';
++
++export const unitSizeCode = (size?: string | null): string =>
++  UNIT_SIZES.find(s => s.value === size)?.code ?? 'UN';
++
++export const unitConditionLabel = (c?: string | null): string =>
++  UNIT_CONDITIONS.find(x => x.value === c)?.label ?? 'Maintained';
++
++export const unitStatusLabel = (s?: string | null): string =>
++  UNIT_STATUSES.find(x => x.value === s)?.label ?? 'Vacant';
++
++export const normalizeUnitType = (v: unknown): UnitType => (v === 'commercial' ? 'commercial' : 'residential');
++export const normalizeUnitSize = (v: unknown): UnitSize =>
++  (UNIT_SIZES.some(s => s.value === v) ? v : 'other') as UnitSize;
++export const normalizeUnitCondition = (v: unknown): UnitCondition =>
++  (v === 'new' || v === 'old' ? v : 'maintained') as UnitCondition;
++export const normalizeUnitStatus = (v: unknown): UnitStatus =>
++  (v === 'occupied' || v === 'maintenance' ? v : 'vacant') as UnitStatus;
++
++/** Checks the builder rows. Returns an error message, or null when they are valid. */
++export const validateUnitSpecs = (specs: UnitSpec[]): string | null => {
++  if (!specs.length) return 'Add at least one unit';
++  let total = 0;
++  for (const s of specs) {
++    if (!Number.isInteger(s.count) || s.count < 1) return 'Each unit row needs a count of at least 1';
++    if (!(s.rentAmount > 0)) return 'Each unit row needs a rent amount greater than 0';
++    if (s.depositAmount < 0 || Number.isNaN(s.depositAmount)) return 'Deposit cannot be negative';
++    total += s.count;
++  }
++  if (total > MAX_UNITS_PER_PROPERTY) return `A property can have at most ${MAX_UNITS_PER_PROPERTY} units`;
++  return null;
++};

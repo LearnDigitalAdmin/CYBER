@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { X, AlertCircle, Loader2, Home } from 'lucide-react';
 import { assetsService, type Asset, type PropertyInput } from '../../services/Assets';
 import { checkSafaricomPhone } from '../../utils/safaricom';
+import { validateUnitSpecs, type UnitSpec } from '../../services/Units';
+import UnitsBuilder, { newUnitSpec } from './UnitsBuilder';
 
 type LimitNumber = number | -1;
 
@@ -36,6 +38,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [unitSpecs, setUnitSpecs] = useState<UnitSpec[]>([newUnitSpec()]);
   const [formData, setFormData] = useState<PropertyInput>({
     userId: asset.id,
     name: '',
@@ -62,8 +65,14 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       return;
     }
 
-    // Validate max units against tier limits
-    if (formData.maxUnits && formData.maxUnits > maxUnitsAllowed) {
+    const unitProblem = validateUnitSpecs(unitSpecs);
+    if (unitProblem) {
+      setError(`Units: ${unitProblem}`);
+      return;
+    }
+    // Validate total units against tier limits
+    const totalUnits = unitSpecs.reduce((sum, u) => sum + u.count, 0);
+    if (totalUnits > maxUnitsAllowed) {
       setError(`Maximum ${maxUnitsAllowed} units allowed for ${asset.tier} tier`);
       return;
     }
@@ -77,7 +86,13 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         throw new Error(`Maximum ${limits.properties} properties allowed for ${asset.tier} tier`);
       }
 
-      await assetsService.createProperty(formData, pId);
+      // A plan's tenant total is also its unit total (300 tenants = 300 units), across all properties
+      const unitsInUse = currentProperties.reduce((sum, p) => sum + (p.maxUnits || 0), 0);
+      if (limits.totalTenants !== -1 && unitsInUse + totalUnits > limits.totalTenants) {
+        throw new Error(`Maximum ${limits.totalTenants} units in total for ${asset.tier} tier (${unitsInUse} already used)`);
+      }
+
+      await assetsService.createProperty({ ...formData, maxUnits: totalUnits, units: unitSpecs }, pId);
       onSuccess();
       onClose();
       
@@ -92,6 +107,7 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         billingMode: 'full',
         ownerPhone: ''
       });
+      setUnitSpecs([newUnitSpec()]);
     } catch (err: any) {
       setError(err.message || 'Failed to create property');
     } finally {
@@ -182,21 +198,9 @@ const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">
-                Max Units * (Max: {maxUnitsAllowed})
-              </label>
-              <input
-                type="number"
-                value={formData.maxUnits}
-                onChange={(e) => setFormData(prev => ({ ...prev, maxUnits: Number(e.target.value) }))}
-                min="1"
-                max={maxUnitsAllowed}
-                required
-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
-              />
-            </div>
           </div>
+
+          <UnitsBuilder specs={unitSpecs} onChange={setUnitSpecs} />
 
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-2">Billing Mode</label>

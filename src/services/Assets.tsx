@@ -9,10 +9,19 @@ import {
   Timestamp,
   updateDoc,
   orderBy,
-  limit} from 'firebase/firestore';
+  limit,
+  writeBatch,
+  deleteDoc,
+  runTransaction} from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functionsAfrica as functions } from './firebaseService';
 import { checkSafaricomPhone } from '../utils/safaricom';
+import {
+  MAX_UNITS_PER_PROPERTY, unitSizeCode, validateUnitSpecs,
+  normalizeUnitType, normalizeUnitSize, normalizeUnitCondition, normalizeUnitStatus,
+  type UnitType, type UnitSize, type UnitCondition, type UnitStatus, type UnitSpec
+} from './Units';
+export type { UnitType, UnitSize, UnitCondition, UnitStatus, UnitSpec } from './Units';
 
 export interface CompanyInfo {
   name: string;
@@ -74,6 +83,23 @@ export interface Property {
 
 export type BillingMode = 'rent_only' | 'full';
 
+/** users/{userId}/properties/{propertyId}/units/{unitId} - PUBLIC to read, so it holds unit facts only (never tenant data). */
+export interface Unit {
+  id: number; // propertyId * 1000 + n
+  localId: number;
+  propertyId: number;
+  userId: string;
+  ownerId?: string;
+  unitNumber: string; // BS-01, 1B-03 ... passed to tenants as their unit number
+  unitType: UnitType;
+  unitSize: UnitSize;
+  condition: UnitCondition;
+  status: UnitStatus;
+  isOccupied: boolean;
+  rentAmount: number;
+  depositAmount: number;
+}
+
 export const normalizeBillingMode = (v: unknown): BillingMode => (v === 'rent_only' ? 'rent_only' : 'full');
 
 /**
@@ -102,6 +128,8 @@ export interface PropertyInput {
   billingMode?: BillingMode;
   /** REQUIRED when creating a property. Must be a Safaricom number. */
   ownerPhone?: string;
+  /** REQUIRED when creating a property: the units to create. maxUnits becomes their total. */
+  units?: UnitSpec[];
 }
 
 export interface Tenant {
@@ -113,6 +141,7 @@ export interface Tenant {
   phone?: string;
   email?: string;
   unitNumber?: string;
+  unitId?: number;
   rentAmount: number;
   standingFees: number;
   depositAmount: number;
@@ -131,6 +160,8 @@ export interface TenantInput {
   phone?: string;
   email?: string;
   unitNumber?: string;
+  /** The vacant unit to lease. Rent, unit number and default deposit are taken from it. */
+  unitId?: number;
   rentAmount: number;
   standingFees?: number;
   depositAmount?: number;
@@ -316,6 +347,13 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         throw new Error(`Owner phone: ${ownerCheck.message}`);
       }
 
+      const unitSpecs = propertyData.units || [];
+      const unitProblem = validateUnitSpecs(unitSpecs);
+      if (unitProblem) {
+        throw new Error(`Units: ${unitProblem}`);
+      }
+      const totalUnits = unitSpecs.reduce((sum, u) => sum + u.count, 0);
+
       const propertyId = await this.getNextPropertyId(propertyData.userId);
       
       const propertyRef = doc(db, 'users', propertyData.userId, 'properties', propertyId.toString());
@@ -334,7 +372,7 @@ public async getNextInvoiceId(userId: string): Promise<number> {
         description: propertyData.description || '',
         image: propertyData.image || '',
         agentCommissionRate: propertyData.agentCommissionRate || 0,
-        maxUnits: propertyData.maxUnits || 1,
+        maxUnits: totalUnits,
         billingMode: normalizeBillingMode(propertyData.billingMode),
         ownerId,
         ownerPhone: ownerCheck.e164,
@@ -345,13 +383,21 @@ public async getNextInvoiceId(userId: string): Promise<number> {
       };
       
       await setDoc(propertyRef, property);
+
+      // No property without its units: if they cannot be written, take the property back out.
+      try {
+        await this.writeUnits(propertyData.userId, propertyId, ownerId, unitSpecs);
+      } catch (unitError) {
+        await deleteDoc(propertyRef).catch(() => {});
+        throw unitError;
+      }
       
       console.log('Property created successfully:', property);
       
       return property as Property;
     } catch (error: any) {
       console.error('Error creating property:', error);
-      if (typeof error?.message === 'string' && error.message.startsWith('Owner phone:')) throw error;
+      if (typeof error?.message === 'string' && (error.message.startsWith('Owner phone:') || error.message.startsWith('Units:'))) throw error;
       throw new Error('Failed to create property. Please try again.');
     }
   }
@@ -411,51 +457,157 @@ public async getNextInvoiceId(userId: string): Promise<number> {
     }
   }
 
+  /** Writes the units of a new property. Ids are propertyId * 1000 + n; numbers are BS-01, BS-02 ... per size. */
+  private async writeUnits(userId: string, propertyId: number, ownerId: string, specs: UnitSpec[]): Promise<void> {
+    const perSize: Record<string, number> = {};
+    const docs: { id: number; data: Record<string, unknown> }[] = [];
+    let seq = 0;
+    for (const spec of specs) {
+      for (let i = 0; i < spec.count; i++) {
+        seq++;
+        if (seq > MAX_UNITS_PER_PROPERTY) throw new Error(`Units: A property can have at most ${MAX_UNITS_PER_PROPERTY} units`);
+        const size = normalizeUnitSize(spec.unitSize);
+        perSize[size] = (perSize[size] || 0) + 1;
+        const id = propertyId * 1000 + seq;
+        docs.push({
+          id,
+          data: {
+            id,
+            localId: id,
+            userId,
+            propertyId,
+            ownerId,
+            unitNumber: `${unitSizeCode(size)}-${String(perSize[size]).padStart(2, '0')}`,
+            unitType: normalizeUnitType(spec.unitType),
+            unitSize: size,
+            condition: normalizeUnitCondition(spec.condition),
+            status: 'vacant',
+            isOccupied: false,
+            rentAmount: spec.rentAmount,
+            depositAmount: spec.depositAmount || 0,
+            ...deskOriginStamp()
+          }
+        });
+      }
+    }
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const u of docs.slice(i, i + 400)) {
+        batch.set(doc(db, 'users', userId, 'properties', propertyId.toString(), 'units', u.id.toString()), u.data);
+      }
+      await batch.commit();
+    }
+  }
+
+  /** All units of a property, by unit number. */
+  async getUnitsByProperty(userId: string, propertyId: number): Promise<Unit[]> {
+    const snap = await getDocs(collection(db, 'users', userId, 'properties', propertyId.toString(), 'units'));
+    return snap.docs
+      .map(d => {
+        const u = d.data();
+        return {
+          ...u,
+          status: normalizeUnitStatus(u.status),
+          unitType: normalizeUnitType(u.unitType),
+          unitSize: normalizeUnitSize(u.unitSize),
+          condition: normalizeUnitCondition(u.condition)
+        } as Unit;
+      })
+      .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }));
+  }
+
+  /** Units a tenant can be given: vacant only. */
+  async getAvailableUnits(userId: string, propertyId: number): Promise<Unit[]> {
+    return (await this.getUnitsByProperty(userId, propertyId)).filter(u => u.status === 'vacant');
+  }
+
   /**
-   * Create a new tenant
+   * Create a new tenant. The tenant leases one vacant unit: the unit is checked and marked occupied in the same
+   * transaction that writes the tenant, so two tenants can never lease the same unit.
    */
   async createTenant(tenantData: TenantInput): Promise<Tenant> {
     try {
-      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
-
-      // The tenant ID is the National ID. Never silently overwrite an existing tenant document that reuses it.
-      const existing = await getDoc(tenantRef);
-      if (existing.exists()) {
-        throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
+      if (tenantData.unitId == null) {
+        throw new Error('Select a vacant unit for this tenant.');
       }
+      const tenantRef = doc(db, 'users', tenantData.userId, 'tenants', tenantData.id.toString());
+      const unitRef = doc(db, 'users', tenantData.userId, 'properties', tenantData.propertyId.toString(), 'units', tenantData.unitId.toString());
       
       // The property's owner id travels with every tenant of that property.
       const ownerId = await this.ensurePropertyOwnerId(tenantData.userId, tenantData.propertyId);
 
-      const tenant = {
-        id: tenantData.id,
-        localId: tenantData.id,
-        propertyId: tenantData.propertyId,
-        ownerId,
-        userId: tenantData.userId,
-        name: tenantData.name,
-        phone: tenantData.phone || '',
-        email: tenantData.email || '',
-        unitNumber: tenantData.unitNumber || '',
-        rentAmount: tenantData.rentAmount,
-        standingFees: tenantData.standingFees || 0,
-        depositAmount: tenantData.depositAmount || 0,
-        leaseStart: tenantData.leaseStart || null,
-        leaseEnd: tenantData.leaseEnd || null,
-        isActive: true,
-        isRestricted: false,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        ...deskOriginStamp()
-      };
-      
-      await setDoc(tenantRef, tenant);
+      const tenant = await runTransaction(db, async (tx) => {
+        // The tenant ID is the National ID. Never silently overwrite an existing tenant document that reuses it.
+        if ((await tx.get(tenantRef)).exists()) {
+          throw new Error(`A tenant with ID ${tenantData.id} already exists for this asset.`);
+        }
+
+        const unitSnap = await tx.get(unitRef);
+        const unit = unitSnap.data();
+        if (!unitSnap.exists() || !unit || unit.propertyId !== tenantData.propertyId) {
+          throw new Error('Unit does not belong to this property.');
+        }
+        if (unit.status === 'maintenance') {
+          throw new Error(`Unit ${unit.unitNumber} is under maintenance.`);
+        }
+        if (unit.status !== 'vacant') {
+          throw new Error(`Unit ${unit.unitNumber} is already occupied.`);
+        }
+
+        const newTenant = {
+          id: tenantData.id,
+          localId: tenantData.id,
+          propertyId: tenantData.propertyId,
+          ownerId,
+          userId: tenantData.userId,
+          name: tenantData.name,
+          phone: tenantData.phone || '',
+          email: tenantData.email || '',
+          unitId: tenantData.unitId,
+          unitNumber: unit.unitNumber,
+          rentAmount: unit.rentAmount,
+          standingFees: tenantData.standingFees || 0,
+          depositAmount: tenantData.depositAmount ?? unit.depositAmount ?? 0,
+          leaseStart: tenantData.leaseStart || null,
+          leaseEnd: tenantData.leaseEnd || null,
+          isActive: true,
+          isRestricted: false,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          ...deskOriginStamp()
+        };
+
+        tx.set(tenantRef, newTenant);
+        tx.update(unitRef, { status: 'occupied', isOccupied: true, ...deskUpdateStamp() });
+        return newTenant;
+      });
       
       return tenant as Tenant;
     } catch (error: any) {
       console.error('Error creating tenant:', error);
-      if (typeof error?.message === 'string' && error.message.includes('already exists')) throw error;
+      if (typeof error?.message === 'string' && /already exists|^Unit |^Select a vacant|already occupied/.test(error.message)) throw error;
       throw new Error('Failed to create tenant. Please try again.');
+    }
+  }
+
+  /** Deletes a tenant and sets the unit they leased back to vacant (a unit under maintenance is left alone). */
+  async deleteTenant(userId: string, tenant: { id: number; propertyId: number; unitId?: number | null }): Promise<void> {
+    try {
+      const tenantRef = doc(db, 'users', userId, 'tenants', tenant.id.toString());
+      const unitRef = tenant.unitId != null
+        ? doc(db, 'users', userId, 'properties', tenant.propertyId.toString(), 'units', tenant.unitId.toString())
+        : null;
+
+      await runTransaction(db, async (tx) => {
+        const unitSnap = unitRef ? await tx.get(unitRef) : null;
+        tx.delete(tenantRef);
+        if (unitRef && unitSnap?.exists() && unitSnap.data()?.status === 'occupied') {
+          tx.update(unitRef, { status: 'vacant', isOccupied: false, ...deskUpdateStamp() });
+        }
+      });
+    } catch (error) {
+      console.error('Error deleting tenant:', error);
+      throw new Error('Failed to delete tenant. Please try again.');
     }
   }
 

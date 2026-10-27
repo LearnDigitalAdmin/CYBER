@@ -1,0 +1,1834 @@
+diff --git a/functions/src/__tests__/house/house.service.test.ts b/functions/src/__tests__/house/house.service.test.ts
+new file mode 100644
+index 0000000..cc6163b
+--- /dev/null
++++ b/functions/src/__tests__/house/house.service.test.ts
+@@ -0,0 +1,198 @@
++import '../ui/env';
++import { test, describe, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++import { db } from '../../config/firebase.config';
++import * as house from '../../services/house.service';
++import * as sms from '../../services/house.sms';
++
++/* eslint-disable @typescript-eslint/no-explicit-any */
++
++// ── A tiny in-memory Firestore: just what house.service uses ──
++let store: Map<string, any>;
++const isInc = (v: any) => v?.constructor?.name === 'NumericIncrementTransform';
++const isTs = (v: any) => v?.constructor?.name === 'ServerTimestampTransform';
++const apply = (cur: any, patch: any) => {
++  const next = { ...(cur ?? {}) };
++  for (const [k, v] of Object.entries(patch)) next[k] = isInc(v) ? (Number(next[k]) || 0) + (v as any).operand : isTs(v) ? new Date(0) : v;
++  return next;
++};
++let autoId = 0;
++const ref = (path: string): any => {
++  const segs = path.split('/');
++  return {
++    path,
++    id: segs[segs.length - 1],
++    parent: { id: segs[segs.length - 2], parent: segs.length > 2 ? ref(segs.slice(0, -2).join('/')) : null },
++    get: async () => ({ exists: store.has(path), data: () => store.get(path), id: segs[segs.length - 1], ref: ref(path) }),
++    update: async (p: any) => void store.set(path, apply(store.get(path), p)),
++    set: async (p: any, o?: any) => void store.set(path, o?.merge ? apply(store.get(path), p) : apply({}, p)),
++    collection: (name: string) => col(`${path}/${name}`),
++  };
++};
++const col = (path: string): any => ({
++  doc: (id: string) => ref(`${path}/${id}`),
++  add: async (p: any) => void store.set(`${path}/auto${++autoId}`, apply({}, p)),
++  where: (field: string, op: string, value: any) => ({
++    get: async () => {
++      const docs = [...store.entries()]
++        .filter(([k]) => k.startsWith(path + '/') && k.split('/').length === path.split('/').length + 1)
++        .filter(([, v]) => (op === 'in' ? value.includes(v[field]) : v[field] === value))
++        .map(([k, v]) => ({ id: k.split('/').pop(), data: () => v, ref: ref(k) }));
++      return { docs };
++    },
++  }),
++});
++const installDb = () => {
++  (db as any).collection = (name: string) => col(name);
++  (db as any).collectionGroup = (name: string) => ({
++    where: (field: string, _op: string, value: any[]) => ({
++      get: async () => ({
++        docs: [...store.entries()]
++          .filter(([k]) => /^users\/[^/]+\/properties\/[^/]+$/.test(k) && name === 'properties')
++          .filter(([, v]) => value.includes(v[field]))
++          .map(([k, v]) => ({ id: k.split('/').pop(), data: () => v, ref: ref(k) })),
++      }),
++    }),
++  });
++  (db as any).runTransaction = async (fn: any) =>
++    fn({
++      get: (r: any) => r.get(),
++      update: (r: any, p: any) => void store.set(r.path, apply(store.get(r.path), p)),
++      set: (r: any, p: any, o?: any) => void store.set(r.path, o?.merge ? apply(store.get(r.path), p) : apply({}, p)),
++    });
++};
++
++const seed = (tokens = 10) => {
++  store = new Map();
++  store.set('users/landlord1', { name: 'Wanjiru Kamau', phone: '0722000111', email: 'w@example.com', tokens, company: { name: 'Kamau Realtors' } });
++  store.set('users/landlord1/properties/1', { ownerId: 'PYP-0001', name: 'Mirera Heights', address: 'Mirera, Naivasha' });
++  store.set('users/landlord2', { name: 'Peter Otieno', phone: '0733000222', tokens: 100 });
++  store.set('users/landlord2/properties/1', { ownerId: 'PYP-0002', name: 'Lake View', address: 'Milimani, Kisumu' });
++  const pub = (ownerId: string, unitId: number, status: string, rent: number, unitNumber: string) =>
++    store.set(`units/${ownerId}_${unitId}`, { ownerId, unitId, unitNumber, unitType: 'residential', unitSize: 'bedsitter', condition: 'new', status, rentAmount: rent, depositAmount: rent });
++  pub('PYP-0001', 1001, 'vacant', 8000, 'BS-01');
++  pub('PYP-0001', 1002, 'vacant', 6500, 'BS-02');
++  pub('PYP-0001', 1003, 'occupied', 6000, 'BS-03');
++  pub('PYP-0002', 1001, 'vacant', 9000, 'BS-01');
++};
++
++let smsLog: Array<{ to: string; text: string }>;
++let smsOk: boolean;
++
++beforeEach(() => {
++  seed();
++  installDb();
++  house.clearHouseCaches();
++  smsLog = [];
++  smsOk = true;
++  (sms as any).sendSmsMessage = async (to: string, text: string) => {
++    smsLog.push({ to, text });
++    return smsOk;
++  };
++});
++
++const tokens = (uid = 'landlord1') => store.get(`users/${uid}`).tokens;
++const found = async (area: string) => house.findVacantUnits(area);
++
++describe('findVacantUnits', () => {
++  test('returns only vacant units of properties whose address matches, cheapest first, with the manager account', async () => {
++    const r = await found('mirer');
++    assert.deepEqual(r.map((u) => u.unitNumber), ['BS-02', 'BS-01']);
++    assert.equal(r[0].userId, 'landlord1');
++    assert.equal(r[0].propertyName, 'Mirera Heights');
++    assert.equal(r[0].address, 'Mirera, Naivasha');
++  });
++  test('misspelt either-word area finds the same property; another area finds the other', async () => {
++    assert.equal((await found('navsha')).length, 2);
++    assert.equal((await found('NAIVASA')).length, 2);
++    assert.deepEqual((await found('kisumu')).map((u) => u.ownerId), ['PYP-0002']);
++    assert.deepEqual(await found('eldoret'), []);
++  });
++  test('a unit that is no longer vacant is reported as gone', async () => {
++    const [u] = await found('mirera');
++    assert.equal(await house.isStillVacant(u), true);
++    store.set('units/PYP-0001_1002', { ...store.get('units/PYP-0001_1002'), status: 'occupied' });
++    assert.equal(await house.isStillVacant(u), u.unitId !== 1002);
++  });
++});
++
++describe('getManager and canSendInquiry', () => {
++  test('contact details are the stored ones, unmasked', async () => {
++    const m = (await house.getManager('landlord1'))!;
++    assert.deepEqual([m.name, m.company, m.email, m.smsPhone, m.tokens], ['Wanjiru Kamau', 'Kamau Realtors', 'w@example.com', '+254722000111', 10]);
++    assert.equal(house.canSendInquiry(m), true);
++  });
++  test('no credits for the cheapest SMS, or no mobile number: not available', async () => {
++    store.set('users/landlord1', { ...store.get('users/landlord1'), tokens: 1 });
++    assert.equal(house.canSendInquiry(await house.getManager('landlord1')), false);
++    store.set('users/landlord1', { ...store.get('users/landlord1'), tokens: 10, phone: '020123456' });
++    assert.equal(house.canSendInquiry(await house.getManager('landlord1')), false);
++  });
++});
++
++describe('sendInquiry', () => {
++  const inquirer = '+254733444555';
++  const unitOf = async () => (await found('mirera')).find((u) => u.unitNumber === 'BS-01')!;
++
++  test('sends the SMS to the manager, charges 2 credits to the manager, and logs it', async () => {
++    const r = await house.sendInquiry(await unitOf(), inquirer);
++    assert.deepEqual(r, { ok: true, managerName: 'Wanjiru Kamau', credits: 2 });
++    assert.deepEqual(smsLog, [{ to: '+254722000111', text: 'Dear Wanjiru, a tenant 0733444555 is inquiring on unit BS-01 on property Mirera Heights. Please contact them.' }]);
++    assert.equal(tokens(), 8);
++    const log = [...store.entries()].filter(([k]) => k.startsWith('users/landlord1/sms-sent-log/'));
++    assert.equal(log.length, 1);
++    assert.equal(log[0][1].tokensCharged, 2);
++    const inq = [...store.entries()].filter(([k]) => k.startsWith('houseInquiries/'));
++    assert.equal(inq.length, 1);
++    assert.equal(inq[0][1].status, 'sent');
++    assert.equal(inq[0][1].inquirerPhone, inquirer);
++    assert.equal(store.get('users/landlord1').smsSentTotal, 1);
++  });
++
++  test('a longer message costs more: 4 credits for up to 275 characters', async () => {
++    store.set('users/landlord1/properties/1', { ownerId: 'PYP-0001', name: 'P'.repeat(150), address: 'Mirera, Naivasha' });
++    house.clearHouseCaches();
++    const r = await house.sendInquiry(await unitOf(), inquirer);
++    assert.deepEqual([r.ok, tokens()], [true, 6]);
++  });
++
++  test('provider refusal: credits and the daily allowance are put back, the attempt is logged as failed', async () => {
++    smsOk = false;
++    const u = await unitOf();
++    assert.deepEqual(await house.sendInquiry(u, inquirer), { ok: false, reason: 'failed' });
++    assert.equal(tokens(), 10);
++    smsOk = true;
++    assert.equal((await house.sendInquiry(u, inquirer)).ok, true);
++    assert.equal(tokens(), 8);
++    assert.deepEqual([...store.values()].filter((v) => v.status === 'failed').length, 1);
++  });
++
++  test('the same tenant cannot inquire twice on one unit in a day, nor more than 3 units', async () => {
++    const [a, b] = await found('mirera');
++    assert.equal((await house.sendInquiry(a, inquirer)).ok, true);
++    assert.deepEqual(await house.sendInquiry(a, inquirer), { ok: false, reason: 'duplicate' });
++    assert.equal((await house.sendInquiry(b, inquirer)).ok, true);
++    store.set('units/PYP-0002_1001', store.get('units/PYP-0002_1001'));
++    const c = (await found('kisumu'))[0];
++    store.set('users/landlord2', { ...store.get('users/landlord2'), tokens: 100 });
++    assert.equal((await house.sendInquiry(c, inquirer)).ok, true);
++    const extra = { ...a, unitId: 1009, unitNumber: 'BS-09' };
++    store.set('units/PYP-0001_1009', { ...store.get('units/PYP-0001_1001'), unitId: 1009 });
++    assert.deepEqual(await house.sendInquiry(extra, inquirer), { ok: false, reason: 'limit' });
++    assert.equal(smsLog.length, 3);
++  });
++
++  test('not enough credits: nothing is sent and nothing is charged', async () => {
++    store.set('users/landlord1', { ...store.get('users/landlord1'), tokens: 1 });
++    assert.deepEqual(await house.sendInquiry(await unitOf(), inquirer), { ok: false, reason: 'no_credits' });
++    assert.equal(smsLog.length, 0);
++    assert.equal(tokens(), 1);
++  });
++
++  test('a unit let in the meantime is refused as gone before anything is charged', async () => {
++    const u = await unitOf();
++    store.set('units/PYP-0001_1001', { ...store.get('units/PYP-0001_1001'), status: 'occupied' });
++    assert.deepEqual(await house.sendInquiry(u, inquirer), { ok: false, reason: 'gone' });
++    assert.equal(tokens(), 10);
++  });
++});
+diff --git a/functions/src/__tests__/house/house.test.ts b/functions/src/__tests__/house/house.test.ts
+new file mode 100644
+index 0000000..27033e9
+--- /dev/null
++++ b/functions/src/__tests__/house/house.test.ts
+@@ -0,0 +1,332 @@
++import { test, describe, beforeEach } from 'node:test';
++import assert from 'node:assert/strict';
++import { Rig } from '../ui/rig';
++import { STATE } from '../../constants/states';
++import { HOUSE_LABELS, HOUSE_MESSAGES } from '../../constants/house.messages';
++import { areaTokens, bestMatches, wordMatches } from '../../utils/house.match';
++import { composeInquirySms, firstName, MIN_INQUIRY_CREDITS, smsCredits } from '../../services/house.sms';
++import * as house from '../../services/house.service';
++
++/* eslint-disable @typescript-eslint/no-explicit-any */
++
++describe('area matching', () => {
++  const props = [
++    { id: 'a', address: 'Mirera, Naivasha' },
++    { id: 'b', address: 'Kilimani, Nairobi' },
++    { id: 'c', address: 'Section 58, Nakuru' },
++    { id: 'd', address: 'Naivasha Town' },
++  ];
++  const ids = (q: string) => bestMatches(q, props, (p) => p.address).map((p) => p.id).sort();
++
++  test('either word of the address finds it, in any case', () => {
++    for (const q of ['mirera', 'MIRERA', 'Naivasha', 'naivasha']) assert.ok(ids(q).includes('a'), q);
++  });
++  test('misspellings still match', () => {
++    for (const q of ['mirer', 'miera', 'navsha', 'naivasa', 'naivash', 'nayvasha', 'Naivassha']) assert.ok(ids(q).includes('a'), q);
++  });
++  test('two words prefer the property that matches both', () => {
++    assert.deepEqual(ids('mirera naivasha'), ['a']);
++    assert.deepEqual(ids('naivasha'), ['a', 'd']);
++  });
++  test('unrelated areas do not match', () => {
++    assert.deepEqual(ids('kitengela'), []);
++    assert.deepEqual(ids('nairobi'), ['b']);
++    assert.ok(!wordMatches('rongai', 'ongata'));
++    assert.ok(!wordMatches('nakuru', 'naivasha'));
++  });
++  test('words that say nothing about where are ignored', () => {
++    assert.deepEqual(areaTokens('Near Mirera Road, Naivasha'), ['mirera', 'naivasha']);
++    assert.deepEqual(areaTokens('12'), []);
++  });
++});
++
++describe('inquiry SMS', () => {
++  test('price bands: 140 -> 2, 275 -> 4, 350 -> 7, longer is refused', () => {
++    assert.equal(smsCredits(1), 2);
++    assert.equal(smsCredits(140), 2);
++    assert.equal(smsCredits(141), 4);
++    assert.equal(smsCredits(275), 4);
++    assert.equal(smsCredits(276), 7);
++    assert.equal(smsCredits(350), 7);
++    assert.equal(smsCredits(351), null);
++    assert.equal(MIN_INQUIRY_CREDITS, 2);
++  });
++  test('greeting is cut at the first space', () => {
++    assert.equal(firstName('Wanjiru Kamau'), 'Wanjiru');
++    assert.equal(firstName('  '), 'Sir/Madam');
++    const sms = composeInquirySms({ managerName: 'Wanjiru Kamau', inquirerPhone: '0712345678', unitNumber: 'BS-01', propertyName: 'Mirera Heights' });
++    assert.equal(sms, 'Dear Wanjiru, a tenant 0712345678 is inquiring on unit BS-01 on property Mirera Heights. Please contact them.');
++    assert.equal(smsCredits(sms.length), 2);
++  });
++  test('a very long property name is shortened so the SMS never exceeds 350 characters', () => {
++    const sms = composeInquirySms({ managerName: 'Wanjiru', inquirerPhone: '0712345678', unitNumber: 'BS-01', propertyName: 'X'.repeat(900) });
++    assert.ok(sms.length <= 350);
++    assert.ok(sms.endsWith('Please contact them.'));
++  });
++  test('emoji and non-Latin characters are stripped', () => {
++    const sms = composeInquirySms({ managerName: 'Wanjiru', inquirerPhone: '0712345678', unitNumber: 'BS-01', propertyName: 'Villa 🏠 Ω' });
++    assert.ok(/^[\x20-\x7E\xA0-\xFF]+$/.test(sms));
++  });
++});
++
++describe('copy', () => {
++  test('every label fits a WhatsApp button (20) in both languages', () => {
++    for (const [k, v] of Object.entries(HOUSE_LABELS)) for (const lang of ['en', 'sw'] as const) assert.ok(v[lang].replace('{phone}', '0712345678').length <= 20, `${k}/${lang}`);
++  });
++  test('every message exists in both languages and the placeholders agree', () => {
++    for (const [k, v] of Object.entries(HOUSE_MESSAGES)) {
++      assert.ok(v.en && v.sw, k);
++      const ph = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join();
++      assert.equal(ph(v.en), ph(v.sw), k);
++    }
++  });
++});
++
++// ── Conversation flows (house.service is replaced; everything else is the real webhook and handlers) ──
++
++const unit = (over: Partial<house.VacantUnit> = {}): house.VacantUnit => ({
++  ownerId: 'PYP-0001',
++  unitId: 1001,
++  userId: 'landlord1',
++  propertyId: 1,
++  unitNumber: 'BS-01',
++  unitType: 'residential',
++  unitSize: 'bedsitter',
++  condition: 'maintained',
++  rentAmount: 6500,
++  depositAmount: 6500,
++  propertyName: 'Mirera Heights',
++  address: 'Mirera, Naivasha',
++  ...over,
++});
++
++const manager = (over: Partial<house.Manager> = {}): house.Manager => ({
++  userId: 'landlord1',
++  name: 'Wanjiru Kamau',
++  firstName: 'Wanjiru',
++  company: 'Kamau Realtors',
++  phone: '0722000111',
++  email: 'wanjiru@example.com',
++  smsPhone: '+254722000111',
++  tokens: 50,
++  ...over,
++});
++
++let units: house.VacantUnit[];
++let mgr: house.Manager | null;
++let sent: Array<{ unit: house.VacantUnit; inquirer: string }>;
++let sendResult: house.InquiryResult;
++let stillVacant: boolean;
++
++beforeEach(() => {
++  units = [unit(), unit({ unitId: 1002, unitNumber: '1B-01', unitSize: 'one_bedroom', rentAmount: 12000 })];
++  mgr = manager();
++  sent = [];
++  stillVacant = true;
++  sendResult = { ok: true, managerName: 'Wanjiru Kamau', credits: 2 };
++  const h = house as any;
++  h.findVacantUnits = async (area: string) => (/nav|naiv|mir/i.test(area) ? units : []);
++  h.isStillVacant = async () => stillVacant;
++  h.getManager = async () => mgr;
++  h.previewInquiry = async (u: house.VacantUnit, inq: string) =>
++    stillVacant
++      ? { ok: true, sms: composeInquirySms({ managerName: mgr?.name, inquirerPhone: house.toLocalPhone(inq), unitNumber: u.unitNumber, propertyName: u.propertyName }), managerName: mgr?.name ?? '', credits: 2 }
++      : { ok: false, reason: 'gone' };
++  h.sendInquiry = async (u: house.VacantUnit, inq: string) => {
++    sent.push({ unit: u, inquirer: inq });
++    return sendResult;
++  };
++});
++
++const fresh = (lang: 'en' | 'sw' = 'en') => new Rig({ lang, state: STATE.MAIN_MENU });
++
++describe('House to Rent flow', () => {
++  test('main menu option 8 asks for the area, in both languages', async () => {
++    for (const [lang, title] of [['en', 'House to Rent'], ['sw', 'Nyumba ya Kupanga']] as const) {
++      const r = fresh(lang);
++      await r.say('8');
++      assert.equal(r.state, STATE.HTR_AREA);
++      assert.match(r.body(), lang === 'en' ? /Type the \*area\*/ : /Andika \*eneo\*/);
++      assert.ok(r.body().includes(title));
++    }
++  });
++
++  test('an area with no vacant units says so and stays ready for another area', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('Kitengela');
++    assert.equal(r.state, STATE.HTR_AREA);
++    assert.match(r.body(), /no listed vacant units in \*Kitengela\*/);
++    await r.say('mirer');
++    assert.equal(r.state, STATE.HTR_RESULTS);
++  });
++
++  test('Kiswahili: nothing found', async () => {
++    const r = fresh('sw');
++    await r.say('8');
++    await r.say('Kitengela');
++    assert.match(r.body(), /Hakuna nyumba au vyumba vilivyo wazi/);
++  });
++
++  test('a one-character answer is not an area', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('7');
++    assert.equal(r.state, STATE.HTR_AREA);
++    assert.match(r.body(), /at least 3 letters/);
++  });
++
++  test('results list the units; picking one shows the details with Send Inquiry and Contact Manager', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('navsha');
++    assert.equal(r.state, STATE.HTR_RESULTS);
++    assert.deepEqual(r.titles(), ['Bedsitter', 'One bedroom', 'Back']);
++    await r.say('1');
++    assert.equal(r.state, STATE.HTR_UNIT);
++    assert.match(r.body(), /Mirera Heights/);
++    assert.match(r.body(), /KES 6,500/);
++    assert.deepEqual(r.titles(), ['Send Inquiry', 'Contact Manager', 'Back']);
++  });
++
++  test('Contact Manager shows name and details unmasked', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('1');
++    await r.tap('Contact Manager');
++    assert.equal(r.state, STATE.HTR_CONTACT);
++    for (const s of ['Wanjiru Kamau', 'Kamau Realtors', '0722000111', 'wanjiru@example.com']) assert.ok(r.body().includes(s), s);
++    assert.deepEqual(r.titles(), ['Send Inquiry', 'Back', 'Main menu']);
++  });
++
++  test('no SMS (no credits or no number): Send Inquiry is not offered', async () => {
++    for (const m of [manager({ tokens: 1 }), manager({ smsPhone: null })]) {
++      mgr = m;
++      const r = fresh();
++      await r.say('8');
++      await r.say('mirera');
++      await r.say('1');
++      assert.deepEqual(r.titles(), ['Contact Manager', 'Back', 'Main menu']);
++    }
++  });
++
++  test('Send Inquiry: number, preview of the exact SMS, send, and no second inquiry is offered', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('1');
++    await r.tap('Send Inquiry');
++    assert.equal(r.state, STATE.HTR_INQ_PHONE);
++    assert.deepEqual(r.titles(), ['Use 0712345678', 'Back', 'Main menu']);
++
++    await r.say('abc');
++    assert.equal(r.state, STATE.HTR_INQ_PHONE);
++    assert.match(r.body(), /not a valid Kenyan phone number/);
++
++    await r.say('0733 444 555');
++    assert.equal(r.state, STATE.HTR_INQ_CONFIRM);
++    assert.match(r.body(), /Dear Wanjiru, a tenant 0733444555 is inquiring on unit BS-01 on property Mirera Heights\. Please contact them\./);
++
++    await r.tap('Send now');
++    assert.equal(r.state, STATE.HTR_UNIT);
++    assert.equal(sent.length, 1);
++    assert.equal(sent[0].inquirer, '+254733444555');
++    assert.match(r.body(), /inquiry has been sent to \*Wanjiru Kamau\*/);
++    assert.deepEqual(r.titles(), ['Contact Manager', 'Back', 'Main menu']);
++  });
++
++  test('the WhatsApp number can be used with one tap', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('1');
++    await r.say('1');
++    await r.tap('Use 0712345678');
++    assert.equal(r.state, STATE.HTR_INQ_CONFIRM);
++    assert.match(r.body(), /a tenant 0712345678 is inquiring/);
++  });
++
++  test('Kiswahili inquiry flow', async () => {
++    const r = fresh('sw');
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('1');
++    assert.deepEqual(r.titles(), ['Tuma Maulizo', 'Wasiliana na Meneja', 'Nyuma']);
++    await r.say('1');
++    assert.match(r.body(), /Meneja anahitaji namba/);
++    await r.say('0733444555');
++    assert.match(r.body(), /Tutatuma SMS hii kwa \*Wanjiru Kamau\*/);
++    await r.tap('Tuma sasa');
++    assert.match(r.body(), /Maulizo yako yametumwa/);
++  });
++
++  test('refusals are explained and leave the tenant on the unit', async () => {
++    const cases: Array<[house.InquiryResult, RegExp]> = [
++      [{ ok: false, reason: 'limit' }, /today's limit of 3 inquiries/],
++      [{ ok: false, reason: 'duplicate' }, /already sent an inquiry for this unit/],
++      [{ ok: false, reason: 'failed' }, /could not send the SMS/],
++      [{ ok: false, reason: 'no_credits' }, /not available for this property/],
++    ];
++    for (const [result, pattern] of cases) {
++      sendResult = result;
++      const r = fresh();
++      await r.say('8');
++      await r.say('mirera');
++      await r.say('1');
++      await r.say('1');
++      await r.say('0733444555');
++      await r.say('1');
++      assert.equal(r.state, STATE.HTR_UNIT);
++      assert.match(r.body(), pattern);
++    }
++  });
++
++  test('a unit let in the meantime is dropped from the list with a notice', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    stillVacant = false;
++    await r.say('1');
++    assert.equal(r.state, STATE.HTR_RESULTS);
++    assert.match(r.body(), /no longer listed as vacant/);
++    assert.deepEqual(r.titles(), ['One bedroom', 'Back']);
++  });
++
++  test('0 steps back one screen at a time, # goes to the main menu, 000 to the language screen', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('1');
++    await r.say('1');
++    await r.say('0733444555');
++    assert.equal(r.state, STATE.HTR_INQ_CONFIRM);
++    await r.say('0');
++    assert.equal(r.state, STATE.HTR_INQ_PHONE);
++    await r.say('0');
++    assert.equal(r.state, STATE.HTR_UNIT);
++    await r.say('0');
++    assert.equal(r.state, STATE.HTR_RESULTS);
++    await r.say('0');
++    assert.equal(r.state, STATE.HTR_AREA);
++    await r.say('0');
++    assert.equal(r.state, STATE.MAIN_MENU);
++
++    await r.say('8');
++    await r.say('mirera');
++    await r.say('#');
++    assert.equal(r.state, STATE.MAIN_MENU);
++    await r.say('8');
++    await r.say('000');
++    assert.equal(r.state, STATE.LANGUAGE_SELECTION);
++  });
++
++  test('a button from an old screen is ignored', async () => {
++    const r = fresh();
++    await r.say('8');
++    await r.say('mirera');
++    await r.tapId('ui:HTR_AREA:1');
++    assert.equal(r.state, STATE.HTR_RESULTS);
++    assert.match(r.body(), /no longer active/);
++  });
++});
+diff --git a/functions/src/__tests__/ui/flows.test.ts b/functions/src/__tests__/ui/flows.test.ts
+index a527aaa..c249ea0 100644
+--- a/functions/src/__tests__/ui/flows.test.ts
++++ b/functions/src/__tests__/ui/flows.test.ts
+@@ -19,7 +19,7 @@ describe('language and main menu', () => {
+     assert.equal(r.state, STATE.MAIN_MENU);
+     assert.equal(r.lastInteractive().kind, 'list');
+     assert.ok(r.titles().includes('Lipa Kodi'));
+-    assert.equal(r.titles().length, 7);
++    assert.equal(r.titles().length, 8);
+   });
+ 
+   test('typed numbers still work: 6 opens Help, then Main menu returns', async () => {
+@@ -30,7 +30,7 @@ describe('language and main menu', () => {
+     assert.deepEqual(r.titles(), ['Main menu']);
+     await r.tap('Main menu');
+     assert.equal(r.state, STATE.MAIN_MENU);
+-    assert.equal(r.titles().length, 7);
++    assert.equal(r.titles().length, 8);
+   });
+ 
+   test('Help: any message returns to the main menu (it used to fall into "Unknown state")', async () => {
+@@ -227,7 +227,7 @@ describe('My Chama', () => {
+     await r.say('3');
+     await r.tap('Cancel');
+     assert.equal(r.state, STATE.MAIN_MENU);
+-    assert.equal(r.titles().length, 7);
++    assert.equal(r.titles().length, 8);
+   });
+ 
+   test('contribution: paged picker (12 periods), pick the 9th on page 2, pay in full through phone, network and confirm', async () => {
+@@ -346,7 +346,7 @@ describe('Landlord Watch hand-off', () => {
+     assert.equal(r.state, STATE.MAIN_MENU);
+     const last = r.sent[r.sent.length - 1];
+     assert.equal(last.kind, 'list');
+-    assert.equal(last.kind === 'list' && last.rows.length, 7);
++    assert.equal(last.kind === 'list' && last.rows.length, 8);
+   });
+ 
+   test('a stale main-menu tap while inside Landlord Watch is answered with the notice', async () => {
+diff --git a/functions/src/__tests__/ui/ui.test.ts b/functions/src/__tests__/ui/ui.test.ts
+index 4ecf768..3900b06 100644
+--- a/functions/src/__tests__/ui/ui.test.ts
++++ b/functions/src/__tests__/ui/ui.test.ts
+@@ -94,12 +94,12 @@ describe('pickers', () => {
+ });
+ 
+ describe('main menu and welcome', () => {
+-  test('main menu: all 7 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
++  test('main menu: all 8 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
+     for (const lang of LANGS) {
+       const menu = mainMenuReply(lang);
+       const rows = rowsOf(menu);
+-      assert.equal(rows.length, 7);
+-      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '2', '3', '4', '5', '6', '7']);
++      assert.equal(rows.length, 8);
++      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '2', '3', '4', '5', '6', '7', '8']);
+       assert.equal(rows[rows.length - 1].id, 'ui:MAIN_MENU:5');
+       assert.ok(rows.every((r) => !!r.description));
+       assert.ok(!needsState(menu));
+@@ -117,11 +117,12 @@ describe('sender integration', () => {
+     const [m] = expandOutbound(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);
+     const payload = buildCloudPayload('254712345678', m) as { interactive: { type: string; action: { sections: Array<{ rows: unknown[] }> } } };
+     assert.equal(payload.interactive.type, 'list');
+-    assert.equal(payload.interactive.action.sections[0].rows.length, 7);
++    assert.equal(payload.interactive.action.sections[0].rows.length, 8);
+   });
+   test('typed fallback leads each line with what the user would type', () => {
+     const text = toNumberedText(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);
+     assert.match(text, /\n7\. Landlord Watch\n/);
++    assert.match(text, /\n8\. House to Rent\n/);
+     assert.match(text, /\n5\. Exit$/);
+     const amount = toNumberedText(stampReply(uiButtons('How much?', [btn('FULL', 'Pay full amount'), btn('0', 'Back'), btn('#', 'Main menu')]), STATE.PAY_RENT_PROCESSING)[0]);
+     assert.match(amount, /FULL\. Pay full amount\n0\. Back\n#\. Main menu$/);
+diff --git a/functions/src/config/sms.config.ts b/functions/src/config/sms.config.ts
+new file mode 100644
+index 0000000..3b8ccda
+--- /dev/null
++++ b/functions/src/config/sms.config.ts
+@@ -0,0 +1,14 @@
++/**
++ * HostPinnacle SMS credentials. These are the project's EXISTING secrets (the same set PMS, PAY and Desk bind):
++ * CYBER, PAY and PMS share one project, so nothing new is created. Bind `HP_SECRETS` on any function that sends.
++ */
++import { defineSecret } from 'firebase-functions/params';
++
++export const HP_SMS_USERID = defineSecret('HP_SMS_USERID');
++export const HP_SMS_PASSWORD = defineSecret('HP_SMS_PASSWORD');
++export const HP_SMS_APIKEY = defineSecret('HP_SMS_APIKEY');
++export const HP_SMS_SENDERID = defineSecret('HP_SMS_SENDERID');
++
++export const HP_SECRETS = [HP_SMS_USERID, HP_SMS_PASSWORD, HP_SMS_APIKEY, HP_SMS_SENDERID];
++
++export const SMS_API_URL = 'https://smsportal.hostpinnacle.co.ke/SMSApi/send';
+diff --git a/functions/src/constants/house.messages.ts b/functions/src/constants/house.messages.ts
+new file mode 100644
+index 0000000..f465db5
+--- /dev/null
++++ b/functions/src/constants/house.messages.ts
+@@ -0,0 +1,132 @@
++/**
++ * House to Rent: copy, English + Kiswahili.
++ * Labels stay within 20 characters so they are valid as reply buttons (enforced by __tests__/house/house.test.ts).
++ */
++import { Lang } from '../types/watch.types';
++import { fill } from '../utils/watch.format';
++
++type Bi = { en: string; sw: string };
++
++export const HOUSE_LABELS = {
++  SEND_INQUIRY: { en: 'Send Inquiry', sw: 'Tuma Maulizo' },
++  CONTACT_MANAGER: { en: 'Contact Manager', sw: 'Wasiliana na Meneja' },
++  SEND_NOW: { en: 'Send now', sw: 'Tuma sasa' },
++  USE_NUMBER: { en: 'Use {phone}', sw: 'Tumia {phone}' },
++} satisfies Record<string, Bi>;
++
++export type HouseLabelKey = keyof typeof HOUSE_LABELS;
++
++export function hlabel(key: HouseLabelKey, lang: Lang, params?: Record<string, string | number>): string {
++  return fill(HOUSE_LABELS[key][lang], params);
++}
++
++export const HOUSE_MESSAGES = {
++  ASK_AREA: {
++    en: '🏠 *House to Rent*\n\nType the *area* where you want to live, for example _Mirera_ or _Naivasha_.\n\nSend *0* to go back or *#* for the main menu.',
++    sw: '🏠 *Nyumba ya Kupanga*\n\nAndika *eneo* unalotaka kuishi, kwa mfano _Mirera_ au _Naivasha_.\n\nTuma *0* kurudi nyuma au *#* kwenda menyu kuu.',
++  },
++  BAD_AREA: {
++    en: 'Please type the name of an area with at least 3 letters, for example _Naivasha_.',
++    sw: 'Tafadhali andika jina la eneo lenye angalau herufi 3, kwa mfano _Naivasha_.',
++  },
++  NONE: {
++    en: 'There are no listed vacant units in *{area}* right now.\n\nType another area to search again.',
++    sw: 'Hakuna nyumba au vyumba vilivyo wazi vilivyoorodheshwa katika *{area}* kwa sasa.\n\nAndika eneo jingine ili kutafuta tena.',
++  },
++  RESULTS: {
++    en: '🏠 *{count}* for "{area}"\n\nChoose one to see the details, or type another area to search again.',
++    sw: '🏠 *{count}* kwa "{area}"\n\nChagua moja uone maelezo, au andika eneo jingine kutafuta tena.',
++  },
++  COUNT_ONE: { en: '1 vacant unit', sw: 'Nyumba 1 iliyo wazi' },
++  COUNT_MANY: { en: '{n} vacant units', sw: 'Nyumba {n} zilizo wazi' },
++  UNIT: {
++    en: '🏠 *{size}* ({unit})\n\n🏢 Property: *{property}*\n📍 Address: {address}\n🏷️ Type: {type}\n✨ Condition: {condition}\n💰 Rent: *{rent}* per month\n🔐 Deposit: {deposit}\n\nWhat would you like to do?',
++    sw: '🏠 *{size}* ({unit})\n\n🏢 Mali: *{property}*\n📍 Anwani: {address}\n🏷️ Aina: {type}\n✨ Hali: {condition}\n💰 Kodi: *{rent}* kwa mwezi\n🔐 Amana: {deposit}\n\nUngependa kufanya nini?',
++  },
++  NO_DEPOSIT: { en: 'none listed', sw: 'haijaorodheshwa' },
++  NO_ADDRESS: { en: 'not listed', sw: 'haijaorodheshwa' },
++  CONTACT: {
++    en: '📞 *Property management*\n\n{lines}\n\nFor: {size} ({unit}) at {property}',
++    sw: '📞 *Usimamizi wa mali*\n\n{lines}\n\nKuhusu: {size} ({unit}) katika {property}',
++  },
++  CONTACT_NAME: { en: 'Manager: *{v}*', sw: 'Meneja: *{v}*' },
++  CONTACT_COMPANY: { en: 'Company: {v}', sw: 'Kampuni: {v}' },
++  CONTACT_PHONE: { en: 'Phone: {v}', sw: 'Simu: {v}' },
++  CONTACT_EMAIL: { en: 'Email: {v}', sw: 'Barua pepe: {v}' },
++  ASK_PHONE: {
++    en: 'The manager needs a number to reach you on.\n\nType your phone number (for example 0712345678), or tap the button to use this WhatsApp number.',
++    sw: 'Meneja anahitaji namba ya kukupigia.\n\nAndika namba yako ya simu (kwa mfano 0712345678), au gusa kitufe kutumia namba hii ya WhatsApp.',
++  },
++  BAD_PHONE: {
++    en: 'That is not a valid Kenyan phone number. Please type it like 0712345678.',
++    sw: 'Hiyo si namba sahihi ya simu ya Kenya. Tafadhali iandike hivi: 0712345678.',
++  },
++  CONFIRM: {
++    en: 'Please confirm. We will send this SMS to *{name}*:\n\n_{sms}_\n\nSend the inquiry?',
++    sw: 'Tafadhali thibitisha. Tutatuma SMS hii kwa *{name}*:\n\n_{sms}_\n\nTuma maulizo?',
++  },
++  SENT: {
++    en: '✅ Your inquiry has been sent to *{name}*. They will contact you on {phone}.',
++    sw: '✅ Maulizo yako yametumwa kwa *{name}*. Atawasiliana nawe kupitia {phone}.',
++  },
++  SEND_FAILED: {
++    en: 'We could not send the SMS. Please try again in a moment, or use *Contact Manager*.',
++    sw: 'Hatukuweza kutuma SMS. Tafadhali jaribu tena baada ya muda mfupi, au tumia *Wasiliana na Meneja*.',
++  },
++  SMS_UNAVAILABLE: {
++    en: 'Inquiries by SMS are not available for this property right now. Please use *Contact Manager*.',
++    sw: 'Kutuma maulizo kwa SMS hakupatikani kwa mali hii kwa sasa. Tafadhali tumia *Wasiliana na Meneja*.',
++  },
++  LIMIT: {
++    en: 'You have reached today\'s limit of {max} inquiries. Please try again tomorrow, or use *Contact Manager*.',
++    sw: 'Umefikia kikomo cha maulizo {max} ya leo. Tafadhali jaribu kesho, au tumia *Wasiliana na Meneja*.',
++  },
++  DUPLICATE: {
++    en: 'You already sent an inquiry for this unit today. The manager has your number.',
++    sw: 'Tayari ulituma maulizo kuhusu nyumba hii leo. Meneja ana namba yako.',
++  },
++  GONE: {
++    en: 'Sorry, that unit is no longer listed as vacant.',
++    sw: 'Samahani, nyumba hiyo haijaorodheshwa tena kama iliyo wazi.',
++  },
++} satisfies Record<string, Bi>;
++
++export type HouseMsgKey = keyof typeof HOUSE_MESSAGES;
++
++export function hmsg(key: HouseMsgKey, lang: Lang, params?: Record<string, string | number>): string {
++  // split/join keeps `$&` and friends inside names or SMS text literal
++  let text: string = HOUSE_MESSAGES[key][lang];
++  for (const [k, v] of Object.entries(params ?? {})) text = text.split(`{${k}}`).join(String(v));
++  return text;
++}
++
++/** Unit vocabulary as the public listing stores it (see Units.ts in the app). */
++export const UNIT_SIZE_LABELS: Record<string, Bi> = {
++  single_room: { en: 'Single room', sw: 'Chumba kimoja' },
++  bedsitter: { en: 'Bedsitter', sw: 'Bedsitter' },
++  studio: { en: 'Studio', sw: 'Studio' },
++  one_bedroom: { en: 'One bedroom', sw: 'Chumba 1 cha kulala' },
++  two_bedroom: { en: 'Two bedroom', sw: 'Vyumba 2 vya kulala' },
++  three_bedroom: { en: 'Three bedroom', sw: 'Vyumba 3 vya kulala' },
++  maisonette: { en: 'Maisonette', sw: 'Maisonette' },
++  shop: { en: 'Shop', sw: 'Duka' },
++  office: { en: 'Office', sw: 'Ofisi' },
++  stall: { en: 'Stall', sw: 'Kibanda' },
++  warehouse: { en: 'Warehouse', sw: 'Ghala' },
++  other: { en: 'Unit', sw: 'Nyumba' },
++};
++
++export const UNIT_TYPE_LABELS: Record<string, Bi> = {
++  residential: { en: 'Residential', sw: 'Makazi' },
++  commercial: { en: 'Commercial', sw: 'Biashara' },
++};
++
++export const UNIT_CONDITION_LABELS: Record<string, Bi> = {
++  new: { en: 'New', sw: 'Mpya' },
++  maintained: { en: 'Well maintained', sw: 'Inatunzwa vizuri' },
++  old: { en: 'Old', sw: 'Ya zamani' },
++};
++
++export const unitSizeText = (v: string, lang: Lang): string => (UNIT_SIZE_LABELS[v] ?? UNIT_SIZE_LABELS.other)[lang];
++export const unitTypeText = (v: string, lang: Lang): string => (UNIT_TYPE_LABELS[v] ?? UNIT_TYPE_LABELS.residential)[lang];
++export const unitConditionText = (v: string, lang: Lang): string => (UNIT_CONDITION_LABELS[v] ?? UNIT_CONDITION_LABELS.maintained)[lang];
+diff --git a/functions/src/constants/states.ts b/functions/src/constants/states.ts
+index 70accf9..6bef92d 100644
+--- a/functions/src/constants/states.ts
++++ b/functions/src/constants/states.ts
+@@ -74,6 +74,14 @@ export enum STATE {
+   WATCH_TR_PHONE = 'WATCH_TR_PHONE',
+   WATCH_TR_PAYING = 'WATCH_TR_PAYING',
+ 
++  // ── House to Rent ──
++  HTR_AREA = 'HTR_AREA',
++  HTR_RESULTS = 'HTR_RESULTS',
++  HTR_UNIT = 'HTR_UNIT',
++  HTR_CONTACT = 'HTR_CONTACT',
++  HTR_INQ_PHONE = 'HTR_INQ_PHONE',
++  HTR_INQ_CONFIRM = 'HTR_INQ_CONFIRM',
++
+   // Idle state
+   IDLE = 'IDLE',
+ }
+diff --git a/functions/src/constants/ui.messages.ts b/functions/src/constants/ui.messages.ts
+index 73d9a7f..e3bbc61 100644
+--- a/functions/src/constants/ui.messages.ts
++++ b/functions/src/constants/ui.messages.ts
+@@ -71,6 +71,11 @@ export const MAIN_MENU_ROWS = [
+     title: { en: 'Landlord Watch', sw: 'Landlord Watch' },
+     desc: { en: 'Follow rent collected on your property', sw: 'Fuatilia kodi iliyokusanywa kwenye mali yako' },
+   },
++  {
++    value: '8',
++    title: { en: 'House to Rent', sw: 'Nyumba ya Kupanga' },
++    desc: { en: 'Find vacant houses and units to rent', sw: 'Tafuta nyumba na vyumba vilivyo wazi vya kupanga' },
++  },
+   { value: '6', title: { en: 'Help', sw: 'Msaada' }, desc: { en: 'Contact SAMUHIA support', sw: 'Wasiliana na msaada wa SAMUHIA' } },
+   { value: '5', title: { en: 'Exit', sw: 'Toka' }, desc: { en: 'End this chat', sw: 'Maliza mazungumzo haya' } },
+ ] as const satisfies ReadonlyArray<{ value: string; title: Bi; desc: Bi }>;
+diff --git a/functions/src/handlers/house.handler.ts b/functions/src/handlers/house.handler.ts
+new file mode 100644
+index 0000000..dbd43a8
+--- /dev/null
++++ b/functions/src/handlers/house.handler.ts
+@@ -0,0 +1,341 @@
++/**
++ * House to Rent handler.
++ *
++ *   HTR_AREA         type an area                           (0 main menu)
++ *   HTR_RESULTS      vacant units in that area, paged       (0 new search)
++ *   HTR_UNIT         one unit: Send Inquiry / Contact Manager   (0 results)
++ *   HTR_CONTACT      the property management's details      (0 unit)
++ *   HTR_INQ_PHONE    the number to pass on to the manager   (0 unit)
++ *   HTR_INQ_CONFIRM  the exact SMS, then send               (0 phone)
++ *
++ * Typed shortcuts work everywhere: 0 back, 00 start over, 000 language, # main menu (the webhook handles #).
++ * Every screen's buttons are equivalent to typing their value (see utils/ui.ts).
++ */
++import { Session } from '../types/session.types';
++import { STATE } from '../constants/states';
++import { getMessage } from '../constants/messages';
++import { hlabel, hmsg, HouseMsgKey, unitConditionText, unitSizeText, unitTypeText } from '../constants/house.messages';
++import { ulabel } from '../constants/ui.messages';
++import { clearSessionContext, updateSessionState } from '../services/session.service';
++import * as house from '../services/house.service';
++import { areaTokens } from '../utils/house.match';
++import { checkNavigationCommand } from '../utils/validator';
++import { kes, parseYesNo, plain, toE164, normalizeKenyanPhone, truncate } from '../utils/watch.format';
++import { btn, mainButton, mainMenuReply, pickerRows, Reply, uiButtons, uiList, welcomeReply, withNotice } from '../utils/ui';
++import { logger } from '../utils/logger';
++
++const CTX = 'htr';
++
++type Lang = 'en' | 'sw';
++
++/** What the session remembers: the search, the units found (so paging and picking need no new query) and the choices made. */
++interface HtrCtx {
++  area?: string;
++  units?: house.VacantUnit[];
++  page?: number;
++  sel?: number;
++  inquirer?: string;
++}
++
++const readCtx = (s: Session): HtrCtx => {
++  const raw = s.context?.[CTX];
++  return (raw && typeof raw === 'object' ? raw : {}) as HtrCtx;
++};
++
++const save = (phone: string, state: string, ctx: HtrCtx) => updateSessionState(phone, state, { [CTX]: ctx });
++
++export const isHouseState = (state: string): boolean => state.startsWith('HTR_');
++
++// ── Screens ──────────────────────────────────────────────────────────────
++
++const areaScreen = (lang: Lang, notice?: string): Reply => {
++  const screen = uiButtons(hmsg('ASK_AREA', lang), [btn('0', ulabel('BACK', lang)), mainButton(lang)]);
++  return notice ? withNotice(screen, notice) : screen;
++};
++
++function resultsScreen(ctx: HtrCtx, lang: Lang, notice?: string): Reply {
++  const units = ctx.units ?? [];
++  const count = units.length === 1 ? hmsg('COUNT_ONE', lang) : hmsg('COUNT_MANY', lang, { n: units.length });
++  const items = units.map((u) => ({
++    title: truncate(unitSizeText(u.unitSize, lang), 24),
++    description: truncate(`${u.unitNumber} · ${kes(u.rentAmount)} · ${plain(u.propertyName, 40)}`, 72),
++  }));
++  const { rows } = pickerRows(items, ctx.page ?? 0, lang, { back: true });
++  const list = uiList(hmsg('RESULTS', lang, { count, area: ctx.area ?? '' }), ulabel('LIST_BUTTON', lang), rows);
++  return notice ? withNotice(list, notice) : list;
++}
++
++function unitScreen(u: house.VacantUnit, lang: Lang, canInquire: boolean, notice?: string): Reply {
++  const body = hmsg('UNIT', lang, {
++    size: unitSizeText(u.unitSize, lang),
++    unit: plain(u.unitNumber, 20),
++    property: plain(u.propertyName, 60),
++    address: plain(u.address, 80) || hmsg('NO_ADDRESS', lang),
++    type: unitTypeText(u.unitType, lang),
++    condition: unitConditionText(u.condition, lang),
++    rent: kes(u.rentAmount),
++    deposit: u.depositAmount > 0 ? kes(u.depositAmount) : hmsg('NO_DEPOSIT', lang),
++  });
++  const buttons = canInquire
++    ? [btn('1', hlabel('SEND_INQUIRY', lang)), btn('2', hlabel('CONTACT_MANAGER', lang)), btn('0', ulabel('BACK', lang))]
++    : [btn('2', hlabel('CONTACT_MANAGER', lang)), btn('0', ulabel('BACK', lang)), mainButton(lang)];
++  const screen = uiButtons(body, buttons);
++  return notice ? withNotice(screen, notice) : screen;
++}
++
++function contactScreen(u: house.VacantUnit, m: house.Manager | null, lang: Lang, canInquire: boolean): Reply {
++  const lines: string[] = [];
++  if (m?.name) lines.push(hmsg('CONTACT_NAME', lang, { v: plain(m.name, 60) }));
++  if (m?.company) lines.push(hmsg('CONTACT_COMPANY', lang, { v: plain(m.company, 60) }));
++  if (m?.phone) lines.push(hmsg('CONTACT_PHONE', lang, { v: plain(m.phone, 30) }));
++  if (m?.email) lines.push(hmsg('CONTACT_EMAIL', lang, { v: plain(m.email, 60) }));
++  const body = hmsg('CONTACT', lang, {
++    lines: lines.join('\n'),
++    size: unitSizeText(u.unitSize, lang),
++    unit: plain(u.unitNumber, 20),
++    property: plain(u.propertyName, 60),
++  });
++  const buttons = canInquire
++    ? [btn('1', hlabel('SEND_INQUIRY', lang)), btn('0', ulabel('BACK', lang)), mainButton(lang)]
++    : [btn('0', ulabel('BACK', lang)), mainButton(lang)];
++  return uiButtons(body, buttons);
++}
++
++const phoneScreen = (lang: Lang, waLocalPhone: string | null, notice?: string): Reply => {
++  const buttons = [
++    ...(waLocalPhone ? [btn('1', hlabel('USE_NUMBER', lang, { phone: waLocalPhone }))] : []),
++    btn('0', ulabel('BACK', lang)),
++    mainButton(lang),
++  ];
++  const screen = uiButtons(hmsg('ASK_PHONE', lang), buttons);
++  return notice ? withNotice(screen, notice) : screen;
++};
++
++/** The WhatsApp number as a Kenyan number to offer on the button, or null when it is not one. */
++function waNumber(phone: string): string | null {
++  const e164 = normalizeKenyanPhone(toE164(phone));
++  return e164 ? house.toLocalPhone(e164) : null;
++}
++
++// ── Transitions (each saves the session state it lands in) ───────────────
++
++async function showArea(phone: string, lang: Lang, notice?: string): Promise<Reply> {
++  await save(phone, STATE.HTR_AREA, {});
++  return areaScreen(lang, notice);
++}
++
++async function showResults(phone: string, ctx: HtrCtx, lang: Lang, notice?: string): Promise<Reply> {
++  if (!ctx.units?.length) return showArea(phone, lang, notice);
++  const next = { area: ctx.area, units: ctx.units, page: ctx.page ?? 0 };
++  await save(phone, STATE.HTR_RESULTS, next);
++  return resultsScreen(next, lang, notice);
++}
++
++async function showUnit(phone: string, ctx: HtrCtx, lang: Lang, notice?: string): Promise<Reply> {
++  const unit = ctx.units?.[ctx.sel ?? -1];
++  if (!unit) return showResults(phone, ctx, lang, notice);
++  const canInquire = house.canSendInquiry(await house.getManager(unit.userId));
++  await save(phone, STATE.HTR_UNIT, { area: ctx.area, units: ctx.units, page: ctx.page, sel: ctx.sel });
++  return unitScreen(unit, lang, canInquire, notice);
++}
++
++/** A search from anywhere that takes an area: validates it, looks it up, lands on results or on "none found". */
++async function search(phone: string, rawArea: string, lang: Lang): Promise<Reply> {
++  const area = plain(rawArea, 40);
++  if (areaTokens(area).length === 0) return showArea(phone, lang, hmsg('BAD_AREA', lang));
++  const units = await house.findVacantUnits(area);
++  logger.info('House to Rent: search', { found: units.length });
++  if (!units.length) return showArea(phone, lang, hmsg('NONE', lang, { area }));
++  return showResults(phone, { area, units, page: 0 }, lang);
++}
++
++// ── Entry and dispatcher ─────────────────────────────────────────────────
++
++/** Main menu entry. */
++export async function beginHouseToRent(phone: string, session: Session): Promise<Reply> {
++  return showArea(phone, session.language);
++}
++
++const FAILURE_COPY: Record<house.InquiryFailure, HouseMsgKey> = {
++  gone: 'GONE',
++  no_sms: 'SMS_UNAVAILABLE',
++  no_credits: 'SMS_UNAVAILABLE',
++  limit: 'LIMIT',
++  duplicate: 'DUPLICATE',
++  failed: 'SEND_FAILED',
++};
++
++/** Any message received while the session is in an HTR_* state. */
++export async function handleHouseToRent(phone: string, input: string, session: Session): Promise<Reply> {
++  const lang = session.language;
++  try {
++    const ctx = readCtx(session);
++    const text = input.trim();
++
++    // 000 language screen, 00 start over, 0 back one screen
++    const nav = checkNavigationCommand(text);
++    if (nav.type === 'exit') {
++      await clearSessionContext(phone);
++      await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
++      return welcomeReply();
++    }
++    if (nav.type === 'restart') return showArea(phone, lang);
++    if (nav.type === 'back') return goBack(phone, session.currentState, ctx, lang);
++
++    switch (session.currentState) {
++      case STATE.HTR_AREA:
++        return search(phone, text, lang);
++      case STATE.HTR_RESULTS:
++        return onResults(phone, text, ctx, lang);
++      case STATE.HTR_UNIT:
++        return onUnit(phone, text, ctx, lang);
++      case STATE.HTR_CONTACT:
++        return onContact(phone, text, ctx, lang);
++      case STATE.HTR_INQ_PHONE:
++        return onInquiryPhone(phone, text, ctx, lang);
++      case STATE.HTR_INQ_CONFIRM:
++        return onInquiryConfirm(phone, text, ctx, lang);
++      default:
++        return showArea(phone, lang);
++    }
++  } catch (error) {
++    logger.error('Error in House to Rent', error);
++    return getMessage('SYSTEM_ERROR', lang);
++  }
++}
++
++async function goBack(phone: string, state: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  switch (state) {
++    case STATE.HTR_RESULTS:
++      return showArea(phone, lang);
++    case STATE.HTR_UNIT:
++      return showResults(phone, ctx, lang);
++    case STATE.HTR_CONTACT:
++    case STATE.HTR_INQ_PHONE:
++      return showUnit(phone, ctx, lang);
++    case STATE.HTR_INQ_CONFIRM: {
++      await save(phone, STATE.HTR_INQ_PHONE, { ...ctx, inquirer: undefined });
++      return phoneScreen(lang, waNumber(phone));
++    }
++    default: {
++      // HTR_AREA (the first screen) leaves to the main menu
++      await clearSessionContext(phone);
++      await updateSessionState(phone, STATE.MAIN_MENU, {});
++      return mainMenuReply(lang);
++    }
++  }
++}
++
++// ── Per-state handlers ───────────────────────────────────────────────────
++
++async function onResults(phone: string, text: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  const units = ctx.units ?? [];
++
++  const paged = /^pg:(\d{1,3})$/.exec(text);
++  if (paged) return showResults(phone, { ...ctx, page: Number(paged[1]) }, lang);
++
++  if (/^\d{1,3}$/.test(text)) {
++    const index = Number(text) - 1;
++    const unit = units[index];
++    if (!unit) return resultsScreen(ctx, lang);
++    // The list can be minutes old: check the unit is still free before showing it
++    if (!(await house.isStillVacant(unit))) {
++      const rest = units.filter((_, i) => i !== index);
++      return showResults(phone, { area: ctx.area, units: rest, page: 0 }, lang, hmsg('GONE', lang));
++    }
++    return showUnit(phone, { ...ctx, sel: index }, lang);
++  }
++
++  // Anything else typed here is a new area
++  return search(phone, text, lang);
++}
++
++async function onUnit(phone: string, text: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  const unit = ctx.units?.[ctx.sel ?? -1];
++  if (!unit) return showResults(phone, ctx, lang);
++  const c = text.toLowerCase();
++
++  if (c === '1' || c === 'inquiry' || c === 'maulizo') return startInquiry(phone, ctx, unit, lang);
++
++  if (c === '2' || c === 'contact' || c === 'mawasiliano') {
++    const manager = await house.getManager(unit.userId);
++    await save(phone, STATE.HTR_CONTACT, ctx);
++    return contactScreen(unit, manager, lang, house.canSendInquiry(manager));
++  }
++  return showUnit(phone, ctx, lang);
++}
++
++async function onContact(phone: string, text: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  const unit = ctx.units?.[ctx.sel ?? -1];
++  if (!unit) return showResults(phone, ctx, lang);
++  if (text === '1') return startInquiry(phone, ctx, unit, lang);
++  const manager = await house.getManager(unit.userId);
++  return contactScreen(unit, manager, lang, house.canSendInquiry(manager));
++}
++
++/** Send Inquiry: only when the manager can receive and pay for an SMS; then ask for the number to pass on. */
++async function startInquiry(phone: string, ctx: HtrCtx, unit: house.VacantUnit, lang: Lang): Promise<Reply> {
++  if (!house.canSendInquiry(await house.getManager(unit.userId))) {
++    return showUnit(phone, ctx, lang, hmsg('SMS_UNAVAILABLE', lang));
++  }
++  await save(phone, STATE.HTR_INQ_PHONE, ctx);
++  return phoneScreen(lang, waNumber(phone));
++}
++
++async function onInquiryPhone(phone: string, text: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  const unit = ctx.units?.[ctx.sel ?? -1];
++  if (!unit) return showResults(phone, ctx, lang);
++
++  const inquirer = text === '1' ? normalizeKenyanPhone(toE164(phone)) : normalizeKenyanPhone(text);
++  if (!inquirer) return phoneScreen(lang, waNumber(phone), hmsg('BAD_PHONE', lang));
++
++  const preview = await house.previewInquiry(unit, inquirer);
++  if (!preview.ok) return afterFailure(phone, ctx, preview.reason, lang);
++
++  await save(phone, STATE.HTR_INQ_CONFIRM, { ...ctx, inquirer });
++  return uiButtons(hmsg('CONFIRM', lang, { name: plain(preview.managerName, 60), sms: plain(preview.sms, 400) }), [
++    btn('1', hlabel('SEND_NOW', lang)),
++    btn('0', ulabel('BACK', lang)),
++    mainButton(lang),
++  ]);
++}
++
++async function onInquiryConfirm(phone: string, text: string, ctx: HtrCtx, lang: Lang): Promise<Reply> {
++  const unit = ctx.units?.[ctx.sel ?? -1];
++  if (!unit || !ctx.inquirer) return showResults(phone, ctx, lang);
++
++  const answer = text === '1' ? 'yes' : parseYesNo(text);
++  if (answer === 'no') return showUnit(phone, ctx, lang);
++  if (answer !== 'yes') {
++    // Not an answer: show the same screen again with a fresh preview
++    const preview = await house.previewInquiry(unit, ctx.inquirer);
++    if (!preview.ok) return afterFailure(phone, ctx, preview.reason, lang);
++    return uiButtons(hmsg('CONFIRM', lang, { name: plain(preview.managerName, 60), sms: plain(preview.sms, 400) }), [
++      btn('1', hlabel('SEND_NOW', lang)),
++      btn('0', ulabel('BACK', lang)),
++      mainButton(lang),
++    ]);
++  }
++
++  const result = await house.sendInquiry(unit, ctx.inquirer);
++  if (!result.ok) return afterFailure(phone, ctx, result.reason, lang);
++
++  logger.info('House to Rent: inquiry sent');
++  // Back on the unit (same state), so Contact Manager and Back keep working; no second inquiry is offered.
++  await save(phone, STATE.HTR_UNIT, { area: ctx.area, units: ctx.units, page: ctx.page, sel: ctx.sel });
++  return uiButtons(hmsg('SENT', lang, { name: plain(result.managerName, 60), phone: house.toLocalPhone(ctx.inquirer) }), [
++    btn('2', hlabel('CONTACT_MANAGER', lang)),
++    btn('0', ulabel('BACK', lang)),
++    mainButton(lang),
++  ]);
++}
++
++/** Explain why the inquiry did not go, then put the tenant back where they can do something else. */
++async function afterFailure(phone: string, ctx: HtrCtx, reason: house.InquiryFailure, lang: Lang): Promise<Reply> {
++  const notice = hmsg(FAILURE_COPY[reason], lang, { max: house.MAX_INQUIRIES_PER_DAY });
++  if (reason === 'gone') {
++    const rest = (ctx.units ?? []).filter((_, i) => i !== ctx.sel);
++    return showResults(phone, { area: ctx.area, units: rest, page: 0 }, lang, notice);
++  }
++  return showUnit(phone, ctx, lang, notice);
++}
+diff --git a/functions/src/handlers/menu.handler.ts b/functions/src/handlers/menu.handler.ts
+index 7b1f916..90f4940 100644
+--- a/functions/src/handlers/menu.handler.ts
++++ b/functions/src/handlers/menu.handler.ts
+@@ -11,6 +11,7 @@ import { STATE } from '../constants/states';
+ import { logger } from '../utils/logger';
+ import { beginMyChama } from './mychama.handler';
+ import { beginWatch } from './watch.entry';
++import { beginHouseToRent } from './house.handler';
+ import { promptNationalId } from './rent.handler';
+ import { isWatchKeyword } from '../utils/watch.format';
+ import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
+@@ -18,7 +19,7 @@ import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
+ /**
+  * Handle main menu selection
+  * Option values are the numbers the menu has always used: 1 Pay Rent, 2 Invoice, 3 My Chama, 4 Plot, 5 Exit, 6 Help,
+- * 7 Landlord Watch (the list shows them in a friendlier order).
++ * 7 Landlord Watch, 8 House to Rent (the list shows them in a friendlier order).
+  */
+ export async function handleMainMenu(phone: string, input: string, session: Session): Promise<Reply> {
+   try {
+@@ -28,8 +29,8 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
+       return await beginWatch(phone, session);
+     }
+ 
+-    // Validate input (1-7)
+-    const validation = validateMenuSelection(input, 1, 7);
++    // Validate input (1-8)
++    const validation = validateMenuSelection(input, 1, 8);
+ 
+     if (!validation.valid || validation.option === undefined) {
+       return mainMenuReply(session.language);
+@@ -70,6 +71,10 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
+         logger.info('Navigating to Landlord Watch');
+         return await beginWatch(phone, session);
+ 
++      case 8: // House to Rent
++        logger.info('Navigating to House to Rent');
++        return await beginHouseToRent(phone, session);
++
+       default:
+         return mainMenuReply(session.language);
+     }
+diff --git a/functions/src/index.ts b/functions/src/index.ts
+index 7ae769a..38a3fd7 100644
+--- a/functions/src/index.ts
++++ b/functions/src/index.ts
+@@ -1657,6 +1657,7 @@ import { handleWebhookVerification } from './webhooks/verify-webhook';
+ import { WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN } from './config/whatsapp.config';
+ import { PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY } from './config/paystack.config';
+ import { LW_BOT_API_KEY } from './config/watch.config';
++import { HP_SECRETS } from './config/sms.config';
+ 
+ 
+ exports.whatsappWebhook = onRequest(
+@@ -1664,7 +1665,7 @@ exports.whatsappWebhook = onRequest(
+     memory: "1GiB",
+     // Landlord Watch waits up to 90 s for an M-Pesa confirmation inside one request
+     timeoutSeconds: 180,
+-    secrets: [WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY, LW_BOT_API_KEY]
++    secrets: [WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY, LW_BOT_API_KEY, ...HP_SECRETS]
+   },
+   async (req, res) => {
+     try {
+diff --git a/functions/src/services/house.service.ts b/functions/src/services/house.service.ts
+new file mode 100644
+index 0000000..6d97077
+--- /dev/null
++++ b/functions/src/services/house.service.ts
+@@ -0,0 +1,335 @@
++/**
++ * House to Rent: data access. Admin SDK only; the bot is the only thing that touches these collections.
++ *
++ *  - units/{ownerId}_{unitId}                       PUBLIC listing, mirrored by Plot Yangu (mirrorPublicUnit). Unit facts only.
++ *  - users/{uid}/properties/{pid}  (ownerId == PYP-NNNN)   gives the address; its parent user is the property manager.
++ *  - users/{uid}.tokens                              the manager's SMS credits, charged for each inquiry.
++ *  - users/{uid}/sms-sent-log                        the existing SMS audit log (every inquiry is written there too).
++ *  - houseInquiries                                  one document per inquiry attempt that reached the provider.
++ *  - houseInquiryLimits/{phone}_{day}                per-tenant daily cap, so nobody can drain a landlord's credits.
++ */
++import { FieldValue } from 'firebase-admin/firestore';
++import { db } from '../config/firebase.config';
++import { bestMatches } from '../utils/house.match';
++import { nairobiToday, normalizeKenyanPhone } from '../utils/watch.format';
++import { logger } from '../utils/logger';
++import { composeInquirySms, firstName, MIN_INQUIRY_CREDITS, sendSmsMessage, smsCredits } from './house.sms';
++
++export const MAX_RESULTS = 60;
++export const MAX_INQUIRIES_PER_DAY = 3;
++
++const VACANT_TTL_MS = 60_000;
++const PROPERTY_TTL_MS = 10 * 60_000;
++
++export interface VacantUnit {
++  ownerId: string;
++  unitId: number;
++  /** The property manager's account (users/{userId}). Internal: never shown to the tenant. */
++  userId: string;
++  propertyId: number;
++  unitNumber: string;
++  unitType: string;
++  unitSize: string;
++  condition: string;
++  rentAmount: number;
++  depositAmount: number;
++  propertyName: string;
++  address: string;
++}
++
++interface PublicUnit {
++  ownerId: string;
++  unitId: number;
++  unitNumber: string;
++  unitType: string;
++  unitSize: string;
++  condition: string;
++  rentAmount: number;
++  depositAmount: number;
++}
++
++interface PropertyRef {
++  ownerId: string;
++  userId: string;
++  propertyId: number;
++  name: string;
++  address: string;
++}
++
++export interface Manager {
++  userId: string;
++  name: string;
++  firstName: string;
++  company: string;
++  /** As stored, shown to the tenant as it is (contact details are never masked). */
++  phone: string;
++  email: string;
++  /** Where the inquiry SMS goes (E.164), or null when the account has no usable mobile number. */
++  smsPhone: string | null;
++  tokens: number;
++}
++
++// ── Caches (per function instance; short so a unit that was just let disappears quickly) ──
++
++let vacantCache: { at: number; units: PublicUnit[] } | null = null;
++const propertyCache = new Map<string, { at: number; prop: PropertyRef | null }>();
++
++/** Test hook. */
++export function clearHouseCaches(): void {
++  vacantCache = null;
++  propertyCache.clear();
++}
++
++async function loadVacantUnits(): Promise<PublicUnit[]> {
++  if (vacantCache && Date.now() - vacantCache.at < VACANT_TTL_MS) return vacantCache.units;
++  const snap = await db.collection('units').where('status', '==', 'vacant').get();
++  const units: PublicUnit[] = [];
++  for (const d of snap.docs) {
++    const u = d.data();
++    if (!u.ownerId) continue;
++    units.push({
++      ownerId: String(u.ownerId),
++      unitId: Number(u.unitId ?? d.id.split('_').pop()),
++      unitNumber: String(u.unitNumber ?? ''),
++      unitType: String(u.unitType ?? 'residential'),
++      unitSize: String(u.unitSize ?? 'other'),
++      condition: String(u.condition ?? 'maintained'),
++      rentAmount: Number(u.rentAmount) || 0,
++      depositAmount: Number(u.depositAmount) || 0,
++    });
++  }
++  vacantCache = { at: Date.now(), units };
++  return units;
++}
++
++function toPropertyRef(d: FirebaseFirestore.QueryDocumentSnapshot): PropertyRef | null {
++  // users/{uid}/properties/{pid}: anything else named `properties` is not ours
++  const userDoc = d.ref.parent.parent;
++  if (!userDoc || userDoc.parent.id !== 'users') return null;
++  const p = d.data();
++  if (!p.ownerId) return null;
++  return {
++    ownerId: String(p.ownerId),
++    userId: userDoc.id,
++    propertyId: Number(d.id),
++    name: String(p.name ?? ''),
++    address: String(p.address ?? ''),
++  };
++}
++
++/** Preferred path: one collection-group query per 30 owners (needs the properties.ownerId collection-group index). */
++async function lookupByIndex(ownerIds: string[]): Promise<PropertyRef[]> {
++  const found: PropertyRef[] = [];
++  for (let i = 0; i < ownerIds.length; i += 30) {
++    const snap = await db.collectionGroup('properties').where('ownerId', 'in', ownerIds.slice(i, i + 30)).get();
++    for (const d of snap.docs) {
++      const ref = toPropertyRef(d);
++      if (ref) found.push(ref);
++    }
++  }
++  return found;
++}
++
++/** Fallback while the index is not deployed yet: read every account's properties. Slower, same answer. */
++async function lookupByScan(ownerIds: string[]): Promise<PropertyRef[]> {
++  const wanted = new Set(ownerIds);
++  const found: PropertyRef[] = [];
++  const users = await db.collection('users').listDocuments();
++  for (let i = 0; i < users.length; i += 25) {
++    const snaps = await Promise.all(users.slice(i, i + 25).map((u) => u.collection('properties').get()));
++    for (const snap of snaps) {
++      for (const d of snap.docs) {
++        const ref = toPropertyRef(d);
++        if (ref && wanted.has(ref.ownerId)) found.push(ref);
++      }
++    }
++  }
++  return found;
++}
++
++async function propertiesByOwner(ownerIds: string[]): Promise<PropertyRef[]> {
++  const now = Date.now();
++  const missing = ownerIds.filter((id) => {
++    const c = propertyCache.get(id);
++    return !c || now - c.at > PROPERTY_TTL_MS;
++  });
++  if (missing.length) {
++    let found: PropertyRef[];
++    try {
++      found = await lookupByIndex(missing);
++    } catch (error) {
++      logger.warn('House to Rent: properties.ownerId index unavailable, scanning accounts instead', {
++        reason: error instanceof Error ? error.message.slice(0, 120) : 'unknown',
++      });
++      found = await lookupByScan(missing);
++    }
++    const byOwner = new Map(found.map((p) => [p.ownerId, p]));
++    for (const id of missing) propertyCache.set(id, { at: now, prop: byOwner.get(id) ?? null });
++  }
++  return ownerIds.map((id) => propertyCache.get(id)?.prop ?? null).filter((p): p is PropertyRef => !!p);
++}
++
++/**
++ * Public vacant units whose property address loosely matches `area` ("mirer", "navsha", "NAIVASHA" ...).
++ * Cheapest first, at most MAX_RESULTS.
++ */
++export async function findVacantUnits(area: string): Promise<VacantUnit[]> {
++  const vacant = await loadVacantUnits();
++  if (!vacant.length) return [];
++  const owners = [...new Set(vacant.map((u) => u.ownerId))];
++  const props = await propertiesByOwner(owners);
++  // Address first; the property name also counts ("Naivasha Villas")
++  const matched = bestMatches(area, props, (p) => `${p.address} ${p.name}`);
++  const byOwner = new Map(matched.map((p) => [p.ownerId, p]));
++
++  return vacant
++    .filter((u) => byOwner.has(u.ownerId))
++    .map((u): VacantUnit => {
++      const p = byOwner.get(u.ownerId)!;
++      return { ...u, userId: p.userId, propertyId: p.propertyId, propertyName: p.name, address: p.address };
++    })
++    .sort((a, b) => a.rentAmount - b.rentAmount || a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
++    .slice(0, MAX_RESULTS);
++}
++
++/** Fresh check, straight from the public listing, that the unit is still vacant. */
++export async function isStillVacant(unit: Pick<VacantUnit, 'ownerId' | 'unitId'>): Promise<boolean> {
++  const snap = await db.collection('units').doc(`${unit.ownerId}_${unit.unitId}`).get();
++  return snap.exists && snap.data()?.status === 'vacant';
++}
++
++/** The property management account behind a unit: contact details (unmasked), SMS number and credit balance. */
++export async function getManager(userId: string): Promise<Manager | null> {
++  const snap = await db.collection('users').doc(userId).get();
++  if (!snap.exists) return null;
++  const u = snap.data() ?? {};
++  const company = (u.company && typeof u.company === 'object' ? u.company : {}) as Record<string, unknown>;
++  const str = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
++  const name = str(u.name) || str(company.name);
++  const smsPhone = [u.phone, company.phone].map((p) => normalizeKenyanPhone(str(p))).find((p): p is string => !!p) ?? null;
++  return {
++    userId,
++    name,
++    firstName: firstName(name),
++    company: str(company.name),
++    phone: str(company.phone) || str(u.phone),
++    email: str(company.email) || str(u.email),
++    smsPhone,
++    tokens: Number(u.tokens) || 0,
++  };
++}
++
++/** Send Inquiry is offered only when the account can actually receive an SMS and has credits for the cheapest one. */
++export const canSendInquiry = (m: Manager | null): boolean => !!m && !!m.smsPhone && m.tokens >= MIN_INQUIRY_CREDITS;
++
++/** `+254712345678` -> `0712345678`: how a Kenyan reads a number. */
++export const toLocalPhone = (e164: string): string => (e164.startsWith('+254') ? '0' + e164.slice(4) : e164);
++
++export type InquiryFailure = 'gone' | 'no_sms' | 'no_credits' | 'limit' | 'duplicate' | 'failed';
++
++export type InquiryPreview = { ok: true; sms: string; managerName: string; credits: number } | { ok: false; reason: InquiryFailure };
++export type InquiryResult = { ok: true; managerName: string; credits: number } | { ok: false; reason: InquiryFailure };
++
++/** The exact SMS that would go out and what it costs, or why it cannot. Nothing is charged or written. */
++export async function previewInquiry(unit: VacantUnit, inquirerE164: string): Promise<InquiryPreview> {
++  if (!(await isStillVacant(unit))) return { ok: false, reason: 'gone' };
++  const manager = await getManager(unit.userId);
++  if (!manager || !manager.smsPhone) return { ok: false, reason: 'no_sms' };
++  const sms = composeInquirySms({
++    managerName: manager.name,
++    inquirerPhone: toLocalPhone(inquirerE164),
++    unitNumber: unit.unitNumber,
++    propertyName: unit.propertyName,
++  });
++  const credits = smsCredits(sms.length);
++  if (credits === null || manager.tokens < credits) return { ok: false, reason: 'no_credits' };
++  return { ok: true, sms, managerName: manager.name || manager.company, credits };
++}
++
++/**
++ * Send the inquiry: reserve the credits and the tenant's daily allowance in ONE transaction, send, and put both back
++ * if the provider refuses. The charge goes to the manager's account (users/{uid}.tokens).
++ */
++export async function sendInquiry(unit: VacantUnit, inquirerE164: string): Promise<InquiryResult> {
++  const preview = await previewInquiry(unit, inquirerE164);
++  if (!preview.ok) return preview;
++  const manager = await getManager(unit.userId);
++  if (!manager || !manager.smsPhone) return { ok: false, reason: 'no_sms' };
++
++  const { sms, credits } = preview;
++  const digits = inquirerE164.replace(/\D/g, '');
++  const day = nairobiToday(Date.now());
++  const unitKey = `${unit.ownerId}_${unit.unitId}`;
++  const userRef = db.collection('users').doc(unit.userId);
++  const limitRef = db.collection('houseInquiryLimits').doc(`${digits}_${day}`);
++
++  const reserved = await db.runTransaction(async (tx): Promise<'ok' | 'duplicate' | 'limit' | 'no_credits'> => {
++    const [userSnap, limitSnap] = await Promise.all([tx.get(userRef), tx.get(limitRef)]);
++    const used = (limitSnap.data() ?? {}) as { count?: number; units?: string[] };
++    const units = Array.isArray(used.units) ? used.units : [];
++    if (units.includes(unitKey)) return 'duplicate';
++    if ((used.count ?? 0) >= MAX_INQUIRIES_PER_DAY) return 'limit';
++    if ((Number(userSnap.data()?.tokens) || 0) < credits) return 'no_credits';
++    tx.update(userRef, { tokens: FieldValue.increment(-credits) });
++    tx.set(limitRef, { phone: digits, day, count: (used.count ?? 0) + 1, units: [...units, unitKey], updatedAt: FieldValue.serverTimestamp() }, { merge: true });
++    return 'ok';
++  });
++  if (reserved !== 'ok') return { ok: false, reason: reserved };
++
++  const sent = await sendSmsMessage(manager.smsPhone, sms);
++
++  if (!sent) {
++    try {
++      await db.runTransaction(async (tx) => {
++        const limitSnap = await tx.get(limitRef);
++        const used = (limitSnap.data() ?? {}) as { count?: number; units?: string[] };
++        tx.update(userRef, { tokens: FieldValue.increment(credits) });
++        tx.set(limitRef, { count: Math.max(0, (used.count ?? 1) - 1), units: (used.units ?? []).filter((k) => k !== unitKey) }, { merge: true });
++      });
++    } catch (error) {
++      // The tenant's SMS did not go out and the refund did not land: this needs a human, so make it findable.
++      logger.error('House to Rent: refund after a failed SMS did not complete', { userId: unit.userId, credits, unitKey, error });
++    }
++  }
++
++  await writeInquiryLogs({ unit, manager, inquirerE164, sms, credits, sent });
++  return sent ? { ok: true, managerName: preview.managerName, credits } : { ok: false, reason: 'failed' };
++}
++
++async function writeInquiryLogs(a: { unit: VacantUnit; manager: Manager; inquirerE164: string; sms: string; credits: number; sent: boolean }): Promise<void> {
++  const charged = a.sent ? a.credits : 0;
++  try {
++    // The audit log the Plot Yangu app already keeps for every SMS (same shape, plus what makes an inquiry traceable)
++    await db.collection('users').doc(a.unit.userId).collection('sms-sent-log').add({
++      source: 'whatsapp_house_to_rent',
++      propertyId: a.unit.propertyId,
++      unitId: a.unit.unitId,
++      unitNumber: a.unit.unitNumber,
++      recipientCount: 1,
++      tokensCharged: charged,
++      successCount: a.sent ? 1 : 0,
++      failCount: a.sent ? 0 : 1,
++      inquirerPhone: a.inquirerE164,
++      message: a.sms,
++      sentAt: FieldValue.serverTimestamp(),
++    });
++    await db.collection('houseInquiries').add({
++      ownerId: a.unit.ownerId,
++      unitId: a.unit.unitId,
++      unitNumber: a.unit.unitNumber,
++      propertyName: a.unit.propertyName,
++      managerUserId: a.unit.userId,
++      managerSmsPhone: a.manager.smsPhone,
++      inquirerPhone: a.inquirerE164,
++      message: a.sms,
++      messageLength: a.sms.length,
++      credits: a.credits,
++      tokensCharged: charged,
++      status: a.sent ? 'sent' : 'failed',
++      createdAt: FieldValue.serverTimestamp(),
++    });
++    if (a.sent) await db.collection('users').doc(a.unit.userId).update({ smsSentTotal: FieldValue.increment(1) });
++  } catch (error) {
++    logger.error('House to Rent: could not write the inquiry log', { userId: a.unit.userId, error });
++  }
++}
+diff --git a/functions/src/services/house.sms.ts b/functions/src/services/house.sms.ts
+new file mode 100644
+index 0000000..5859ac9
+--- /dev/null
++++ b/functions/src/services/house.sms.ts
+@@ -0,0 +1,102 @@
++/**
++ * House to Rent: the inquiry SMS. Composing, pricing and the HostPinnacle call. No Firestore here.
++ */
++import axios from 'axios';
++import { HP_SMS_APIKEY, HP_SMS_PASSWORD, HP_SMS_SENDERID, HP_SMS_USERID, SMS_API_URL } from '../config/sms.config';
++import { logger } from '../utils/logger';
++
++/** Longest SMS we ever send (the top price band). */
++export const SMS_MAX_CHARS = 350;
++
++/** Price bands, in SMS credits, by message length: up to 140 characters 2, up to 275 characters 4, up to 350 characters 7. */
++export const SMS_PRICE_BANDS: ReadonlyArray<{ maxChars: number; credits: number }> = [
++  { maxChars: 140, credits: 2 },
++  { maxChars: 275, credits: 4 },
++  { maxChars: 350, credits: 7 },
++];
++
++/** The cheapest inquiry there is: below this balance the Send Inquiry option is not offered. */
++export const MIN_INQUIRY_CREDITS = SMS_PRICE_BANDS[0].credits;
++
++/** Credits for a message of this length, or null when it is longer than the maximum. */
++export function smsCredits(length: number): number | null {
++  for (const band of SMS_PRICE_BANDS) if (length <= band.maxChars) return band.credits;
++  return null;
++}
++
++/** Plain GSM-friendly text: no emoji, printable Latin-1 only, single spaces. */
++export function cleanSmsText(text: string): string {
++  return (text ?? '')
++    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
++    .replace(/[\u{2600}-\u{27BF}]/gu, '')
++    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '')
++    .replace(/\s+/g, ' ')
++    .trim();
++}
++
++/** "Wanjiru Kamau" -> "Wanjiru": the greeting is cut at the first space. */
++export function firstName(full: string | undefined | null): string {
++  const first = cleanSmsText(full || '').split(' ')[0];
++  return first || 'Sir/Madam';
++}
++
++export interface InquirySmsInput {
++  managerName: string | undefined | null;
++  /** The inquiring person's number as the manager should dial it, e.g. 0712345678 */
++  inquirerPhone: string;
++  unitNumber: string;
++  propertyName: string;
++}
++
++/**
++ * "Dear Wanjiru, a tenant 0712345678 is inquiring on unit BS-01 on property Mirera Heights. Please contact them."
++ * Always within SMS_MAX_CHARS: an over-long property name is shortened, never the rest of the message.
++ */
++export function composeInquirySms(i: InquirySmsInput): string {
++  const build = (property: string): string =>
++    cleanSmsText(`Dear ${firstName(i.managerName)}, a tenant ${i.inquirerPhone} is inquiring on unit ${cleanSmsText(i.unitNumber)} on property ${property}. Please contact them.`);
++  let property = cleanSmsText(i.propertyName);
++  let sms = build(property);
++  while (sms.length > SMS_MAX_CHARS && property.length > 4) {
++    property = property.slice(0, Math.max(4, property.length - (sms.length - SMS_MAX_CHARS) - 1)).trimEnd();
++    sms = build(property);
++  }
++  return sms;
++}
++
++/** Send one SMS. Never throws; returns whether the provider accepted it. */
++export async function sendSmsMessage(msisdn: string, message: string): Promise<boolean> {
++  try {
++    const userid = HP_SMS_USERID.value();
++    const apikey = HP_SMS_APIKEY.value();
++    if (!userid || !apikey) {
++      logger.warn('House to Rent: SMS credentials are not configured');
++      return false;
++    }
++    const form = new URLSearchParams({
++      userid,
++      password: HP_SMS_PASSWORD.value(),
++      apikey,
++      senderid: HP_SMS_SENDERID.value(),
++      mobile: msisdn.replace(/\D/g, ''),
++      msg: message,
++      sendMethod: 'quick',
++      msgType: 'text',
++      output: 'json',
++      duplicatecheck: 'true',
++    });
++    // HostPinnacle expects form-encoded fields; a JSON body is not parsed
++    const res = await axios.post(SMS_API_URL, form.toString(), {
++      timeout: 15000,
++      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
++      validateStatus: (s) => s >= 200 && s < 300,
++    });
++    const status = String((res.data as { status?: unknown } | undefined)?.status ?? '').toLowerCase();
++    const failed = status === 'error' || status === 'fail' || status === 'failed' || status === 'failure' || (res.data as { ErrorCode?: unknown } | undefined)?.ErrorCode !== undefined;
++    if (failed) logger.warn('House to Rent: SMS provider rejected the message');
++    return !failed;
++  } catch (error) {
++    logger.warn('House to Rent: SMS send failed', { reason: axios.isAxiosError(error) ? error.code || error.message : 'unknown' });
++    return false;
++  }
++}
+diff --git a/functions/src/utils/house.match.ts b/functions/src/utils/house.match.ts
+new file mode 100644
+index 0000000..b33aa60
+--- /dev/null
++++ b/functions/src/utils/house.match.ts
+@@ -0,0 +1,110 @@
++/**
++ * House to Rent: forgiving area matching. Pure functions, no I/O.
++ *
++ * A tenant types an area ("mirer", "navsha", "naivasa", "NAIVASHA") and it must find a property whose address is
++ * "Mirera, Naivasha". Matching is per word: any word of the address that resembles a word the tenant typed counts.
++ * Resemblance = same word, a prefix, the same consonant skeleton ("navsha" ~ "naivasha"), or a small edit distance.
++ */
++
++/** Words that say nothing about WHERE a property is. Ignored on both sides. */
++const STOP = new Set([
++  'the', 'and', 'for', 'off', 'near', 'next', 'opposite', 'behind', 'along', 'area', 'town', 'county', 'estate', 'road', 'rd', 'street',
++  'st', 'avenue', 'ave', 'lane', 'drive', 'close', 'court', 'house', 'houses', 'apartment', 'apartments', 'plot', 'plots', 'block',
++  'floor', 'kenya', 'kwa', 'wa', 'ya', 'na', 'of', 'in', 'at', 'to', 'rent', 'nyumba',
++]);
++
++/** Lower-case, accents removed, everything that is not a letter or digit becomes a space. */
++export function normalizeText(s: string): string {
++  return (s || '')
++    .normalize('NFD')
++    .replace(/[\u0300-\u036f]/g, '')
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, ' ')
++    .trim();
++}
++
++/** Meaningful words: at least 3 characters, not a stop word, not a bare number. */
++export function areaTokens(s: string): string[] {
++  const all = normalizeText(s).split(' ').filter(Boolean);
++  const kept = all.filter((t) => t.length >= 3 && !STOP.has(t) && !/^\d+$/.test(t));
++  // "road" or "estate" alone is still something the tenant typed: fall back to every word of 3+ letters
++  return kept.length ? kept : all.filter((t) => t.length >= 3 && !/^\d+$/.test(t));
++}
++
++/** Consonant skeleton with the common Kenyan spelling swaps folded: navsha / naivasha -> nvsh, mirer / mirera -> mr. */
++export function skeleton(word: string): string {
++  const s = word
++    .replace(/ph/g, 'f')
++    .replace(/ck/g, 'k')
++    .replace(/c(?=[eiy])/g, 's')
++    .replace(/ch/g, '#')
++    .replace(/c/g, 'k')
++    .replace(/x/g, 'ks')
++    .replace(/q/g, 'k')
++    .replace(/z/g, 's')
++    .replace(/#/g, 'c');
++  if (!s) return '';
++  return (s[0] + s.slice(1).replace(/[aeiouy]/g, '')).replace(/(.)\1+/g, '$1');
++}
++
++/** Optimal string alignment distance (insert, delete, replace, swap two neighbours). */
++export function editDistance(a: string, b: string): number {
++  const m = a.length;
++  const n = b.length;
++  if (!m) return n;
++  if (!n) return m;
++  const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...new Array<number>(n).fill(0)]);
++  for (let j = 0; j <= n; j++) d[0][j] = j;
++  for (let i = 1; i <= m; i++) {
++    for (let j = 1; j <= n; j++) {
++      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
++      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
++      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
++    }
++  }
++  return d[m][n];
++}
++
++/** How many typos a word of this length may carry: short words get none, so "rongai" never matches "ongata". */
++function allowedTypos(len: number): number {
++  if (len <= 3) return 0;
++  if (len <= 5) return 1;
++  if (len <= 8) return 2;
++  return 3;
++}
++
++/** Does the typed word `q` resemble the address word `t`? Both are already normalized. */
++export function wordMatches(q: string, t: string): boolean {
++  if (!q || !t) return false;
++  if (q === t) return true;
++  // a half-typed or over-typed word: "mirer" / "mirera", "naivash" / "naivasha"
++  if (q.length >= 4 && t.startsWith(q)) return true;
++  if (t.length >= 4 && q.startsWith(t)) return true;
++  const sq = skeleton(q);
++  const st = skeleton(t);
++  if (sq.length >= 3 && sq === st) return true;
++  const shorter = Math.min(q.length, t.length);
++  if (shorter >= 4 && editDistance(q, t) <= Math.min(allowedTypos(shorter), allowedTypos(Math.max(q.length, t.length)))) return true;
++  if (sq.length >= 4 && st.length >= 4 && editDistance(sq, st) <= 1) return true;
++  return false;
++}
++
++/** How many of the typed words resemble some word of the address. */
++export function matchScore(queryWords: string[], addressWords: string[]): number {
++  let score = 0;
++  for (const q of queryWords) if (addressWords.some((t) => wordMatches(q, t))) score++;
++  return score;
++}
++
++/**
++ * Keep the best-matching candidates: everything that matched the MOST typed words (and at least one).
++ * "mirera naivasha" therefore prefers a property that has both over one that only has "naivasha".
++ */
++export function bestMatches<T>(query: string, items: T[], addressOf: (item: T) => string): T[] {
++  const q = areaTokens(query);
++  if (!q.length) return [];
++  const scored = items.map((item) => ({ item, score: matchScore(q, areaTokens(addressOf(item))) })).filter((x) => x.score > 0);
++  if (!scored.length) return [];
++  const top = Math.max(...scored.map((x) => x.score));
++  return scored.filter((x) => x.score === top).map((x) => x.item);
++}
+diff --git a/functions/src/webhooks/whatsapp-webhook.ts b/functions/src/webhooks/whatsapp-webhook.ts
+index 98d6101..e40d180 100644
+--- a/functions/src/webhooks/whatsapp-webhook.ts
++++ b/functions/src/webhooks/whatsapp-webhook.ts
+@@ -46,6 +46,7 @@ import {
+   handleGetInvoice,
+ } from '../handlers/rent.handler';
+ import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../handlers/watch.entry';
++import { handleHouseToRent } from '../handlers/house.handler';
+ import { isWatchState } from '../handlers/watch.handler';
+ import { claimMessage } from '../services/message-dedup.service';
+ import { logger } from '../utils/logger';
+@@ -229,6 +230,15 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+         response = await handleHelpMenu(phone, input, session);
+         break;
+ 
++      case STATE.HTR_AREA:
++      case STATE.HTR_RESULTS:
++      case STATE.HTR_UNIT:
++      case STATE.HTR_CONTACT:
++      case STATE.HTR_INQ_PHONE:
++      case STATE.HTR_INQ_CONFIRM:
++        response = await handleHouseToRent(phone, input, session);
++        break;
++
+       case STATE.IDLE:
+         logger.info('Routing to idle handler');
+         response = await handleIdle(phone, input, session);
+diff --git a/house.indexes.fragment.json b/house.indexes.fragment.json
+new file mode 100644
+index 0000000..020b6e6
+--- /dev/null
++++ b/house.indexes.fragment.json
+@@ -0,0 +1,15 @@
++{
++  "_comment": "House to Rent: the bot resolves a public unit's property with a collection-group query on properties.ownerId. Merge `fieldOverrides` into the ONE firestore.indexes.json that is deployed for this database (deploying indexes from another repo without it would delete it). Until it is deployed the bot falls back to scanning accounts: same answer, slower.",
++  "fieldOverrides": [
++    {
++      "collectionGroup": "properties",
++      "fieldPath": "ownerId",
++      "indexes": [
++        { "order": "ASCENDING", "queryScope": "COLLECTION" },
++        { "order": "DESCENDING", "queryScope": "COLLECTION" },
++        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
++        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
++      ]
++    }
++  ]
++}

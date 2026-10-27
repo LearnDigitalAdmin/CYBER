@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Home, Loader2, Trash2, AlertCircle, Users } from 'lucide-react';
-import { doc, deleteDoc } from 'firebase/firestore';
-import { db } from '../../services/firebaseService';
-import { assetsService, type Asset, type Property, type Tenant } from '../../services/Assets';
+import { X, Home, Loader2, Trash2, AlertCircle, Users, Copy, Check } from 'lucide-react';
+import { assetsService, type Asset, type Property, type Tenant, type Unit } from '../../services/Assets';
 
 interface ViewPropertyModalProps {
   isOpen: boolean;
@@ -21,6 +19,8 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [copied, setCopied] = useState(false);
   const [deletingTenant, setDeletingTenant] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [tenantToDelete, setTenantToDelete] = useState<Tenant | null>(null);
@@ -37,6 +37,7 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
     try {
       const tenantsData = await assetsService.getTenantsByProperty(asset.id, property.id);
       setTenants(tenantsData);
+      setUnits(await assetsService.getUnitsByProperty(asset.id, property.id));
     } catch (error) {
       console.error('Error loading tenants:', error);
       setError('Failed to load tenants');
@@ -57,9 +58,8 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
     setError('');
 
     try {
-      // Delete from Firestore
-      const tenantRef = doc(db, 'users', asset.id, 'tenants', tenantToDelete.id.toString());
-      await deleteDoc(tenantRef);
+      // Delete from Firestore; the unit they leased becomes vacant again
+      await assetsService.deleteTenant(asset.id, tenantToDelete);
 
       // Reload tenants
       await loadTenants();
@@ -90,7 +90,20 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
                 <h3 className="text-xl font-bold text-white">{property.name}</h3>
                 <p className="text-sm text-gray-400">{property.address || 'No address provided'}</p>
                 {property.ownerId && (
-                  <p className="mt-0.5 text-xs font-mono text-cyan-400">{property.ownerId}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(property.ownerId!).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }).catch(() => {});
+                    }}
+                    title="Copy owner ID"
+                    className="mt-0.5 flex items-center gap-1 text-xs font-mono text-cyan-400 hover:text-cyan-300 select-all"
+                  >
+                    {property.ownerId}
+                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  </button>
                 )}
               </div>
             </div>
@@ -135,6 +148,11 @@ const ViewPropertyModal: React.FC<ViewPropertyModalProps> = ({
               <Users className="w-5 h-5 text-cyan-400" />
               <h4 className="text-lg font-semibold text-white">Tenants ({tenants.length}/{property.maxUnits})</h4>
             </div>
+            <p className="text-xs text-gray-500">
+              {units.filter(u => u.status === 'vacant').length} vacant ·{' '}
+              {units.filter(u => u.status === 'occupied').length} occupied ·{' '}
+              {units.filter(u => u.status === 'maintenance').length} maintenance
+            </p>
           </div>
 
           {error && (

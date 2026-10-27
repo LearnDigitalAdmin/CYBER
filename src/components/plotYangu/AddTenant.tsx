@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, AlertCircle, Loader2, UserPlus } from 'lucide-react';
-import { assetsService, type Asset, type Property, type TenantInput } from '../../services/Assets';
+import { assetsService, type Asset, type Property, type TenantInput, type Unit } from '../../services/Assets';
+import { unitSizeLabel, unitConditionLabel } from '../../services/Units';
 import { checkSafaricomPhone } from '../../utils/safaricom';
 
 type LimitNumber = number | -1;
@@ -35,6 +36,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [properties, setProperties] = useState<Property[]>([]);
+  const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
   const [formData, setFormData] = useState<TenantInput>({
     id: 0,
     propertyId: 0,
@@ -53,6 +55,30 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
       loadProperties();
     }
   }, [isOpen]);
+
+  // Vacant units of the selected property
+  useEffect(() => {
+    let cancelled = false;
+    setAvailableUnits([]);
+    if (isOpen && formData.propertyId) {
+      assetsService.getAvailableUnits(asset.id, formData.propertyId)
+        .then(units => { if (!cancelled) setAvailableUnits(units); })
+        .catch(err => console.error('Error loading units:', err));
+    }
+    return () => { cancelled = true; };
+  }, [isOpen, formData.propertyId, asset.id]);
+
+  // Picking a unit passes its id as the unit number and its price to the form
+  const selectUnit = (value: string) => {
+    const unit = availableUnits.find(u => String(u.id) === value);
+    setFormData(prev => ({
+      ...prev,
+      unitId: unit ? unit.id : undefined,
+      unitNumber: unit ? unit.unitNumber : '',
+      rentAmount: unit ? unit.rentAmount : 0,
+      depositAmount: unit ? unit.depositAmount : 0
+    }));
+  };
 
   const loadProperties = async () => {
     try {
@@ -79,6 +105,11 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
 
     if (!selectedProperty) {
       setError('Selected property not found');
+      return;
+    }
+
+    if (formData.unitId == null) {
+      setError('Please select a vacant unit');
       return;
     }
 
@@ -126,6 +157,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
         phone: '',
         email: '',
         unitNumber: '',
+        unitId: undefined,
         rentAmount: 0,
         standingFees: 0,
         depositAmount: 0
@@ -164,7 +196,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
             <label className="block text-sm font-medium text-gray-400 mb-2">Select Property *</label>
             <select
               value={formData.propertyId}
-              onChange={(e) => setFormData(prev => ({ ...prev, propertyId: Number(e.target.value) }))}
+              onChange={(e) => setFormData(prev => ({ ...prev, propertyId: Number(e.target.value), unitId: undefined, unitNumber: '', rentAmount: 0, depositAmount: 0 }))}
               required
               className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 text-white"
             >
@@ -226,14 +258,21 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-400 mb-2">Unit Number</label>
-              <input
-                type="text"
-                value={formData.unitNumber}
-                onChange={(e) => setFormData(prev => ({ ...prev, unitNumber: e.target.value }))}
-                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white placeholder-gray-500"
-                placeholder="A101"
-              />
+              <label className="block text-sm font-medium text-gray-400 mb-2">Unit *</label>
+              <select
+                value={formData.unitId ?? ''}
+                onChange={(e) => selectUnit(e.target.value)}
+                disabled={!formData.propertyId}
+                required
+                className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
+              >
+                <option value="">{availableUnits.length ? 'Select a vacant unit' : 'No vacant units'}</option>
+                {availableUnits.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.unitNumber} · {unitSizeLabel(u.unitSize)} · {u.unitType} · {unitConditionLabel(u.condition)} · KES {u.rentAmount.toLocaleString()}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -241,7 +280,7 @@ const AddTenantModal: React.FC<AddTenantModalProps> = ({
               <input
                 type="number"
                 value={formData.rentAmount}
-                onChange={(e) => setFormData(prev => ({ ...prev, rentAmount: Number(e.target.value) }))}
+                readOnly
                 required
                 min="0"
                 className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-white"
