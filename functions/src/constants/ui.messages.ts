@@ -71,6 +71,11 @@ export const MAIN_MENU_ROWS = [
     title: { en: 'Landlord Watch', sw: 'Landlord Watch' },
     desc: { en: 'Follow rent collected on your property', sw: 'Fuatilia kodi iliyokusanywa kwenye mali yako' },
   },
+  {
+    value: '8',
+    title: { en: 'House to Rent', sw: 'Nyumba ya Kupanga' },
+    desc: { en: 'Find vacant houses and units to rent', sw: 'Tafuta nyumba na vyumba vilivyo wazi vya kupanga' },
+  },
   { value: '6', title: { en: 'Help', sw: 'Msaada' }, desc: { en: 'Contact SAMUHIA support', sw: 'Wasiliana na msaada wa SAMUHIA' } },
   { value: '5', title: { en: 'Exit', sw: 'Toka' }, desc: { en: 'End this chat', sw: 'Maliza mazungumzo haya' } },
 ] as const satisfies ReadonlyArray<{ value: string; title: Bi; desc: Bi }>;

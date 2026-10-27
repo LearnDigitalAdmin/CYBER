@@ -11,6 +11,7 @@ import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { beginMyChama } from './mychama.handler';
 import { beginWatch } from './watch.entry';
+import { beginHouseToRent } from './house.handler';
 import { promptNationalId } from './rent.handler';
 import { isWatchKeyword } from '../utils/watch.format';
 import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
@@ -18,7 +19,7 @@ import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
 /**
  * Handle main menu selection
  * Option values are the numbers the menu has always used: 1 Pay Rent, 2 Invoice, 3 My Chama, 4 Plot, 5 Exit, 6 Help,
- * 7 Landlord Watch (the list shows them in a friendlier order).
+ * 7 Landlord Watch, 8 House to Rent (the list shows them in a friendlier order).
  */
 export async function handleMainMenu(phone: string, input: string, session: Session): Promise<Reply> {
   try {
@@ -28,8 +29,8 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
       return await beginWatch(phone, session);
     }
 
-    // Validate input (1-7)
-    const validation = validateMenuSelection(input, 1, 7);
+    // Validate input (1-8)
+    const validation = validateMenuSelection(input, 1, 8);
 
     if (!validation.valid || validation.option === undefined) {
       return mainMenuReply(session.language);
@@ -69,6 +70,10 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
       case 7: // Landlord Watch
         logger.info('Navigating to Landlord Watch');
         return await beginWatch(phone, session);
+
+      case 8: // House to Rent
+        logger.info('Navigating to House to Rent');
+        return await beginHouseToRent(phone, session);
 
       default:
         return mainMenuReply(session.language);

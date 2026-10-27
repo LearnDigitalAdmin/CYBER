@@ -1,0 +1,15 @@
+{
+  "_comment": "House to Rent: the bot resolves a public unit's property with a collection-group query on properties.ownerId. Merge `fieldOverrides` into the ONE firestore.indexes.json that is deployed for this database (deploying indexes from another repo without it would delete it). Until it is deployed the bot falls back to scanning accounts: same answer, slower.",
+  "fieldOverrides": [
+    {
+      "collectionGroup": "properties",
+      "fieldPath": "ownerId",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
+}

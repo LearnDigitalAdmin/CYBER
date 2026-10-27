@@ -1657,6 +1657,7 @@ import { handleWebhookVerification } from './webhooks/verify-webhook';
 import { WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN } from './config/whatsapp.config';
 import { PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY } from './config/paystack.config';
 import { LW_BOT_API_KEY } from './config/watch.config';
+import { HP_SECRETS } from './config/sms.config';
 
 
 exports.whatsappWebhook = onRequest(
@@ -1664,7 +1665,7 @@ exports.whatsappWebhook = onRequest(
     memory: "1GiB",
     // Landlord Watch waits up to 90 s for an M-Pesa confirmation inside one request
     timeoutSeconds: 180,
-    secrets: [WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY, LW_BOT_API_KEY]
+    secrets: [WHATSAPP_VERIFY_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN, PAYSTACK_SECRET_KEY, MYCHAMA_PAYSTACK_SECRET_KEY, LW_BOT_API_KEY, ...HP_SECRETS]
   },
   async (req, res) => {
     try {

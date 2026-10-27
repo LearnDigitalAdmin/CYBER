@@ -46,6 +46,7 @@ import {
   handleGetInvoice,
 } from '../handlers/rent.handler';
 import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../handlers/watch.entry';
+import { handleHouseToRent } from '../handlers/house.handler';
 import { isWatchState } from '../handlers/watch.handler';
 import { claimMessage } from '../services/message-dedup.service';
 import { logger } from '../utils/logger';
@@ -227,6 +228,15 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       case STATE.HELP_MENU:
         logger.info('Routing to help handler');
         response = await handleHelpMenu(phone, input, session);
+        break;
+
+      case STATE.HTR_AREA:
+      case STATE.HTR_RESULTS:
+      case STATE.HTR_UNIT:
+      case STATE.HTR_CONTACT:
+      case STATE.HTR_INQ_PHONE:
+      case STATE.HTR_INQ_CONFIRM:
+        response = await handleHouseToRent(phone, input, session);
         break;
 
       case STATE.IDLE:

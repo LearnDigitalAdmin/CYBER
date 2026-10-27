@@ -19,7 +19,7 @@ describe('language and main menu', () => {
     assert.equal(r.state, STATE.MAIN_MENU);
     assert.equal(r.lastInteractive().kind, 'list');
     assert.ok(r.titles().includes('Lipa Kodi'));
-    assert.equal(r.titles().length, 7);
+    assert.equal(r.titles().length, 8);
   });
 
   test('typed numbers still work: 6 opens Help, then Main menu returns', async () => {
@@ -30,7 +30,7 @@ describe('language and main menu', () => {
     assert.deepEqual(r.titles(), ['Main menu']);
     await r.tap('Main menu');
     assert.equal(r.state, STATE.MAIN_MENU);
-    assert.equal(r.titles().length, 7);
+    assert.equal(r.titles().length, 8);
   });
 
   test('Help: any message returns to the main menu (it used to fall into "Unknown state")', async () => {
@@ -227,7 +227,7 @@ describe('My Chama', () => {
     await r.say('3');
     await r.tap('Cancel');
     assert.equal(r.state, STATE.MAIN_MENU);
-    assert.equal(r.titles().length, 7);
+    assert.equal(r.titles().length, 8);
   });
 
   test('contribution: paged picker (12 periods), pick the 9th on page 2, pay in full through phone, network and confirm', async () => {
@@ -346,7 +346,7 @@ describe('Landlord Watch hand-off', () => {
     assert.equal(r.state, STATE.MAIN_MENU);
     const last = r.sent[r.sent.length - 1];
     assert.equal(last.kind, 'list');
-    assert.equal(last.kind === 'list' && last.rows.length, 7);
+    assert.equal(last.kind === 'list' && last.rows.length, 8);
   });
 
   test('a stale main-menu tap while inside Landlord Watch is answered with the notice', async () => {
