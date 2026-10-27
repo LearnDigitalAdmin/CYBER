@@ -117,11 +117,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const refreshUser = async () => {
     console.log('🔄 [refreshUser] Called');
-    if (currentUser) {
+    // auth.currentUser is read directly so this also works in the same tick as a fresh sign-in
+    const signedIn = auth.currentUser ?? currentUser;
+    if (signedIn) {
       console.log('🔄 [refreshUser] Refreshing user data');
-      console.log('🔄 [refreshUser] User email:', currentUser.email);
-      console.log('🔄 [refreshUser] User phone:', currentUser.phoneNumber);
-      await fetchFirestoreUser(currentUser.uid);
+      console.log('🔄 [refreshUser] User email:', signedIn.email);
+      console.log('🔄 [refreshUser] User phone:', signedIn.phoneNumber);
+      await fetchFirestoreUser(signedIn.uid);
       console.log('🔄 [refreshUser] User data refresh complete');
     } else {
       console.warn('⚠️ [refreshUser] No current user to refresh');

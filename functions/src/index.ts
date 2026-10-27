@@ -1682,3 +1682,11 @@ exports.whatsappWebhook = onRequest(
     }
   }
 );
+
+// Low-friction signup (Google + phone SMS code) and post-signup profile edits
+export {
+  sendSignupOtp,
+  verifySignupOtp,
+  ensureAgentProfile,
+  updateAgentProfile,
+} from './handlers/signupAuth';

@@ -96,6 +96,7 @@ import HomePage from "../pages/HomePage";
 import ExplorePage from "../pages/ExplorePage";
 import AuthPage from "../pages/AuthPage";
 import SignupPage from "../pages/SignupPage";
+import CompleteProfilePage from "../pages/CompleteProfilePage";
 import Dashboard from "../pages/DashboardLayout";
 import { useAuth } from "../context/authContext";
 import UploadsPage from "../pages/Uploads";
@@ -117,7 +118,7 @@ const isInstalledApp = () =>
     (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
 
 const AppRoutes: React.FC = () => {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, firestoreUser, loading } = useAuth();
   const location = useLocation();
 
   // Wait for initial auth check before rendering routes
@@ -131,6 +132,10 @@ const AppRoutes: React.FC = () => {
       </div>
     );
   }
+
+  // Accounts made by the Google / phone signup must finish their profile first. Only an explicit `false` gates:
+  // older agent docs have no such flag, so existing users are never redirected.
+  const needsProfile = firestoreUser?.profileComplete === false;
 
   const ProtectedRoute = ({ children }: { children: React.ReactNode }) =>
     currentUser ? <>{children}</> : <Navigate to="/signin" replace />;
@@ -172,16 +177,24 @@ const AppRoutes: React.FC = () => {
           }
         />*/}
         <Route
+          path="/complete-profile"
+          element={
+            <ProtectedRoute>
+              <CompleteProfilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/dashboard/*"
           element={
             <ProtectedRoute>
-              <Dashboard />
+              {needsProfile ? <Navigate to="/complete-profile" replace /> : <Dashboard />}
             </ProtectedRoute>
           }
         /> 
 
         {/* Samuhia Desk (all screens live under src/desk) */}
-        <Route path="/desk/*" element={<ProtectedRoute><DeskApp /></ProtectedRoute>} />
+        <Route path="/desk/*" element={<ProtectedRoute>{needsProfile ? <Navigate to="/complete-profile" replace /> : <DeskApp />}</ProtectedRoute>} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

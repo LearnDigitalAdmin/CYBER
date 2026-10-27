@@ -4,6 +4,7 @@ import { Mail, Lock, LogIn, X } from "lucide-react";
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../services/firebaseService";
 import { useNavigate } from "react-router-dom";
+import AuthMethods from "../components/auth/AuthMethods";
 
 const AuthPage: React.FC = () => {
   const navigate = useNavigate();
@@ -58,7 +59,15 @@ const AuthPage: React.FC = () => {
       >
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold">Sign In</h1>
-          <p className="text-sm opacity-80">Using Email and Password</p>
+          <p className="text-sm opacity-80">Google, phone or email</p>
+        </div>
+
+        <AuthMethods onSuccess={(isNew) => navigate(isNew ? "/complete-profile" : "/dashboard")} />
+
+        <div className="flex items-center my-5 text-xs text-gray-400">
+          <div className="flex-1 h-px bg-gray-600" />
+          <span className="px-3">or sign in with email</span>
+          <div className="flex-1 h-px bg-gray-600" />
         </div>
 
         <form onSubmit={handleEmailLogin}>
