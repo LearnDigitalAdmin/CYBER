@@ -28,6 +28,7 @@ import { toast } from 'react-toastify';
 import CyberTab from '../components/cyber/CyberTab';
 import InstallButton from '../pwa/InstallButton';
 import { Paystack } from '../services/paystackService';
+import SettlementFields, { type SettlementType } from '../components/SettlementFields';
 import { Screening } from '../services/Screening';
 import TerminalModal from '../components/global/Terminal';
 import IncomeTab from '../components/income/IncomeTab';
@@ -75,7 +76,8 @@ const Dashboard = () => {
   const [tillBusinessName, setTillBusinessName] = useState('');
 
   const [businessName, setBusinessName] = useState('');
-  const [settlementBank, setSettlementBank] = useState<'mpesa' | 'airtel-ke'>('mpesa');
+  const [settlementBank, setSettlementBank] = useState<SettlementType>('mpesa');
+  const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -221,6 +223,7 @@ const Dashboard = () => {
       await Paystack.setupPaymentAccount({
         businessName,
         settlementBank,
+        bankCode: settlementBank === 'bank' ? bankCode : undefined,
         accountNumber,
         email,
         name,
@@ -563,37 +566,15 @@ const Dashboard = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Settlement Bank
-                  </label>
-                  <select
-                    value={settlementBank}
-                    onChange={(e) => setSettlementBank(e.target.value as 'mpesa' | 'airtel-ke')}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="mpesa">M-Pesa</option>
-                    <option value="airtel-ke">Airtel Money (Kenya)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Number / Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    value={accountNumber}
-                    onChange={(e) => setAccountNumber(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="254712345678"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Enter your M-Pesa/Airtel Money registered phone number
-                  </p>
-                </div>
+                <SettlementFields
+                  settlementBank={settlementBank}
+                  setSettlementBank={setSettlementBank}
+                  bankCode={bankCode}
+                  setBankCode={setBankCode}
+                  accountNumber={accountNumber}
+                  setAccountNumber={setAccountNumber}
+                  loadBanks={Paystack.listKenyaBanks}
+                />
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
