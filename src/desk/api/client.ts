@@ -6,6 +6,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import "../../services/firebaseService"; // side effect: initialises the Firebase app
 import { DESK_REGION } from "./contract";
 import type {
+  NetDecideIn, NetInviteIn, NetOptionsIn, NetTeamIn,
   CreateRequestIn, ListMyDocsIn, ListRequestsIn, SyncEmailIn, SyncPayoutAccountsIn, TopGetDeskIn, TopGetDocIn,
   TopListDesksIn, TopListPayablesIn, TopPayoutIn, TopRequestOtpIn, TopSetDeskStatusIn, TopSetRankIn,
   UpdateRequestIn, UploadDocIn,
@@ -72,6 +73,13 @@ export const deskApi = {
   listRequests: (i: ListRequestsIn = {}) => callDesk("desk_listRequests", i),
   updateRequest: (i: UpdateRequestIn) => callDesk("desk_updateRequest", i),
   createRequest: (i: CreateRequestIn) => callDesk("desk_createRequest", i),
+  net: {
+    options: (i: NetOptionsIn) => callDesk("desk_net_options", i),
+    invite: (i: NetInviteIn) => callDesk("desk_net_invite", i),
+    decide: (i: NetDecideIn) => callDesk("desk_net_decide", i),
+    team: (i: NetTeamIn = {}) => callDesk("desk_net_team", i),
+    dashboard: () => callDesk("desk_net_dashboard", {}),
+  },
   top: {
     requestOtp: (i: TopRequestOtpIn) => callDesk("desk_top_requestOtp", i),
     listDesks: (i: TopListDesksIn = {}) => callDesk("desk_top_listDesks", i),

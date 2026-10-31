@@ -26,10 +26,10 @@ export function aggregateEarnings(rows: readonly Pick<LedgerDoc, "kind" | "statu
     else if (r.status === "payable" || r.status === "processing") payableMinor += r.amountMinor;
     else if (r.status === "paid") paidMinor += r.amountMinor;
     const stream: EarningsByProduct["product"] =
-      r.kind === "bonus" ? "bonus" : r.kind === "support" ? "support" : r.kind === "service" ? "service" : (r.product ?? "service");
+      r.kind === "bonus" ? "bonus" : r.kind === "support" ? "support" : r.kind === "network" ? "network" : r.kind === "service" ? "service" : (r.product ?? "service");
     by.set(stream, (by.get(stream) ?? 0) + r.amountMinor);
   }
-  const order: EarningsByProduct["product"][] = ["service", "chama", "school", "pms", "bonus", "support"];
+  const order: EarningsByProduct["product"][] = ["service", "chama", "school", "pms", "bonus", "support", "network"];
   return {
     settledMinor, payableMinor, paidMinor,
     byProduct: order.filter((k) => by.has(k)).map((k) => ({ product: k, amountMinor: by.get(k) as number })),

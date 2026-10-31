@@ -21,7 +21,7 @@ export const STATUS_LABEL: Record<AgentStatus, string> = {
 export const STATUS_TONE: Record<AgentStatus, "gray" | "blue" | "amber" | "green" | "red"> = {
   applied: "gray", training: "blue", certified: "amber", active: "green", suspended: "red", closed: "gray",
 };
-export const RANK_LABEL: Record<Rank, string> = { clerk: "Clerk", senior: "Senior", lead: "Lead" };
+export const RANK_LABEL: Record<Rank, string> = { clerk: "Clerk", senior: "Senior", lead: "Lead", admin: "Admin", internal: "Internal" };
 
 export type ReasonCheck = { ok: true; value: string } | { ok: false; error: string };
 export function validateReason(reason: string): ReasonCheck {

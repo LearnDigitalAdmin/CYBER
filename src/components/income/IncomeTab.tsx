@@ -3,6 +3,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import { cyberService, type IncomeData } from "../../services/Cyber";
 import { useAuth } from "../../context/authContext"; // Adjust path as needed
 import DeskIncomeSection from "./DeskIncomeSection";
+import NetworkIncomeSection from "./NetworkIncomeSection";
 
 interface BarData {
   date: string;
@@ -352,6 +353,7 @@ const IncomeTab = () => {
 
       {/* Desk earnings: ledger, milestone and a check against the payment records above (desk accounts only) */}
       <DeskIncomeSection period={period} />
+      <NetworkIncomeSection />
 
       {/* Transaction Details */}
       {(incomeData.records.plot.length > 0 || incomeData.records.cyber.length > 0) && (

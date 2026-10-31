@@ -4,6 +4,7 @@ import { col, db } from "../db.js";
 import { audit } from "../kernel/audit.js";
 import { appendLedger } from "../kernel/ledger.js";
 import type { CustomerDoc, DeskEventDoc, LedgerDoc } from "../types.js";
+import { applyNetworkEffects, reverseOverrides } from "./network.js";
 import { planCommission, planCustomerUpdate, planReversals, validateEvent } from "./plan.js";
 
 const customerRef = (entityKey: string) => col("customers").doc(entityKey.replace(/\//g, "_"));
@@ -61,6 +62,7 @@ export async function handleDeskEvent(eventId: string, raw: unknown): Promise<st
 
   if (e.type === "refund") {
     const reversals = await reverseRows(eventId, e.originalRef as string);
+    await reverseOverrides(eventId, e.originalRef as string, Date.now());
     const cust = await updateCustomer(e);
     await audit({
       action: "refund_recorded", agentId: e.agentId, entityKey: e.entityKey,
@@ -73,6 +75,7 @@ export async function handleDeskEvent(eventId: string, raw: unknown): Promise<st
   const plan = planCommission(e, firstPurchase);
   let entryId: string | undefined;
   let created = false;
+  let refunded = false;
   if (plan && plan.agentMinor > 0) {
     const res = await appendLedger({
       agentId: e.agentId, kind: "commission", amountMinor: plan.agentMinor, status: "settled", product: e.product, entityKey: e.entityKey,
@@ -82,8 +85,19 @@ export async function handleDeskEvent(eventId: string, raw: unknown): Promise<st
     entryId = res.entryId; created = res.created;
     const refundEvent = await refundExistsFor(e.paystackRef);
     if (refundEvent) await reverseRows(refundEvent, e.paystackRef);
+    refunded = !!refundEvent;
   }
   const cust = await updateCustomer(e);
+  if (plan && plan.agentMinor > 0) {
+    // team overrides, income counters and the payment SMS; idempotent, and a failure here must never undo the commission above
+    try {
+      const after = (await customerRef(e.entityKey).get()).data() as CustomerDoc | undefined;
+      await applyNetworkEffects(eventId, e, plan.agentMinor, after, refunded);
+    } catch (err) {
+      logger.error("network effects failed", { eventId, err: String(err) });
+      throw err; // retry: the marker makes the second attempt safe
+    }
+  }
   if (created || cust.applied || !cust.exists) {
     await audit({
       action: "commission_recorded", agentId: e.agentId, entityKey: e.entityKey,

@@ -8,7 +8,7 @@
  * `agentId` IS the agent's Firebase Auth uid (desk_agents/{uid}); security rules rely on that.
  */
 
-export const DESK_CONTRACT_VERSION = 5;
+export const DESK_CONTRACT_VERSION = 6;
 export const DESK_REGION = "us-central1";
 
 /** Desk charges use the existing CYBER_ payment reference family, so PAY's webhook already routes them. */
@@ -21,7 +21,12 @@ export const DESK_TOP_CODE = "COG-0000";
 export const SAMUHIA_EMAIL_DOMAIN = "samuhia.co.ke";
 
 export type Product = "chama" | "school" | "pms";
-export type Rank = "clerk" | "senior" | "lead";
+/**
+ * The distribution network's roles (stored as `rank` on desk_agents). clerk < senior < lead < admin; `internal` is Samuhia staff (ops).
+ * Hierarchy: clerks sit under a senior (max 4 per ward), seniors under a lead (max 3 per constituency), leads under an admin (per county).
+ * A missing level is skipped; with no one above, the agent rolls up under internal.
+ */
+export type Rank = "clerk" | "senior" | "lead" | "admin" | "internal";
 export type AgentStatus = "applied" | "training" | "certified" | "active" | "suspended" | "closed";
 export type SessionStatus = "pending" | "active" | "ended" | "expired";
 export type TicketStatus =
@@ -34,7 +39,8 @@ export type TicketStatus =
  * void     = bonus withdrawn before payment
  */
 export type LedgerStatus = "settled" | "payable" | "processing" | "paid" | "void";
-export type LedgerKind = "service" | "commission" | "bonus" | "support" | "reversal";
+/** `network` = one row per agent per month: team overrides + automatic retention/activity incentives, paid automatically by Paystack transfer. */
+export type LedgerKind = "service" | "commission" | "bonus" | "support" | "reversal" | "network";
 export type ServiceType =
   | "import_excel" | "manual_entry" | "schedule_setup" | "bulk_reminder";
 export type Scope =
@@ -47,7 +53,18 @@ export type OtpAction = "bulk_sms" | "rent_stk" | "export";
 export type EntityKey = string;
 
 // ---------------------------------------------------------------- callables
-export interface ApplyAgentIn { name: string; phone: string; idNumber: string; wardId: string }
+export interface ApplyAgentIn {
+  name: string; phone: string; idNumber: string;
+  /** Ward as a free label (legacy) OR leave empty and send county + constituency + ward names from the address pickers. */
+  wardId: string;
+  county?: string; constituency?: string; ward?: string;
+  /** Joining under a specific agent: a senior's code (you become a clerk), a lead's (senior) or an admin's (lead). */
+  uplineCode?: string;
+  /** An invite code from a senior, lead, admin or internal agent. The role comes from the invite. */
+  inviteCode?: string;
+  /** Only honoured when the ward/constituency already has the hierarchy (see desk_net_options). Otherwise everyone joins as a clerk under internal. */
+  role?: "clerk" | "senior" | "lead";
+}
 export interface ApplyAgentOut { agentId: string; status: AgentStatus }
 
 export interface ResolveEntityIn { code: string }
@@ -99,7 +116,7 @@ export interface RentBatchView {
 }
 
 export interface GetEarningsIn { from: number; to: number }
-export interface EarningsByProduct { product: Product | "service" | "bonus" | "support"; amountMinor: number }
+export interface EarningsByProduct { product: Product | "service" | "bonus" | "support" | "network"; amountMinor: number }
 export interface GetEarningsOut {
   settledMinor: number; payableMinor: number; paidMinor: number;
   bonusProgress: { qualifyingAccounts: number; blocksPaid: number; bankedMinor: number; capMinor: number };
@@ -308,6 +325,11 @@ export interface DeskCallableMap {
   desk_runReport: { in: RunReportIn; out: RunReportOut };
   desk_exportData: { in: ExportDataIn; out: ExportDataOut };
   desk_listTenants: { in: ListTenantsIn; out: ListTenantsOut };
+  desk_net_options: { in: NetOptionsIn; out: NetOptionsOut };
+  desk_net_invite: { in: NetInviteIn; out: NetInviteOut };
+  desk_net_decide: { in: NetDecideIn; out: NetDecideOut };
+  desk_net_team: { in: NetTeamIn; out: NetTeamOut };
+  desk_net_dashboard: { in: NetDashboardIn; out: NetDashboardOut };
 }
 export type DeskCallableName = keyof DeskCallableMap;
 
@@ -321,11 +343,13 @@ export const DESK_CALLABLES = [
   "desk_top_requestOtp", "desk_top_listDesks", "desk_top_getDesk", "desk_top_getDoc",
   "desk_top_setDeskStatus", "desk_top_setRank", "desk_top_listPayables", "desk_top_payout",
   "desk_getEntityInfo", "desk_runReport", "desk_exportData", "desk_listTenants",
+  "desk_net_options", "desk_net_invite", "desk_net_decide", "desk_net_team", "desk_net_dashboard",
 ] as const;
 
 // ------------------------------------------------- client-visible Firestore views
 export interface AgentView {
   agentId: string; agentCode: string; name: string; status: AgentStatus; rank: Rank; wardId: string;
+  countyId?: string; constituencyId?: string; uplineId?: string; uplineCode?: string; approvedAt?: number;
 }
 export interface SessionView {
   sessionId: string; entityKey: EntityKey; scopes: Scope[]; status: SessionStatus; expiresAt: number;
@@ -357,6 +381,10 @@ export const DESK_COLLECTIONS = {
   docs: "desk_docs",
   topOtps: "desk_topOtps",
   splitCodes: "desk_split_codes",
+  stats: "desk_stats",
+  accruals: "desk_accruals",
+  incentives: "desk_incentives",
+  invites: "desk_invites",
 } as const;
 
 // ------------------------------------------------------------ v5: workspace (entity info, reports, exports, tenants)
@@ -401,3 +429,50 @@ export type WorkspaceErrorReason =
   | "no_such_audience" | "no_such_report" | "no_such_export" | "not_pms_entity" | "product_unsupported";
 /** Delegate reply codes a product uses for an action it does not implement yet (HTTP 501 counts too). */
 export const DELEGATE_UNSUPPORTED_CODES = ["unknown_action", "unsupported_action", "not_supported", "not_implemented", "unimplemented"] as const;
+
+// ------------------------------------------------------------ v6: distribution network (roles, approval, metrics)
+export type NetworkRole = Exclude<Rank, "internal">;
+export type NetDecision = "approve" | "activate" | "reject" | "suspend" | "reinstate" | "assign";
+
+/** Which roles a joiner may pick in a ward. Everyone else joins as a clerk under internal until assigned. */
+export interface NetOptionsIn { county: string; constituency: string; ward: string }
+export interface NetRoleOption { role: "clerk" | "senior" | "lead"; available: boolean; reason?: string; slotsLeft?: number; assignedTo?: string }
+export interface NetOptionsOut { defaultRole: "clerk"; roles: NetRoleOption[] }
+
+export interface NetInviteIn { role: NetworkRole; phone: string; name?: string }
+export interface NetInviteOut { inviteCode: string; expiresAt: number; smsSent: boolean }
+
+export interface NetDecideIn { deskCode: string; action: NetDecision; reason?: string; uplineCode?: string; contractRef?: string }
+export interface NetDecideOut { ok: boolean; status: AgentStatus }
+
+export interface NetMember {
+  deskCode: string; name: string; phoneMasked: string; rank: Rank; status: AgentStatus; wardId: string; uplineCode?: string;
+  createdAt: number; monthNetMinor: number; monthPayments: number; customers: number;
+}
+export interface NetTeamIn { status?: AgentStatus; rank?: Rank; search?: string; cursor?: number }
+export interface NetTeamOut { members: NetMember[]; nextCursor?: number }
+
+export interface NetMonthStat {
+  month: string; payments: number; netMinor: number; commissionMinor: number; overrideMinor: number; incentiveMinor: number;
+  newCustomers: number; activeCustomers: number; teamNetMinor: number; teamPayments: number; teamNewCustomers: number;
+}
+export interface NetPending { deskCode: string; name: string; rank: Rank; wardId: string; createdAt: number; uplineCode?: string }
+export interface NetDashboardIn { _?: never }
+export interface NetDashboardOut {
+  role: Rank; status: AgentStatus; deskCode: string; month: string;
+  upline?: { name: string; deskCode: string; rank: Rank };
+  stats: NetMonthStat[];
+  customers: { owned: number; paidThisMonth: number; paidLastMonth: number };
+  team?: { clerks: number; seniors: number; leads: number; admins: number; active: number; suspended: number; pendingApproval: number };
+  slots?: { seniorsInWard: number; seniorsMax: number; leadsInConstituency: number; leadsMax: number };
+  pending: NetPending[];
+  payout: { carryMinor: number; minPayoutMinor: number; nextRun: string };
+  rules: { overridePct: { subscription: number; report: number; rent: number } | null; incentives: NetIncentiveRules };
+  /** Internal only: how much of the month's net revenue Samuhia kept after agent costs. */
+  margin?: { month: string; baseMinor: number; costMinor: number; retainedPct: number; floorPct: number; scale: number };
+}
+export interface NetIncentiveRules {
+  acquisitionMinor: number; activationMinor: number; retention6Minor: number; retention12Minor: number;
+  loyaltyMonthlyMinor: number; loyaltyMinStreak: number; activeBookTiers: { min: number; minor: number }[];
+  qualityMinor: number; qualityMinConfirmed: number;
+}

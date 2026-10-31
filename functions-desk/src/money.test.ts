@@ -33,12 +33,12 @@ test("B. SMS first purchase (KES 150 at 0.70): agent nets the whole margin, with
   assert.ok(Math.abs(s.agentMinor - margin) <= 2, `agent ${s.agentMinor} vs margin ${margin}`);
   assert.ok(s.platformMinor >= credits * C.creditCostMinor - 2, "Samuhia still recovers the SMS cost");
 });
-test("B. SMS standard purchase (KES 500 at 0.70): agent nets 40% of margin, within KES 0.02", () => {
+test("B. SMS standard purchase (KES 500 at 0.70): agent nets 45% of margin, within KES 0.02", () => {
   const credits = creditsFor(50000, 70);
   const plan = smsPlan({ grossMinor: 50000, credits, firstPurchaseEligible: false }, C);
   assert.equal(plan.rule, "sms_standard");
   const s = settledAmounts({ grossMinor: 50000, feeMinor: 750, agentSharePct: plan.agentSharePct });
-  const target = Math.floor(0.4 * (50000 - 750 - credits * C.creditCostMinor));  // 13988
+  const target = Math.floor(0.45 * (50000 - 750 - credits * C.creditCostMinor));  // 15737
   assert.ok(Math.abs(s.agentMinor - target) <= 2, `agent ${s.agentMinor} vs ${target}`);
 });
 test("B. a first purchase at or above KES 200 uses the standard share", () => {
@@ -61,21 +61,21 @@ test("D. rent take is capped at KES 250", () => {
   assert.equal(rentTake(800000, 1.5, C), 12000);
   assert.equal(rentTake(2000000, 2, C), 25000);
 });
-test("D. rent split: landlord keeps 100 - take, desk gets 30% of the take, Samuhia the rest", () => {
+test("D. rent split: landlord keeps 100 - take, desk gets 40% of the take, Samuhia the rest", () => {
   const p = rentPlan({ rentMinor: 800000, takeMinor: 12000 }, C);
-  assert.deepEqual(p, { landlordSharePct: 98.5, agentSharePct: 0.45, platformSharePct: 1.05, takeMinor: 12000 });
+  assert.deepEqual(p, { landlordSharePct: 98.5, agentSharePct: 0.6, platformSharePct: 0.9, takeMinor: 12000 });
   const capped = rentPlan({ rentMinor: 2000000, takeMinor: 40000 }, C);
   assert.equal(capped.takeMinor, 25000);
   assert.equal(capped.landlordSharePct, 98.75);
-  assert.equal(capped.agentSharePct, 0.37);
+  assert.equal(capped.agentSharePct, 0.5);
   assert.ok(Math.abs(capped.landlordSharePct + capped.agentSharePct + capped.platformSharePct - 100) < 1e-9);
 });
-test("D. rent: agent nets 30% of the take after the proportional fee", () => {
+test("D. rent: agent nets 40% of the take after the proportional fee", () => {
   const plan = rentPlan({ rentMinor: 800000, takeMinor: 12000 }, C);
   const fee = 12000;                                               // 1.5% of rent
   const s = settledAmounts({ grossMinor: 800000, feeMinor: fee, agentSharePct: plan.agentSharePct });
   const takeNet = 12000 - Math.round((fee * 12000) / 800000);      // 11820
-  assert.ok(Math.abs(s.agentMinor - Math.floor(takeNet * 0.3)) <= 2);
+  assert.ok(Math.abs(s.agentMinor - Math.floor(takeNet * 0.4)) <= 2);
 });
 
 test("E. milestone: one bonus per block of 10, lifetime cap KES 10,000", () => {

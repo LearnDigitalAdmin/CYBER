@@ -87,14 +87,14 @@ export function milestoneView(bp: GetEarningsOut["bonusProgress"]): MilestoneVie
 
 // ------------------------------------------------------------------ labels
 export const KIND_LABEL: Record<LedgerKind, string> = {
-  service: "Desk service", commission: "Commission", bonus: "Milestone bonus", support: "Support payout", reversal: "Reversal",
+  service: "Desk service", commission: "Commission", bonus: "Milestone bonus", support: "Support payout", reversal: "Reversal", network: "Network earnings",
 };
 export const STATUS_LABEL: Record<LedgerStatus, { text: string; tone: "green" | "amber" | "blue" | "gray" }> = {
   settled: { text: "Auto-settled", tone: "green" }, payable: { text: "Payable", tone: "amber" },
   processing: { text: "Processing", tone: "blue" }, paid: { text: "Paid", tone: "green" }, void: { text: "Void", tone: "gray" },
 };
 export const STREAM_LABEL: Record<string, string> = {
-  service: "Desk services", chama: "MyChama", school: "MyRegister", pms: "Plot Yangu", bonus: "Milestone bonuses", support: "Support payouts",
+  service: "Desk services", chama: "MyChama", school: "MyRegister", pms: "Plot Yangu", bonus: "Milestone bonuses", support: "Support payouts", network: "Team & incentives",
 };
 export const streamLabel = (k: string): string => STREAM_LABEL[k] ?? k;
 export const productLabel = (p: string | undefined): string => (p ? (STREAM_LABEL[p] ?? p) : "—");

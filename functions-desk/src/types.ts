@@ -10,6 +10,19 @@ export interface AgentDoc {
   /** Paystack transfer recipient for automatic support payouts (created on first payout). */
   payoutRecipientCode?: string;
   statusReason?: string; closedAt?: number;
+  // ---- distribution network (v6). Existing agents have none of these: they behave as clerks under internal.
+  countyId?: string; constituencyId?: string;
+  /** Immediate upline (undefined = internal). seniorId / leadId / adminId are the whole chain, denormalised for queries and payouts. */
+  uplineId?: string; seniorId?: string; leadId?: string; adminId?: string;
+  downlineCount?: number;
+  joinedVia?: "self" | "invite" | "upline_code" | "internal_domain" | "even_distribution";
+  invitedBy?: string; approvedBy?: string; approvedAt?: number; contractRef?: string;
+  /** Salted hashes behind the one-person-one-account locks (see agents/locks). */
+  phoneHash?: string; emailHash?: string;
+  /** Set false to stop payment SMS notifications. */
+  notifySms?: boolean;
+  /** Set once the ward/constituency slot and the upline's downline count were released after the desk closed. */
+  slotReleased?: boolean;
 }
 export interface CustomerDoc {
   entityKey: EntityKey; product: Product; ownerAgentId: string; attributedAt: number;
@@ -56,6 +69,34 @@ export interface LedgerDoc {
   product?: Product; entityKey?: EntityKey; paystackRef?: string; sourceId?: string;
   grossMinor?: number; feeMinor?: number; sharePct?: number; rule?: string; note?: string;
   createdAt: number; paidAt?: number; transferRef?: string; transferCode?: string;
+  /** kind "network": the month it covers and how it splits. */
+  month?: string; overrideMinor?: number; incentiveMinor?: number; carriedMinor?: number;
+}
+
+/** desk_invites/{code} */
+export interface InviteDoc {
+  code: string; inviterId: string; inviterCode: string; role: Exclude<Rank, "internal">; phone: string; phoneHash: string;
+  name?: string; status: "open" | "used" | "revoked"; createdAt: number; expiresAt: number; usedBy?: string; usedAt?: number;
+}
+/** desk_stats/{agentId}_{YYYY-MM}: counters written only by server code, in the same transaction as the fact they count. */
+export interface StatsDoc {
+  agentId: string; month: string;
+  payments?: number; netMinor?: number; commissionMinor?: number; overrideMinor?: number; incentiveMinor?: number;
+  newCustomers?: number; activeCustomers?: number; teamNetMinor?: number; teamPayments?: number; teamNewCustomers?: number;
+  /** payment-SMS throttle */
+  lastSmsAt?: number; unsentPayments?: number; unsentMinor?: number;
+  /** month close */
+  closedAt?: number; carryOutMinor?: number;
+}
+/** desk_accruals/{id}: one create-only row per override accrued or clawed back, so it can never count twice. */
+export interface AccrualDoc {
+  id: string; beneficiaryId: string; beneficiaryRank: "senior" | "lead"; ownerId: string; paystackRef: string; eventId: string;
+  stream: "subscription" | "report" | "rent"; baseMinor: number; amountMinor: number; month: string; createdAt: number; reversalOf?: string;
+}
+/** desk_incentives/{id}: a requested incentive; month close scales and awards it. */
+export interface IncentiveDoc {
+  id: string; agentId: string; kind: "acquisition" | "activation" | "retention6" | "retention12" | "loyalty" | "active_book" | "quality";
+  month: string; requestedMinor: number; entityKey?: string; status: "requested" | "awarded"; createdAt: number; awardedMinor?: number;
 }
 
 export interface SessionContext {

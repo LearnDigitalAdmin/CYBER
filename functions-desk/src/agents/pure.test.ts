@@ -43,3 +43,16 @@ test("id hash is salted, stable and not the number", () => {
   assert.ok(!h.includes("12345678"));
 });
 test("mask keeps last 4", () => assert.equal(maskIdNumber("12345678"), "****5678"));
+
+test("v6 application: geography names become ids; codes and role are checked; phone must be Safaricom", () => {
+  const base = { name: "Jane Wanjiku", phone: "0712345678", idNumber: "12345678" };
+  const a = validateApplication({ ...base, wardId: "", county: "Nakuru", constituency: "Naivasha", ward: "Maiella", uplineCode: "cog-0042" });
+  assert.equal(a.wardId, "nakuru/naivasha/maiella"); assert.equal(a.countyId, "nakuru"); assert.equal(a.constituencyId, "nakuru/naivasha"); assert.equal(a.uplineCode, "COG-0042");
+  assert.throws(() => validateApplication({ ...base, wardId: "", county: "Nakuru", constituency: "Naivasha" }), /county, constituency and ward/);
+  assert.throws(() => validateApplication({ ...base, wardId: "", county: "Nakuru", constituency: "Naivasha", ward: "Nowhere" }));
+  assert.throws(() => validateApplication({ ...base, wardId: "x", uplineCode: "12" }), /agent code/);
+  assert.throws(() => validateApplication({ ...base, wardId: "x", uplineCode: "COG-0042", inviteCode: "ABCDEFGH" }), /either an agent code or an invite code/);
+  assert.throws(() => validateApplication({ ...base, wardId: "x", role: "admin" }), /clerk, senior or lead/);
+  assert.equal(validateApplication({ ...base, wardId: "Legacy ward" }).wardId, "Legacy ward", "the legacy free-text ward still works");
+  assert.throws(() => validateApplication({ ...base, phone: "0733123456", wardId: "x" }), /Safaricom/i);
+});

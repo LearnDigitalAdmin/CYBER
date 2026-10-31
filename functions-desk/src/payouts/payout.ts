@@ -36,7 +36,10 @@ export type PayoutRow = LedgerDoc & PayoutLedgerExtra;
 
 const ledgerRef = (id: string) => col("ledger").doc(id);
 const dayRef = (key: string) => col("counters").doc(`payout_day_${key}`);
-const PAYOUT_KINDS: readonly string[] = ["bonus", "support"];
+/** Kinds the top desk can pay by hand. `network` rows (overrides + incentives) are normally paid automatically by the monthly run. */
+export const PAYOUT_KINDS: readonly string[] = ["bonus", "support", "network"];
+/** Kinds the scheduler pays on its own. Bonus and support stay manual (OTP-approved by the top desk). */
+export const AUTO_PAYOUT_KINDS: readonly string[] = ["network"];
 export const OTP_SETUP_MESSAGE =
   "Paystack is asking for a confirmation code on this transfer. Turn off \"Confirm transfers before sending\" in Paystack Preferences; this transfer will expire and can then be sent again.";
 
@@ -81,7 +84,7 @@ async function reserve(deps: PayoutDeps, entryId: string, capMinor: number): Pro
     const rSnap = await tx.get(ledgerRef(entryId));
     if (!rSnap.exists) return { ok: false, reason: "This entry no longer exists" };
     const row = rSnap.data() as PayoutRow;
-    if (!PAYOUT_KINDS.includes(row.kind)) return { ok: false, reason: "Only bonus and support entries can be paid here" };
+    if (!PAYOUT_KINDS.includes(row.kind)) return { ok: false, reason: "Only bonus, support and network earnings can be paid here" };
     if (row.status !== "payable") return { ok: false, reason: `This entry is already ${row.status}` };
     const [aSnap, pSnap, cSnap] = await Promise.all([tx.get(col("agents").doc(row.agentId)), tx.get(db().collection("agents").doc(row.agentId)), tx.get(dayRef(key))]);
     const agent = aSnap.exists ? (aSnap.data() as AgentDoc) : undefined;
@@ -165,7 +168,7 @@ async function ensureRecipient(deps: PayoutDeps, agent: AgentDoc, info: { settle
 }
 
 // ------------------------------------------------------------------ one entry
-async function payEntry(deps: PayoutDeps, entryId: string, capMinor: number): Promise<TopPayoutResult> {
+export async function payEntry(deps: PayoutDeps, entryId: string, capMinor: number): Promise<TopPayoutResult> {
   const r = await reserve(deps, entryId, capMinor);
   if (!r.ok) return { entryId, status: "failed", reference: "", error: r.reason };
   const { row, agent, info, reference } = r;

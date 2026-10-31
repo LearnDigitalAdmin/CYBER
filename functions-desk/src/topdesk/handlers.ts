@@ -17,6 +17,7 @@ import type { AgentDoc, DocMetaDoc } from "../types.js";
 import { docMetaId } from "../docs/pure.js";
 import type { TopDeps } from "./deps.js";
 import { runWithTopOtp } from "./otp.js";
+import { afterRankChange, releaseAgentSlot } from "../network/admin.js";
 import {
   checkStatusMove, checkTopSummary, deskCodeInput, isTopAction, LIST_DESKS_MAX, matchesSearch, rankInput, reasonInput, statusInput,
   summaryRow, TOP_OTP_REQUESTS_PER_HOUR, TOP_OTP_TTL_MS, topOtpSmsText,
@@ -188,7 +189,7 @@ export async function topGetDoc(deps: TopDeps, auth: AuthLike | null | undefined
   return { contentType: meta.contentType, dataBase64: bytes.toString("base64") };
 }
 
-async function endSessions(uid: string, nowMs: number): Promise<number> {
+export async function endSessions(uid: string, nowMs: number): Promise<number> {
   let ended = 0;
   for (const status of ["pending", "active"]) {
     const snap = await col("sessions").where("agentId", "==", uid).where("status", "==", status).get();
@@ -242,6 +243,7 @@ export async function topSetDeskStatus(deps: TopDeps, auth: AuthLike | null | un
     },
   );
   const sessionsEnded = to === "active" ? 0 : await endSessions(target.agentId, now);
+  if (to === "closed") await releaseAgentSlot(target.agentId, now);
   await audit({ action: "top_set_desk_status", agentId: top.agentId, meta: { deskCode: code, from: result, to, reason, sessionsEnded } });
   return { ok: true };
 }
@@ -267,6 +269,7 @@ export async function topSetRank(deps: TopDeps, auth: AuthLike | null | undefine
     },
     (tx, previous) => { tx.update(targetRef, { rank }); return previous; },
   );
+  await afterRankChange(target.agentId, from, rank, deps.now());
   await audit({ action: "top_set_rank", agentId: top.agentId, meta: { deskCode: code, from, to: rank } });
   return { ok: true };
 }
